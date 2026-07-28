@@ -1,0 +1,77 @@
+[gd_scene load_steps=2 format=3 uid="uid://home_view_scene_001"]
+
+[ext_resource type="Script" path="res://app/scenes/home_view.gd" id="1_home_script"]
+
+[node name="HomeView" type="MarginContainer"]
+layout_mode = 2
+script = ExtResource("1_home_script")
+
+[node name="MarginContainer" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 0
+theme_override_constants/margin_top = 0
+theme_override_constants/margin_right = 0
+theme_override_constants/margin_bottom = 0
+
+[node name="MainVBox" type="VBoxContainer" parent="MarginContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 20
+
+[node name="ActionGrid" type="HBoxContainer" parent="MarginContainer/MainVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="TileCheckIn" type="Button" parent="MarginContainer/MainVBox/ActionGrid"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 100)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="TileFindPerson" type="Button" parent="MarginContainer/MainVBox/ActionGrid"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 100)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="TileSendMessage" type="Button" parent="MarginContainer/MainVBox/ActionGrid"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 100)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="TileViewSchedule" type="Button" parent="MarginContainer/MainVBox/ActionGrid"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 100)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="MiddleGrid" type="HBoxContainer" parent="MarginContainer/MainVBox"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 16
+
+[node name="NeedsAttentionCard" type="PanelContainer" parent="MarginContainer/MainVBox/MiddleGrid"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="TodayCenterCard" type="PanelContainer" parent="MarginContainer/MainVBox/MiddleGrid"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="AiAssistantCard" type="PanelContainer" parent="MarginContainer/MainVBox/MiddleGrid"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="RecentActivityCard" type="PanelContainer" parent="MarginContainer/MainVBox"]
+unique_name_in_owner = true
+layout_mode = 2
