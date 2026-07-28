@@ -193,15 +193,16 @@ func _get_time_slot_index(time_str: String) -> int:
 
 # ==================== TAB 1: STAFFING SHIFTS ====================
 
-func create_shift_entry_atomic(person_name: String, shift_role: String, shift_date: String, start_time: String, end_time: String, area: String, notes: String = "") -> Dictionary:
+func create_shift_entry_atomic(person_name: String, shift_role: String, shift_date: String, start_time: String, end_time: String, area: String, notes: String = "", session_id: Variant = null) -> Dictionary:
 	var start_time_usec = Time.get_ticks_usec()
 	var entry_uuid = "sh_" + _generate_uuid()
 	var event_uuid = "evt_" + _generate_uuid()
 	var device_uuid = "dev_macbook_primary_node"
+	var sess_id_val = int(session_id) if (session_id != null and str(session_id).is_valid_int() and int(session_id) > 0) else null
 
 	var stmt1 = {
-		"sql": "INSERT INTO schedule_entries (entry_uuid, person_name, shift_role, shift_date, start_time, end_time, area, notes, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 999);",
-		"args": [entry_uuid, person_name, shift_role, shift_date, start_time, end_time, area, notes]
+		"sql": "INSERT INTO schedule_entries (entry_uuid, person_name, shift_role, shift_date, start_time, end_time, area, notes, session_id, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 999);",
+		"args": [entry_uuid, person_name, shift_role, shift_date, start_time, end_time, area, notes, sess_id_val]
 	}
 
 	var payload_dict = {
@@ -331,7 +332,7 @@ func cut_paste_shifts_atomic(items: Array) -> Dictionary:
 
 # ==================== TAB 2: SESSION & WAITLIST MANAGEMENT ====================
 
-func create_full_session_atomic(title: String, session_type_id_or_name, date_text: String, start_time: String, end_time: String, room_name: String = "Gathering Room", max_capacity = 30, signup_required: int = 1, limit_signups: int = 1, location_ids: Array = [], description: String = "", leader_name: String = "John Smith", term_override: String = "", type_override: String = "", actor_id: String = "usr_admin_master", operation_uuid: String = "", force_fail_step: bool = false) -> Dictionary:
+func create_full_session_atomic(title: String, session_type_id_or_name, date_text: String, start_time: String, end_time: String, room_name: String = "Gathering Room", max_capacity = 30, signup_required: int = 1, limit_signups: int = 1, location_ids: Array = [], description: String = "", leader_name: String = "John Smith", term_override: String = "", type_override: String = "", actor_id: String = "usr_admin_master", operation_uuid: String = "", force_fail_step: bool = false, staffing_requirement: String = "DEDICATED_SESSION_STAFF") -> Dictionary:
 	var auth = authorize_staff_mutation(actor_id, "CAP_HOURS_EDIT")
 	if not auth["authorized"]: return {"success": false, "error": auth["error"]}
 
@@ -362,6 +363,7 @@ func create_full_session_atomic(title: String, session_type_id_or_name, date_tex
 	var cap_val = int(max_capacity) if (signup_required == 1 and limit_signups == 1) else 30
 	var final_signup_req = signup_required
 	var final_limit_signups = limit_signups if final_signup_req == 1 else 0
+	var clean_staffing_req = staffing_requirement if staffing_requirement in ["DEDICATED_SESSION_STAFF", "COVERED_BY_STUDY_CENTER_STAFF"] else "DEDICATED_SESSION_STAFF"
 
 	# Check Operation-Level Idempotency
 	if operation_uuid != "":
@@ -412,8 +414,8 @@ func create_full_session_atomic(title: String, session_type_id_or_name, date_tex
 
 	# Statement 1: Insert Session Row
 	stmts.append({
-		"sql": "INSERT INTO sessions (session_uuid, session_type_id, title, session_type, date_text, start_time, end_time, room_location, max_capacity, signup_required, limit_signups, description, term_override, type_override, is_active, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'));",
-		"args": [session_uuid, type_id, clean_title, type_name, date_text, start_time, end_time, derived_room_str, cap_val, final_signup_req, final_limit_signups, description.strip_edges(), term_override.strip_edges(), type_override.strip_edges()]
+		"sql": "INSERT INTO sessions (session_uuid, session_type_id, title, session_type, date_text, start_time, end_time, room_location, max_capacity, signup_required, limit_signups, description, term_override, type_override, staffing_requirement, is_active, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'));",
+		"args": [session_uuid, type_id, clean_title, type_name, date_text, start_time, end_time, derived_room_str, cap_val, final_signup_req, final_limit_signups, description.strip_edges(), term_override.strip_edges(), type_override.strip_edges(), clean_staffing_req]
 	})
 
 	# Statement 2: Insert Location Junction Records
@@ -498,7 +500,7 @@ func create_full_session_atomic(title: String, session_type_id_or_name, date_tex
 
 	return res_dict
 
-func update_full_session_atomic(session_id: int, title: String, session_type_id_or_name, date_text: String, start_time: String, end_time: String, max_capacity, signup_required: int, limit_signups: int, location_ids: Array = [], description: String = "", term_override: String = "", type_override: String = "", actor_id: String = "usr_admin_master", actor_name: String = "Administrator", operation_uuid: String = "", force_fail_step: bool = false) -> Dictionary:
+func update_full_session_atomic(session_id: int, title: String, session_type_id_or_name, date_text: String, start_time: String, end_time: String, max_capacity, signup_required: int, limit_signups: int, location_ids: Array = [], description: String = "", term_override: String = "", type_override: String = "", actor_id: String = "usr_admin_master", actor_name: String = "Administrator", operation_uuid: String = "", force_fail_step: bool = false, staffing_requirement: String = "DEDICATED_SESSION_STAFF") -> Dictionary:
 	var auth = authorize_staff_mutation(actor_id, "CAP_HOURS_EDIT")
 	if not auth["authorized"]: return {"success": false, "error": auth["error"]}
 
@@ -529,6 +531,7 @@ func update_full_session_atomic(session_id: int, title: String, session_type_id_
 	var cap_val = int(max_capacity) if (signup_required == 1 and limit_signups == 1) else 30
 	var final_signup_req = signup_required
 	var final_limit_signups = limit_signups if final_signup_req == 1 else 0
+	var clean_staffing_req = staffing_requirement if staffing_requirement in ["DEDICATED_SESSION_STAFF", "COVERED_BY_STUDY_CENTER_STAFF"] else "DEDICATED_SESSION_STAFF"
 
 	# Check Operation-Level Idempotency
 	if operation_uuid != "":
@@ -539,9 +542,12 @@ func update_full_session_atomic(session_id: int, title: String, session_type_id_
 				cached_res["already_processed"] = true
 				return cached_res
 
-	var curr_res = db.execute("SELECT session_uuid, title, session_type_id, date_text, start_time, end_time, max_capacity, signup_required, limit_signups, description, term_override, type_override FROM sessions WHERE id = ?;", [session_id])
+	var start_time_usec = Time.get_ticks_usec()
+
+	# Fetch Current Session State for Audit Diffing
+	var curr_res = db.execute("SELECT session_uuid, title, session_type_id, date_text, start_time, end_time, max_capacity, signup_required, limit_signups, description, term_override, type_override, staffing_requirement FROM sessions WHERE id = ?;", [session_id])
 	if not curr_res["success"] or curr_res["data"].size() == 0:
-		return {"success": false, "error": "Session record not found."}
+		return {"success": false, "error": "Target session ID %d not found." % session_id}
 
 	var curr = curr_res["data"][0]
 	var session_uuid = str(curr["session_uuid"])
@@ -565,6 +571,15 @@ func update_full_session_atomic(session_id: int, title: String, session_type_id_
 		var val_res = config_service.validate_location_selection(location_ids)
 		if not val_res["valid"]:
 			return {"success": false, "error": val_res["error"]}
+
+	# Format derived room_location string
+	var derived_room_str = "Gathering Room"
+	if location_ids.size() > 0:
+		var loc_names = []
+		for loc_id in location_ids:
+			var n_res = db.execute("SELECT name FROM session_locations WHERE id = ?;", [int(loc_id)])
+			if n_res["success"] and n_res["data"].size() > 0: loc_names.append(str(n_res["data"][0]["name"]))
+		if loc_names.size() > 0: derived_room_str = ", ".join(loc_names)
 
 	# Compute Field-Level Changes for Audit History
 	var old_loc_ids = get_session_location_ids(session_id)
@@ -600,21 +615,10 @@ func update_full_session_atomic(session_id: int, title: String, session_type_id_
 	if changed_fields.size() == 0 and not force_fail_step:
 		return {"success": true, "error": "", "no_changes": true, "session_id": session_id, "session_uuid": session_uuid}
 
-	# Derived room_location string
-	var derived_room_str = ""
-	if location_ids.size() > 0:
-		var loc_names = []
-		for loc_id in location_ids:
-			var n_res = db.execute("SELECT name FROM session_locations WHERE id = ?;", [int(loc_id)])
-			if n_res["success"] and n_res["data"].size() > 0: loc_names.append(str(n_res["data"][0]["name"]))
-		if loc_names.size() > 0: derived_room_str = ", ".join(loc_names)
-
-	var stmts = []
-
 	# Statement 1: Update Session Row
 	stmts.append({
-		"sql": "UPDATE sessions SET title = ?, session_type_id = ?, session_type = ?, date_text = ?, start_time = ?, end_time = ?, room_location = ?, max_capacity = ?, signup_required = ?, limit_signups = ?, description = ?, term_override = ?, type_override = ?, updated_at = datetime('now') WHERE id = ?;",
-		"args": [clean_title, type_id, type_name, date_text, start_time, end_time, derived_room_str, cap_val, final_signup_req, final_limit_signups, description.strip_edges(), term_override.strip_edges(), type_override.strip_edges(), session_id]
+		"sql": "UPDATE sessions SET title = ?, session_type_id = ?, session_type = ?, date_text = ?, start_time = ?, end_time = ?, room_location = ?, max_capacity = ?, signup_required = ?, limit_signups = ?, description = ?, term_override = ?, type_override = ?, staffing_requirement = ?, updated_at = datetime('now') WHERE id = ?;",
+		"args": [clean_title, type_id, type_name, date_text, start_time, end_time, derived_room_str, cap_val, final_signup_req, final_limit_signups, description.strip_edges(), term_override.strip_edges(), type_override.strip_edges(), clean_staffing_req, session_id]
 	})
 
 	# Statement 2: Update Location Junction Records

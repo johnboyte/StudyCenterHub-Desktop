@@ -260,6 +260,52 @@ func run_tests() -> void:
 	db.execute("DELETE FROM schedule_entries WHERE entry_uuid LIKE 'sh-ex-%';")
 	print("PASS 4b: Time-span coverage engine rules (Examples A-E) verified 100% successfully.")
 
+	# 4c. Test Session Staffing Requirement (DEDICATED_SESSION_STAFF vs COVERED_BY_STUDY_CENTER_STAFF)
+	print("[Test 4c] Testing Prompt 2 Session Staffing Requirement & Queue Counts...")
+	# 1. Verify Migration 0035 default staffing_requirement = 'DEDICATED_SESSION_STAFF'
+	db.execute("INSERT INTO sessions (id, session_uuid, title, date_text, start_time, end_time, room_location, is_active) VALUES (888, 'sess-888', 'Default Dedicated Session', date('now', '+2 days'), '03:00 PM', '05:00 PM', 'Study Room #88', 1);")
+	var col_check = db.execute("SELECT staffing_requirement FROM sessions WHERE id = 888;")
+	if not col_check["success"] or col_check["data"][0]["staffing_requirement"] != "DEDICATED_SESSION_STAFF":
+		print("FAIL: Migration 0035 default staffing_requirement is not DEDICATED_SESSION_STAFF.")
+		quit(1); return
+
+	# 2. General staff shift present covering 3-5 PM, but session requires DEDICATED_SESSION_STAFF
+	var test_date_888 = str(db.execute("SELECT date('now', '+2 days') as d;")["data"][0]["d"])
+	db.execute("INSERT INTO schedule_entries (entry_uuid, person_name, shift_role, shift_date, start_time, end_time, area) VALUES ('sh-gen-888', 'General Floor Staff', 'Supervisor', ?, '03:00 PM', '05:00 PM', 'Study Room #88');", [test_date_888])
+
+	# DEDICATED_SESSION_STAFF + General staff present => STILL UNCOVERED
+	qc.start_queue("uncovered_sessions")
+	items = qc.fetch_queue_records("uncovered_sessions")
+	var sess_888_uncovered = false
+	for it in items:
+		if it.get("id") == 888: sess_888_uncovered = true
+	if not sess_888_uncovered:
+		print("FAIL: Dedicated session with general staff should remain UNCOVERED.")
+		quit(1); return
+
+	# Dedicated staff assigned (session_id = 888) => COVERED
+	db.execute("INSERT INTO schedule_entries (entry_uuid, person_name, shift_role, shift_date, start_time, end_time, area, session_id) VALUES ('sh-ded-888', 'Dedicated Assistant', 'Session Staff', ?, '03:00 PM', '05:00 PM', 'Study Room #88', 888);", [test_date_888])
+	qc.start_queue("uncovered_sessions")
+	items = qc.fetch_queue_records("uncovered_sessions")
+	sess_888_uncovered = false
+	for it in items:
+		if it.get("id") == 888: sess_888_uncovered = true
+	if sess_888_uncovered:
+		print("FAIL: Dedicated session with dedicated staff assigned (session_id) should be COVERED.")
+		quit(1); return
+
+	# 3. Change staffing_requirement to COVERED_BY_STUDY_CENTER_STAFF (Session Creation & Edit Persistence)
+	sch_svc.update_full_session_atomic(888, "Default Dedicated Session", 1, test_date_888, "03:00 PM", "05:00 PM", 30, 1, 1, [], "", "", "", "usr_admin_master", "Administrator", "", false, "COVERED_BY_STUDY_CENTER_STAFF")
+	var edit_chk = db.execute("SELECT staffing_requirement FROM sessions WHERE id = 888;")
+	if not edit_chk["success"] or edit_chk["data"][0]["staffing_requirement"] != "COVERED_BY_STUDY_CENTER_STAFF":
+		print("FAIL: staffing_requirement COVERED_BY_STUDY_CENTER_STAFF did not persist after edit.")
+		quit(1); return
+
+	# Clean up 888 test session and shifts
+	db.execute("DELETE FROM sessions WHERE id = 888;")
+	db.execute("DELETE FROM schedule_entries WHERE entry_uuid LIKE 'sh-%-888';")
+	print("PASS 4c: Prompt 2 Session Staffing Requirement & Queue Counts verified 100% successfully.")
+
 	# 5. Test Full Production V1 Home Action Center (All 5 Queues Operational)
 	print("[Test 5] Verifying all 5 Production V1 Action Center queues operational...")
 	var home = load("res://app/scenes/home_view.tscn").instantiate()

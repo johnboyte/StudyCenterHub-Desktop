@@ -189,6 +189,7 @@ func _on_confirmed() -> void:
 	var sel_role = VALID_ROLES[role_dropdown.selected] if (role_dropdown and role_dropdown.selected >= 0 and role_dropdown.selected < VALID_ROLES.size()) else "Shift Supervisor (Staff)"
 
 	var payload = {
+		"session_id": int(session_data.get("id", 0)),
 		"person_id": sel_person["id"],
 		"person_name": sel_person["name"],
 		"person_uuid": sel_person["person_uuid"],

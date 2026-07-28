@@ -12,7 +12,8 @@ static func get_registry() -> Dictionary:
 	var s_end = _parse_time_sql("s.end_time")
 	var se_st = _parse_time_sql("se.start_time")
 	var se_end = _parse_time_sql("se.end_time")
-	var full_coverage_join = "se.shift_date = s.date_text AND se.area = s.room_location AND " + se_st + " <= " + s_st + " AND " + se_end + " >= " + s_end
+	var req_col = "COALESCE(s.staffing_requirement, 'DEDICATED_SESSION_STAFF')"
+	var full_coverage_join = "((" + req_col + " = 'COVERED_BY_STUDY_CENTER_STAFF' AND se.shift_date = s.date_text AND se.area = s.room_location AND " + se_st + " <= " + s_st + " AND " + se_end + " >= " + s_end + ") OR (" + req_col + " != 'COVERED_BY_STUDY_CENTER_STAFF' AND (se.session_id = s.id OR (se.shift_date = s.date_text AND se.area = s.room_location AND " + se_st + " <= " + s_st + " AND " + se_end + " >= " + s_end + " AND (se.notes = 'covered' OR se.notes LIKE '%Assigned via Uncovered%')))))"
 
 	return {
 		"overdue_callbacks": {

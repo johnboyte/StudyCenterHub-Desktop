@@ -2257,8 +2257,42 @@ func open_session_editor_modal(session_data: Dictionary = {}) -> void:
 	dt_card.add_child(dt_hbox)
 	mvbox.add_child(dt_card)
 
-	# ---------------- GROUP 3: LOCATIONS & EXCLUSIVITY ----------------
-	var g3_lbl = Label.new(); g3_lbl.text = "3. Session Locations"; g3_lbl.add_theme_font_size_override("font_size", 16); g3_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
+	# ---------------- GROUP 3: STAFFING REQUIREMENT ----------------
+	var g_staff_lbl = Label.new(); g_staff_lbl.text = "3. Staffing Requirement"; g_staff_lbl.add_theme_font_size_override("font_size", 16); g_staff_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
+	mvbox.add_child(g_staff_lbl)
+
+	var g_staff_card = _create_group_card.call()
+	var staff_vbox = VBoxContainer.new(); staff_vbox.add_theme_constant_override("separation", 10)
+
+	var cur_staff_req = str(session_data.get("staffing_requirement", "DEDICATED_SESSION_STAFF"))
+
+	var chk_dedicated = CheckBox.new()
+	_style_checkbox(chk_dedicated)
+	chk_dedicated.text = "Dedicated Session Staff Required"
+	chk_dedicated.button_pressed = (cur_staff_req != "COVERED_BY_STUDY_CENTER_STAFF")
+	staff_vbox.add_child(chk_dedicated)
+
+	var chk_covered_by_staff = CheckBox.new()
+	_style_checkbox(chk_covered_by_staff)
+	chk_covered_by_staff.text = "Covered by Study Center Staff"
+	chk_covered_by_staff.button_pressed = (cur_staff_req == "COVERED_BY_STUDY_CENTER_STAFF")
+	staff_vbox.add_child(chk_covered_by_staff)
+
+	# Radio Button Mutual Exclusivity Handler
+	chk_dedicated.toggled.connect(func(pressed: bool):
+		if pressed: chk_covered_by_staff.button_pressed = false
+		elif not chk_covered_by_staff.button_pressed: chk_dedicated.button_pressed = true
+	)
+	chk_covered_by_staff.toggled.connect(func(pressed: bool):
+		if pressed: chk_dedicated.button_pressed = false
+		elif not chk_dedicated.button_pressed: chk_dedicated.button_pressed = true
+	)
+
+	g_staff_card.add_child(staff_vbox)
+	mvbox.add_child(g_staff_card)
+
+	# ---------------- GROUP 4: LOCATIONS & EXCLUSIVITY ----------------
+	var g3_lbl = Label.new(); g3_lbl.text = "4. Session Locations"; g3_lbl.add_theme_font_size_override("font_size", 16); g3_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
 	mvbox.add_child(g3_lbl)
 
 	var g3_card = _create_group_card.call()
@@ -2530,14 +2564,15 @@ func open_session_editor_modal(session_data: Dictionary = {}) -> void:
 		if req_val == 1 and chk_limit.button_pressed:
 			lim_val = 1
 		var cap_val = int(input_cap.value)
+		var sel_staffing_req = "COVERED_BY_STUDY_CENTER_STAFF" if chk_covered_by_staff.button_pressed else "DEDICATED_SESSION_STAFF"
 
 		btn_save.disabled = true
 
 		var save_res = {}
 		if is_edit_mode:
-			save_res = sch_service.update_full_session_atomic(target_session_id, clean_title, s_type_id, date_text, start_t, end_t, cap_val, req_val, lim_val, loc_ids, input_desc.text, input_term_ov.text, input_type_ov.text, "usr_admin_master", "Administrator")
+			save_res = sch_service.update_full_session_atomic(target_session_id, clean_title, s_type_id, date_text, start_t, end_t, cap_val, req_val, lim_val, loc_ids, input_desc.text, input_term_ov.text, input_type_ov.text, "usr_admin_master", "Administrator", "", false, sel_staffing_req)
 		else:
-			save_res = sch_service.create_full_session_atomic(clean_title, s_type_id, date_text, start_t, end_t, "Gathering Room", cap_val, req_val, lim_val, loc_ids, input_desc.text, "Administrator", input_term_ov.text, input_type_ov.text, "usr_admin_master")
+			save_res = sch_service.create_full_session_atomic(clean_title, s_type_id, date_text, start_t, end_t, "Gathering Room", cap_val, req_val, lim_val, loc_ids, input_desc.text, "Administrator", input_term_ov.text, input_type_ov.text, "usr_admin_master", "", false, sel_staffing_req)
 
 		if save_res["success"]:
 			dialog.queue_free()
