@@ -198,12 +198,13 @@ func run_tests() -> void:
 	print("[Test 5] Verifying all 5 Production V1 Action Center queues operational...")
 	var home = load("res://app/scenes/home_view.tscn").instantiate()
 	home.set_app_shell(shell)
+	home.show_all_queues = true
 	root.add_child(home)
 	await process_frame
 
 	var cards = _get_action_cards(home)
 	if cards.size() != 5:
-		print("FAIL: Expected 5 ActionCenterCard instances, got: ", cards.size())
+		print("FAIL: Expected 5 ActionCenterCard instances when show_all_queues is true, got: ", cards.size())
 		quit(1)
 		return
 

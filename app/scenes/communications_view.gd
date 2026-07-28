@@ -77,11 +77,31 @@ func configure_queue_mode(params: Dictionary = {}) -> void:
 	_attach_header_bar()
 	_refresh_queue_view()
 
+func _get_main_vbox() -> VBoxContainer:
+	if has_node("MarginContainer/MainVBox"):
+		return $MarginContainer/MainVBox as VBoxContainer
+	elif has_node("MarginContainer/VBoxContainer"):
+		return $MarginContainer/VBoxContainer as VBoxContainer
+	return null
+
+func _get_std_hdr() -> Control:
+	var vbox = _get_main_vbox()
+	if vbox:
+		if vbox.has_node("HeaderVBox"):
+			return vbox.get_node("HeaderVBox") as Control
+		elif vbox.has_node("HeaderBar"):
+			return vbox.get_node("HeaderBar") as Control
+		elif vbox.has_node("HeaderContainer"):
+			return vbox.get_node("HeaderContainer") as Control
+	return null
+
 func _attach_header_bar() -> void:
 	if header_bar_instance: return
 
-	var main_vbox = get_node_or_null("MarginContainer/MainVBox") as VBoxContainer
-	var parent_container = main_vbox if main_vbox else (get_child(0) if get_child_count() > 0 else self)
+	var parent_container = _get_main_vbox()
+	if not parent_container:
+		parent_container = get_child(0) if get_child_count() > 0 else self
+
 	if parent_container:
 		header_bar_instance = WorkQueueHeaderBarScene.instantiate()
 		parent_container.add_child(header_bar_instance)
@@ -89,7 +109,7 @@ func _attach_header_bar() -> void:
 			parent_container.move_child(header_bar_instance, 0)
 
 		# Hide standard page header during active Queue Mode to eliminate header overlap
-		var std_hdr = get_node_or_null("MarginContainer/MainVBox/HeaderVBox") as Control
+		var std_hdr = _get_std_hdr()
 		if std_hdr:
 			std_hdr.visible = false
 
@@ -112,7 +132,7 @@ func _clear_queue_mode() -> void:
 		queue_card_container = null
 
 	# Restore standard page header upon exiting Queue Mode
-	var std_hdr = get_node_or_null("MarginContainer/MainVBox/HeaderVBox") as Control
+	var std_hdr = _get_std_hdr()
 	if std_hdr:
 		std_hdr.visible = true
 
@@ -138,8 +158,9 @@ func _refresh_queue_view() -> void:
 
 	if not queue_card_container:
 		queue_card_container = PanelContainer.new()
-		var main_vbox = get_node_or_null("MarginContainer/MainVBox") as VBoxContainer
-		var parent_container = main_vbox if main_vbox else (get_child(0) if get_child_count() > 0 else self)
+		var parent_container = _get_main_vbox()
+		if not parent_container:
+			parent_container = get_child(0) if get_child_count() > 0 else self
 		if parent_container:
 			parent_container.add_child(queue_card_container)
 			if parent_container.has_method("move_child") and header_bar_instance:
