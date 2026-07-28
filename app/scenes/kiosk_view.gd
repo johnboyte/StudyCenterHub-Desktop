@@ -587,7 +587,7 @@ func _on_registration_submit() -> void:
 	
 	# Insert into people
 	var consent_time = Time.get_date_string_from_system() + " " + Time.get_time_string_from_system()
-	var q = "INSERT INTO people (person_uuid, human_id, first_name, last_name, primary_role, phone, birthday, profile_photo, flag_status, sms_consent, sms_consent_at, sms_consent_source) VALUES (?, ?, ?, ?, 'Participant', ?, ?, ?, 'Clear', 1, ?, 'Kiosk Self Registration');"
+	var q = "INSERT INTO people (person_uuid, human_id, first_name, last_name, primary_role, phone, birthday, profile_photo, flag_status, sms_consent, sms_consent_at, sms_consent_source, review_status) VALUES (?, ?, ?, ?, 'Participant', ?, ?, ?, 'Clear', 1, ?, 'Kiosk Self Registration', 'pending');"
 	db.execute(q, [new_uuid, new_human_id, fn, ln, ph, bd, reg_photo_base64, consent_time])
 	
 	# Fetch inserted person id

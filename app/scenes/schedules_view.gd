@@ -7,6 +7,9 @@ const SQLiteDatabaseScript = preload("res://src/infrastructure/database/sqlite_d
 const MigrationsRunnerScript = preload("res://src/infrastructure/database/migrations_runner.gd")
 const SchedulesServiceScript = preload("res://src/domain/schedules/schedules_service.gd")
 const SessionConfigServiceScript = preload("res://src/domain/schedules/session_config_service.gd")
+const WorkQueueHeaderBarScene = preload("res://app/scenes/components/work_queue_header_bar.tscn")
+const QueueControllerScript = preload("res://src/domain/work_queue/queue_controller.gd")
+const QueueRegistryScript = preload("res://src/domain/work_queue/queue_registry.gd")
 
 var db: RefCounted:
 	set(value):
@@ -31,6 +34,13 @@ var paste_target_day_index: int = -1
 var selected_session_id: int = 1
 var is_hours_selector_visible: bool = false
 var current_week_base_unix: int = 0
+
+# Queue Mode Members
+var is_queue_mode: bool = false
+var active_queue_id: String = ""
+var queue_controller: RefCounted = null
+var header_bar_instance: Control = null
+var queue_card_container: PanelContainer = null
 
 # Front-End Editable Lists for Center Areas & Shift Roles
 var available_areas: Array = ["Study Center", "Gathering Room", "Kitchen", "Study Room #1", "Study Room #2", "Study Room #3", "The Study", "The Back Porch", "Whole Center"]
@@ -84,6 +94,154 @@ func _ready() -> void:
 	_connect_tab_buttons()
 	_setup_marquee_and_preview_overlay()
 	switch_top_tab("shifts")
+
+func receive_navigation_context(params: Dictionary) -> void:
+	_clear_queue_mode()
+
+func configure_queue_mode(params: Dictionary = {}) -> void:
+	is_queue_mode = true
+	active_queue_id = params.get("queue_id", "uncovered_sessions")
+
+	if params.has("queue_controller") and params["queue_controller"] != null:
+		queue_controller = params["queue_controller"]
+	else:
+		queue_controller = QueueControllerScript.new(db)
+
+	if queue_controller:
+		if db: queue_controller.db = db
+		if queue_controller.active_queue_id != active_queue_id or queue_controller.active_items.size() == 0:
+			queue_controller.start_queue(active_queue_id)
+
+	_attach_header_bar()
+	_refresh_queue_view()
+
+func _attach_header_bar() -> void:
+	if header_bar_instance: return
+
+	var parent_container = $MarginContainer/VBoxContainer if has_node("MarginContainer/VBoxContainer") else (get_child(0) if get_child_count() > 0 else self)
+	if parent_container:
+		header_bar_instance = WorkQueueHeaderBarScene.instantiate()
+		parent_container.add_child(header_bar_instance)
+		if parent_container.has_method("move_child"):
+			parent_container.move_child(header_bar_instance, 0)
+
+		var cur_idx = queue_controller.current_index if queue_controller else 0
+		var rem_count = queue_controller.get_remaining_count() if queue_controller else 0
+		var def = QueueRegistryScript.get_definition(active_queue_id)
+		var q_title = def.get("title", "Uncovered Sessions (Next 14d)")
+		header_bar_instance.configure_header(q_title, cur_idx, rem_count)
+		header_bar_instance.pause_requested.connect(_on_queue_pause)
+		header_bar_instance.exit_requested.connect(_on_queue_exit)
+
+func _clear_queue_mode() -> void:
+	is_queue_mode = false
+	active_queue_id = ""
+	if header_bar_instance:
+		header_bar_instance.queue_free()
+		header_bar_instance = null
+	if queue_card_container:
+		queue_card_container.queue_free()
+		queue_card_container = null
+
+func _on_queue_pause() -> void:
+	if header_bar_instance and queue_controller:
+		header_bar_instance.update_progress(queue_controller.current_index, queue_controller.get_remaining_count())
+
+func _on_queue_exit() -> void:
+	if queue_controller:
+		queue_controller.end_session()
+	_clear_queue_mode()
+
+func _refresh_queue_view() -> void:
+	if not is_queue_mode: return
+
+	var def = QueueRegistryScript.get_definition(active_queue_id)
+	var q_title = def.get("title", "Work Queue")
+	var cur_idx = queue_controller.current_index if queue_controller else 0
+	var rem_count = queue_controller.get_remaining_count() if queue_controller else 0
+
+	if header_bar_instance:
+		header_bar_instance.update_progress(cur_idx, rem_count)
+
+	if not queue_card_container:
+		queue_card_container = PanelContainer.new()
+		var parent_container = $MarginContainer/VBoxContainer if has_node("MarginContainer/VBoxContainer") else (get_child(0) if get_child_count() > 0 else self)
+		if parent_container:
+			parent_container.add_child(queue_card_container)
+			if parent_container.has_method("move_child") and header_bar_instance:
+				parent_container.move_child(queue_card_container, 1)
+
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(0.98, 0.99, 1.0, 1.0)
+	style.border_width_left = 2; style.border_width_top = 2; style.border_width_right = 2; style.border_width_bottom = 2
+	style.border_color = Color(0.55, 0.35, 0.95, 1.0) # Purple accent for scheduling queue
+	style.corner_radius_top_left = 12; style.corner_radius_top_right = 12; style.corner_radius_bottom_left = 12; style.corner_radius_bottom_right = 12
+	style.content_margin_left = 20; style.content_margin_top = 18; style.content_margin_right = 20; style.content_margin_bottom = 18
+	queue_card_container.add_theme_stylebox_override("panel", style)
+
+	for child in queue_card_container.get_children():
+		queue_card_container.remove_child(child)
+		child.queue_free()
+
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 14)
+	queue_card_container.add_child(vbox)
+
+	if rem_count == 0 or not queue_controller:
+		var empty_lbl = Label.new()
+		empty_lbl.text = "✨ Queue Complete! All items in " + q_title + " have been resolved."
+		empty_lbl.add_theme_font_size_override("font_size", 16)
+		empty_lbl.add_theme_color_override("font_color", Color(0.18, 0.55, 0.35, 1.0))
+		vbox.add_child(empty_lbl)
+
+		var exit_btn = Button.new()
+		exit_btn.text = "Return to Standard Schedules"
+		exit_btn.custom_minimum_size = Vector2(240, 36)
+		exit_btn.pressed.connect(_on_queue_exit)
+		vbox.add_child(exit_btn)
+		return
+
+	var current_item = queue_controller.get_current_item()
+	if current_item.is_empty():
+		return
+
+	var title_txt = str(current_item.get("title", "Study Center Session"))
+	var date_txt = str(current_item.get("date_text", ""))
+	var time_txt = str(current_item.get("start_time", ""))
+	var location_txt = str(current_item.get("room_location", "Study Center"))
+
+	var hdr_lbl = Label.new()
+	hdr_lbl.text = "UNCOVERED SESSION — " + title_txt
+	hdr_lbl.add_theme_font_size_override("font_size", 16)
+	hdr_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
+	vbox.add_child(hdr_lbl)
+
+	var details_lbl = Label.new()
+	details_lbl.text = "📅 Date: " + date_txt + " | ⏰ Time: " + time_txt + " | 📍 Location: " + location_txt
+	details_lbl.add_theme_font_size_override("font_size", 14)
+	details_lbl.add_theme_color_override("font_color", Color(0.20, 0.25, 0.32, 1.0))
+	vbox.add_child(details_lbl)
+
+	var btn_hbox = HBoxContainer.new()
+	btn_hbox.add_theme_constant_override("separation", 12)
+	vbox.add_child(btn_hbox)
+
+	var comp_btn = Button.new()
+	comp_btn.text = "✅ Assign Duty Worker Coverage"
+	comp_btn.custom_minimum_size = Vector2(220, 38)
+	var btn_st = StyleBoxFlat.new()
+	btn_st.bg_color = Color(0.55, 0.35, 0.95, 1.0)
+	btn_st.corner_radius_top_left = 6; btn_st.corner_radius_top_right = 6; btn_st.corner_radius_bottom_left = 6; btn_st.corner_radius_bottom_right = 6
+	comp_btn.add_theme_stylebox_override("normal", btn_st)
+	comp_btn.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
+	comp_btn.pressed.connect(func(): _on_complete_queue_item(date_txt, location_txt))
+	btn_hbox.add_child(comp_btn)
+
+func _on_complete_queue_item(date_txt: String, location_txt: String) -> void:
+	if not queue_controller: return
+	var success = queue_controller.complete_current_item([date_txt, location_txt])
+	if success:
+		_refresh_queue_view()
 
 func _init_database() -> void:
 	if not db:

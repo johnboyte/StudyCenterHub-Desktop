@@ -15,6 +15,9 @@ const QRCredentialServiceScript = preload("res://src/domain/security/qr_credenti
 const CommunicationsServiceScript = preload("res://src/domain/communications/communications_service.gd")
 const AppleWalletServiceScript = preload("res://src/domain/security/apple_wallet_service.gd")
 const GoogleWalletServiceScript = preload("res://src/domain/security/google_wallet_service.gd")
+const WorkQueueHeaderBarScene = preload("res://app/scenes/components/work_queue_header_bar.tscn")
+const QueueControllerScript = preload("res://src/domain/work_queue/queue_controller.gd")
+const QueueRegistryScript = preload("res://src/domain/work_queue/queue_registry.gd")
 
 var db: RefCounted
 var read_service: RefCounted
@@ -29,6 +32,13 @@ var selected_person_index: int = -1
 
 var debounce_timer: Timer
 var _active_photo_callback: Callable = Callable()
+
+# Queue Mode Members
+var is_queue_mode: bool = false
+var active_queue_id: String = ""
+var queue_controller: RefCounted = null
+var header_bar_instance: Control = null
+var queue_card_container: PanelContainer = null
 
 @onready var btn_filter_all: Button = $MarginContainer/VBoxContainer/HeaderBar/FilterContainer/BtnFilterAll
 @onready var btn_filter_active: Button = $MarginContainer/VBoxContainer/HeaderBar/FilterContainer/BtnFilterActive
@@ -78,6 +88,164 @@ func _ready() -> void:
 	if not read_service:
 		_init_read_service()
 	_connect_signals()
+
+func receive_navigation_context(params: Dictionary) -> void:
+	if params.get("queue_mode", false) == true:
+		var qid = params.get("queue_id", "")
+		if qid == "registrations_awaiting_review":
+			configure_queue_mode(params)
+		else:
+			_clear_queue_mode()
+	else:
+		_clear_queue_mode()
+
+func configure_queue_mode(params: Dictionary = {}) -> void:
+	is_queue_mode = true
+	active_queue_id = params.get("queue_id", "registrations_awaiting_review")
+
+	if params.has("queue_controller") and params["queue_controller"] != null:
+		queue_controller = params["queue_controller"]
+	else:
+		queue_controller = QueueControllerScript.new(db)
+
+	if queue_controller:
+		if db: queue_controller.db = db
+		if queue_controller.active_queue_id != active_queue_id or queue_controller.active_items.size() == 0:
+			queue_controller.start_queue(active_queue_id)
+
+	_attach_header_bar()
+	_refresh_queue_view()
+
+func _attach_header_bar() -> void:
+	if header_bar_instance: return
+
+	var parent_container = $MarginContainer/VBoxContainer if has_node("MarginContainer/VBoxContainer") else (get_child(0) if get_child_count() > 0 else self)
+	if parent_container:
+		header_bar_instance = WorkQueueHeaderBarScene.instantiate()
+		parent_container.add_child(header_bar_instance)
+		if parent_container.has_method("move_child"):
+			parent_container.move_child(header_bar_instance, 0)
+
+		var cur_idx = queue_controller.current_index if queue_controller else 0
+		var rem_count = queue_controller.get_remaining_count() if queue_controller else 0
+		var def = QueueRegistryScript.get_definition(active_queue_id)
+		var q_title = def.get("title", "Registrations Awaiting Review")
+		header_bar_instance.configure_header(q_title, cur_idx, rem_count)
+		header_bar_instance.pause_requested.connect(_on_queue_pause)
+		header_bar_instance.exit_requested.connect(_on_queue_exit)
+
+func _clear_queue_mode() -> void:
+	is_queue_mode = false
+	active_queue_id = ""
+	if header_bar_instance:
+		header_bar_instance.queue_free()
+		header_bar_instance = null
+	if queue_card_container:
+		queue_card_container.queue_free()
+		queue_card_container = null
+
+func _on_queue_pause() -> void:
+	if header_bar_instance and queue_controller:
+		header_bar_instance.update_progress(queue_controller.current_index, queue_controller.get_remaining_count())
+
+func _on_queue_exit() -> void:
+	if queue_controller:
+		queue_controller.end_session()
+	_clear_queue_mode()
+
+func _refresh_queue_view() -> void:
+	if not is_queue_mode: return
+
+	var def = QueueRegistryScript.get_definition(active_queue_id)
+	var q_title = def.get("title", "Work Queue")
+	var cur_idx = queue_controller.current_index if queue_controller else 0
+	var rem_count = queue_controller.get_remaining_count() if queue_controller else 0
+
+	if header_bar_instance:
+		header_bar_instance.update_progress(cur_idx, rem_count)
+
+	if not queue_card_container:
+		queue_card_container = PanelContainer.new()
+		var parent_container = $MarginContainer/VBoxContainer if has_node("MarginContainer/VBoxContainer") else (get_child(0) if get_child_count() > 0 else self)
+		if parent_container:
+			parent_container.add_child(queue_card_container)
+			if parent_container.has_method("move_child") and header_bar_instance:
+				parent_container.move_child(queue_card_container, 1)
+
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(0.98, 0.99, 1.0, 1.0)
+	style.border_width_left = 2; style.border_width_top = 2; style.border_width_right = 2; style.border_width_bottom = 2
+	style.border_color = Color(0.12, 0.53, 0.90, 1.0)
+	style.corner_radius_top_left = 12; style.corner_radius_top_right = 12; style.corner_radius_bottom_left = 12; style.corner_radius_bottom_right = 12
+	style.content_margin_left = 20; style.content_margin_top = 18; style.content_margin_right = 20; style.content_margin_bottom = 18
+	queue_card_container.add_theme_stylebox_override("panel", style)
+
+	for child in queue_card_container.get_children():
+		queue_card_container.remove_child(child)
+		child.queue_free()
+
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 14)
+	queue_card_container.add_child(vbox)
+
+	if rem_count == 0 or not queue_controller:
+		var empty_lbl = Label.new()
+		empty_lbl.text = "✨ Queue Complete! All items in " + q_title + " have been resolved."
+		empty_lbl.add_theme_font_size_override("font_size", 16)
+		empty_lbl.add_theme_color_override("font_color", Color(0.18, 0.55, 0.35, 1.0))
+		vbox.add_child(empty_lbl)
+
+		var exit_btn = Button.new()
+		exit_btn.text = "Return to Standard Directory"
+		exit_btn.custom_minimum_size = Vector2(240, 36)
+		exit_btn.pressed.connect(_on_queue_exit)
+		vbox.add_child(exit_btn)
+		return
+
+	var current_item = queue_controller.get_current_item()
+	if current_item.is_empty():
+		return
+
+	var item_id = current_item.get("id", 0)
+	var first_name = str(current_item.get("first_name", ""))
+	var last_name = str(current_item.get("last_name", ""))
+	var name = (first_name + " " + last_name).strip_edges()
+	var human_id = str(current_item.get("human_id", ""))
+	var phone = str(current_item.get("phone", ""))
+	var role = str(current_item.get("primary_role", "Participant"))
+
+	var hdr_lbl = Label.new()
+	hdr_lbl.text = "REGISTRATION AWAITING REVIEW — " + name + " (" + human_id + ")"
+	hdr_lbl.add_theme_font_size_override("font_size", 16)
+	hdr_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
+	vbox.add_child(hdr_lbl)
+
+	var details_lbl = Label.new()
+	details_lbl.text = "Role: " + role + " | Phone: " + (phone if phone != "" else "Not on file")
+	details_lbl.add_theme_font_size_override("font_size", 14)
+	details_lbl.add_theme_color_override("font_color", Color(0.20, 0.25, 0.32, 1.0))
+	vbox.add_child(details_lbl)
+
+	var btn_hbox = HBoxContainer.new()
+	btn_hbox.add_theme_constant_override("separation", 12)
+	vbox.add_child(btn_hbox)
+
+	var comp_btn = Button.new()
+	comp_btn.text = "✅ Approve & Mark Reviewed"
+	comp_btn.custom_minimum_size = Vector2(220, 38)
+	var btn_st = StyleBoxFlat.new()
+	btn_st.bg_color = Color(0.12, 0.53, 0.90, 1.0)
+	btn_st.corner_radius_top_left = 6; btn_st.corner_radius_top_right = 6; btn_st.corner_radius_bottom_left = 6; btn_st.corner_radius_bottom_right = 6
+	comp_btn.add_theme_stylebox_override("normal", btn_st)
+	comp_btn.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
+	comp_btn.pressed.connect(func(): _on_complete_queue_item(item_id))
+	btn_hbox.add_child(comp_btn)
+
+func _on_complete_queue_item(item_id: int) -> void:
+	if not queue_controller: return
+	var success = queue_controller.complete_current_item([item_id])
+	if success:
+		_refresh_queue_view()
 	_style_add_person_button()
 
 	var header_bar = get_node_or_null("MarginContainer/VBoxContainer/HeaderBar")
@@ -167,9 +335,10 @@ func set_read_service(service: RefCounted) -> void:
 		refresh_view()
 
 func _init_read_service() -> void:
-	db = SQLiteDatabaseScript.new()
-	var migrations_runner = MigrationsRunnerScript.new(db)
-	migrations_runner.run_migrations()
+	if not db:
+		db = SQLiteDatabaseScript.new()
+		var migrations_runner = MigrationsRunnerScript.new(db)
+		migrations_runner.run_migrations()
 	read_service = DirectoryReadServiceScript.new(db)
 
 func _init_debounce_timer() -> void:

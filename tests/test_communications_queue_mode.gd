@@ -193,11 +193,11 @@ func run_tests() -> void:
 		quit(1)
 		return
 
-	if reg["registrations_awaiting_review"].get("queue_mode_supported", true) or reg["uncovered_sessions"].get("queue_mode_supported", true):
-		print("FAIL: Unsupported queues (registrations_awaiting_review / uncovered_sessions) must remain queue_mode_supported = false.")
+	if not reg["registrations_awaiting_review"].get("queue_mode_supported", false) or reg["uncovered_sessions"].get("queue_mode_supported", true):
+		print("FAIL: QueueRegistry flags mismatch for registrations_awaiting_review or uncovered_sessions.")
 		quit(1)
 		return
-	print("PASS 8/14: QueueRegistry correctly enables overdue_callbacks and unanswered_messages while keeping unsupported queues disabled.")
+	print("PASS 8/14: QueueRegistry correctly enables active queues while preserving honest unavailable state for uncovered_sessions.")
 
 	com_view.queue_free()
 	home.queue_free()

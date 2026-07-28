@@ -155,24 +155,24 @@ func run_tests() -> void:
 			break
 	print("PASS 6/7: Counts refreshed and synchronized after queue item completion.")
 
-	# 7. Verify Unsupported Queues Are Disabled & Do Not Launch Ordinary Destination Pages
-	print("[Test 7] Verifying unsupported queue cards do not launch ordinary pages...")
-	shell.switched_view = ""
-	home._on_card_action("registrations_awaiting_review")
-	if shell.switched_view != "":
-		print("FAIL: Unsupported queue registrations_awaiting_review should not switch views, got: ", shell.switched_view)
-		quit(1)
-		return
-
+	# 7. Verify Active Queue Launch & Honest Unavailable Queue Card
+	print("[Test 7] Verifying active queue launch & honest unavailable queue card...")
 	for card in cards:
-		if card.queue_id == "registrations_awaiting_review":
+		if card.queue_id == "uncovered_sessions":
 			var btn = card.primary_button if card.primary_button else (card.find_child("PrimaryButton", true, false) as Button)
 			if not btn or not btn.disabled or not btn.text.contains("(Unavailable)"):
-				print("FAIL: Unsupported card button state mismatch. Disabled: ", (btn.disabled if btn else "null"), " Text: ", (btn.text if btn else "null"))
+				print("FAIL: uncovered_sessions card should display (Unavailable). Found: ", (btn.text if btn else "null"))
 				quit(1)
 				return
 			break
-	print("PASS 7/7: Unsupported queues clearly display unavailable status and do not misleadingly launch destination pages.")
+
+	shell.switched_view = ""
+	home._on_card_action("registrations_awaiting_review")
+	if shell.switched_view != "people":
+		print("FAIL: Selecting registrations_awaiting_review should switch to people view, got: ", shell.switched_view)
+		quit(1)
+		return
+	print("PASS 7/7: Home Action Center renders 4 active queue modes and 1 honest unavailable queue card.")
 
 	home.queue_free()
 	shell.queue_free()
