@@ -1,0 +1,56 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://app/scenes/components/work_queue_header_bar.gd" id="1_header"]
+
+[node name="WorkQueueHeaderBar" type="PanelContainer"]
+custom_minimum_size = Vector2(0, 52)
+offset_right = 700.0
+offset_bottom = 52.0
+size_flags_horizontal = 3
+script = ExtResource("1_header")
+
+[node name="MarginContainer" type="MarginContainer" parent="."]
+layout_mode = 2
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 8
+
+[node name="MainHBox" type="HBoxContainer" parent="MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="TitleLabel" type="Label" parent="MarginContainer/MainHBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+text = "⚡ WORK QUEUE: Title"
+
+[node name="ProgressHBox" type="HBoxContainer" parent="MarginContainer/MainHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 10
+
+[node name="CountLabel" type="Label" parent="MarginContainer/MainHBox/ProgressHBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.6, 0.68, 0.78, 1)
+theme_override_font_sizes/font_size = 13
+text = "Item 1 of 5"
+
+[node name="ProgressBar" type="ProgressBar" parent="MarginContainer/MainHBox/ProgressHBox"]
+custom_minimum_size = Vector2(120, 12)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+show_percentage = false
+
+[node name="ActionsHBox" type="HBoxContainer" parent="MarginContainer/MainHBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="BtnPause" type="Button" parent="MarginContainer/MainHBox/ActionsHBox"]
+layout_mode = 2
+text = "Pause Queue"
+
+[node name="BtnExit" type="Button" parent="MarginContainer/MainHBox/ActionsHBox"]
+layout_mode = 2
+text = "Exit Queue"

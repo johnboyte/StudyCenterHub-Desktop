@@ -1,0 +1,72 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://app/scenes/components/action_center_card.gd" id="1_card"]
+
+[node name="ActionCenterCard" type="PanelContainer"]
+custom_minimum_size = Vector2(280, 160)
+offset_right = 280.0
+offset_bottom = 160.0
+size_flags_horizontal = 3
+script = ExtResource("1_card")
+
+[node name="MarginContainer" type="MarginContainer" parent="."]
+layout_mode = 2
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 16
+
+[node name="MainVBox" type="VBoxContainer" parent="MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="TopHBox" type="HBoxContainer" parent="MarginContainer/MainVBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="UrgencyPill" type="PanelContainer" parent="MarginContainer/MainVBox/TopHBox"]
+layout_mode = 2
+
+[node name="Margin" type="MarginContainer" parent="MarginContainer/MainVBox/TopHBox/UrgencyPill"]
+layout_mode = 2
+theme_override_constants/margin_left = 6
+theme_override_constants/margin_top = 2
+theme_override_constants/margin_right = 6
+theme_override_constants/margin_bottom = 2
+
+[node name="UrgencyLabel" type="Label" parent="MarginContainer/MainVBox/TopHBox/UrgencyPill/Margin"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 11
+text = "NORMAL"
+
+[node name="TitleLabel" type="Label" parent="MarginContainer/MainVBox/TopHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 16
+text = "Work Queue Title"
+text_overrun_behavior = 3
+
+[node name="MiddleHBox" type="VBoxContainer" parent="MarginContainer/MainVBox"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="CountBadge" type="Label" parent="MarginContainer/MainVBox/MiddleHBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "0 Items Need Action"
+
+[node name="DetailLabel" type="Label" parent="MarginContainer/MainVBox/MiddleHBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.6, 0.68, 0.78, 1)
+theme_override_font_sizes/font_size = 13
+text = "Supporting details"
+
+[node name="BottomHBox" type="HBoxContainer" parent="MarginContainer/MainVBox"]
+layout_mode = 2
+size_flags_vertical = 10
+
+[node name="PrimaryButton" type="Button" parent="MarginContainer/MainVBox/BottomHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Start Queue"
