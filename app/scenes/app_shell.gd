@@ -254,12 +254,15 @@ func _update_header_for_current_view(first_name: String = "") -> void:
 				is_bday = true
 
 	if is_bday:
-		greeting_label.text = "Happy Birthday, " + first_name + "!"
-		greeting_subtitle.text = "We hope your day is filled with joy. Thank you for all you do at StudyCenter!"
-		greeting_subtitle.tooltip_text = greeting_subtitle.text
+		if greeting_label:
+			greeting_label.text = "Happy Birthday, " + first_name + "!"
+		if greeting_subtitle:
+			greeting_subtitle.text = "We hope your day is filled with joy. Thank you for all you do at StudyCenter!"
+			greeting_subtitle.tooltip_text = greeting_subtitle.text
 		return
 
-	greeting_label.text = salutation + ", " + first_name + "!"
+	if greeting_label:
+		greeting_label.text = salutation + ", " + first_name + "!"
 
 	# Resolve subtitle: 1. User Override -> 2. Org Default -> 3. Hardcoded Fallback
 	var sub_text = _resolve_page_subtitle(current_view_name)
@@ -312,33 +315,40 @@ func _connect_nav_signals() -> void:
 	var nav_vbox = $SidebarPanel/SidebarMargin/SidebarVBox/NavScroll/NavVBox
 	nav_vbox.add_child(btn_nav_kiosk)
 
-func switch_view(view_name: String) -> void:
+func switch_view(view_name: String, params: Dictionary = {}) -> bool:
+	if view_name.is_empty():
+		return false
+
 	current_view_name = view_name
 
 	if view_name == "kiosk":
-		sidebar_panel.visible = false
-		top_header_bar.visible = false
-		page_scroll.visible = false
-		content_area.offset_left = 0
-		content_area.offset_top = 0
+		if sidebar_panel: sidebar_panel.visible = false
+		if top_header_bar: top_header_bar.visible = false
+		if page_scroll: page_scroll.visible = false
+		if content_area:
+			content_area.offset_left = 0
+			content_area.offset_top = 0
 	else:
-		sidebar_panel.visible = true
-		top_header_bar.visible = true
-		page_scroll.visible = true
-		content_area.offset_left = 260.0
-		_adjust_content_area_offset()
+		if sidebar_panel: sidebar_panel.visible = true
+		if top_header_bar: top_header_bar.visible = true
+		if page_scroll: page_scroll.visible = true
+		if content_area:
+			content_area.offset_left = 260.0
+			_adjust_content_area_offset()
 
 	_update_nav_button_styles()
 	_update_header_for_current_view()
 
 	# Clear previous view nodes from both standard and overlay layouts
-	for child in content_container.get_children():
-		content_container.remove_child(child)
-		child.queue_free()
-	for child in content_area.get_children():
-		if child != page_scroll:
-			content_area.remove_child(child)
+	if content_container:
+		for child in content_container.get_children():
+			content_container.remove_child(child)
 			child.queue_free()
+	if content_area:
+		for child in content_area.get_children():
+			if child != page_scroll:
+				content_area.remove_child(child)
+				child.queue_free()
 
 	if view_name == "home":
 		var scene_res = load("res://app/scenes/home_view.tscn")
@@ -409,25 +419,7 @@ func switch_view(view_name: String) -> void:
 			if current_view_node.has_method("set_app_shell"):
 				current_view_node.set_app_shell(self)
 	else:
-		var ph_vbox = VBoxContainer.new()
-		ph_vbox.alignment = BoxContainer.ALIGNMENT_CENTER
-		ph_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		ph_vbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
-
-		var lbl_title = Label.new()
-		lbl_title.text = view_name.capitalize() + " Sub-system"
-		lbl_title.add_theme_font_size_override("font_size", 22)
-		lbl_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		ph_vbox.add_child(lbl_title)
-
-		var lbl_sub = Label.new()
-		lbl_sub.text = "Module architecture ready. Full interface will be integrated in upcoming sprint story."
-		lbl_sub.add_theme_font_size_override("font_size", 14)
-		lbl_sub.add_theme_color_override("font_color", Color(0.60, 0.68, 0.78))
-		lbl_sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		ph_vbox.add_child(lbl_sub)
-
-		current_view_node = ph_vbox
+		return false
 
 	if current_view_node:
 		if current_view_node is Control:
@@ -442,9 +434,16 @@ func switch_view(view_name: String) -> void:
 			current_view_node.offset_right = 0
 			current_view_node.offset_bottom = 0
 		if view_name == "kiosk":
-			content_area.add_child(current_view_node)
+			if content_area: content_area.add_child(current_view_node)
 		else:
-			content_container.add_child(current_view_node)
+			if content_container: content_container.add_child(current_view_node)
+
+		if current_view_node.has_method("receive_navigation_context"):
+			current_view_node.call("receive_navigation_context", params.duplicate(true))
+		return true
+
+	return false
+
 
 func _update_nav_button_styles() -> void:
 	var buttons = {
