@@ -109,66 +109,66 @@ func _style_action_tile(btn: Button, icon_emoji: String, title: String, subtitle
 	if not btn: return
 	for child in btn.get_children(): child.free()
 
-	btn.custom_minimum_size = Vector2(0, 105)
+	btn.custom_minimum_size = Vector2(0, 98)
 
 	var bg_style = StyleBoxFlat.new()
 	bg_style.bg_color = Color(1.0, 1.0, 1.0, 1.0)
 	bg_style.border_width_left = 1; bg_style.border_width_top = 1; bg_style.border_width_right = 1; bg_style.border_width_bottom = 1
-	bg_style.border_color = Color(0.86, 0.89, 0.94, 1.0)
-	bg_style.corner_radius_top_left = 14; bg_style.corner_radius_top_right = 14; bg_style.corner_radius_bottom_left = 14; bg_style.corner_radius_bottom_right = 14
+	bg_style.border_color = Color(0.88, 0.91, 0.95, 1.0)
+	bg_style.corner_radius_top_left = 12; bg_style.corner_radius_top_right = 12; bg_style.corner_radius_bottom_left = 12; bg_style.corner_radius_bottom_right = 12
 	btn.add_theme_stylebox_override("normal", bg_style)
 
 	var hover_style = bg_style.duplicate() as StyleBoxFlat
-	hover_style.bg_color = Color(0.96, 0.98, 1.0, 1.0)
+	hover_style.bg_color = Color(0.97, 0.985, 1.0, 1.0)
 	hover_style.border_color = _get_active_secondary_color()
-	hover_style.shadow_color = Color(0.0, 0.0, 0.0, 0.06)
-	hover_style.shadow_size = 8
+	hover_style.shadow_color = Color(0.0, 0.0, 0.0, 0.04)
+	hover_style.shadow_size = 6
 	btn.add_theme_stylebox_override("hover", hover_style)
 	btn.add_theme_stylebox_override("pressed", hover_style)
 
 	var margin_container = MarginContainer.new()
 	margin_container.set_anchors_preset(PRESET_FULL_RECT)
 	margin_container.mouse_filter = MOUSE_FILTER_IGNORE
-	margin_container.add_theme_constant_override("margin_left", 18)
-	margin_container.add_theme_constant_override("margin_top", 16)
-	margin_container.add_theme_constant_override("margin_right", 18)
-	margin_container.add_theme_constant_override("margin_bottom", 16)
+	margin_container.add_theme_constant_override("margin_left", 16)
+	margin_container.add_theme_constant_override("margin_top", 14)
+	margin_container.add_theme_constant_override("margin_right", 16)
+	margin_container.add_theme_constant_override("margin_bottom", 14)
 
 	var hbox = HBoxContainer.new()
 	hbox.size_flags_horizontal = SIZE_EXPAND_FILL
 	hbox.size_flags_vertical = SIZE_EXPAND_FILL
 	hbox.mouse_filter = MOUSE_FILTER_IGNORE
-	hbox.add_theme_constant_override("separation", 16)
+	hbox.add_theme_constant_override("separation", 14)
 
 	var icon_box = Label.new()
 	icon_box.text = icon_emoji
-	icon_box.custom_minimum_size = Vector2(54, 54)
+	icon_box.custom_minimum_size = Vector2(48, 48)
 	icon_box.size_flags_vertical = SIZE_SHRINK_CENTER
 	icon_box.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	icon_box.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	icon_box.add_theme_font_size_override("font_size", 24)
+	icon_box.add_theme_font_size_override("font_size", 22)
 
 	var icon_style = StyleBoxFlat.new()
 	icon_style.bg_color = accent_color
-	icon_style.corner_radius_top_left = 12; icon_style.corner_radius_top_right = 12; icon_style.corner_radius_bottom_left = 12; icon_style.corner_radius_bottom_right = 12
+	icon_style.corner_radius_top_left = 10; icon_style.corner_radius_top_right = 10; icon_style.corner_radius_bottom_left = 10; icon_style.corner_radius_bottom_right = 10
 	icon_box.add_theme_stylebox_override("normal", icon_style)
 	hbox.add_child(icon_box)
 
 	var vbox = VBoxContainer.new()
 	vbox.size_flags_horizontal = SIZE_EXPAND_FILL
 	vbox.size_flags_vertical = SIZE_SHRINK_CENTER
-	vbox.add_theme_constant_override("separation", 3)
+	vbox.add_theme_constant_override("separation", 2)
 
 	var title_lbl = Label.new()
 	title_lbl.text = title
-	title_lbl.add_theme_font_size_override("font_size", 18)
+	title_lbl.add_theme_font_size_override("font_size", 17)
 	title_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
 	vbox.add_child(title_lbl)
 
 	var sub_lbl = Label.new()
 	sub_lbl.text = subtitle
-	sub_lbl.add_theme_font_size_override("font_size", 14)
-	sub_lbl.add_theme_color_override("font_color", Color(0.30, 0.36, 0.46, 1.0))
+	sub_lbl.add_theme_font_size_override("font_size", 13)
+	sub_lbl.add_theme_color_override("font_color", Color(0.38, 0.44, 0.52, 1.0))
 	vbox.add_child(sub_lbl)
 
 	hbox.add_child(vbox)
@@ -383,9 +383,9 @@ func _build_today_center_content() -> Control:
 
 		var time_lbl = Label.new()
 		time_lbl.text = item["time"]
-		time_lbl.custom_minimum_size = Vector2(80, 0)
-		time_lbl.add_theme_font_size_override("font_size", 14)
-		time_lbl.add_theme_color_override("font_color", Color(0.22, 0.28, 0.38, 1.0))
+		time_lbl.custom_minimum_size = Vector2(85, 0)
+		time_lbl.add_theme_font_size_override("font_size", 13)
+		time_lbl.add_theme_color_override("font_color", Color(0.18, 0.24, 0.34, 1.0))
 		hbox.add_child(time_lbl)
 
 		var info_vbox = VBoxContainer.new()
@@ -406,7 +406,7 @@ func _build_today_center_content() -> Control:
 		var r_lbl = Label.new()
 		r_lbl.text = item["sub"]
 		r_lbl.add_theme_font_size_override("font_size", 13)
-		r_lbl.add_theme_color_override("font_color", Color(0.35, 0.42, 0.52, 1.0))
+		r_lbl.add_theme_color_override("font_color", Color(0.40, 0.46, 0.54, 1.0))
 		info_vbox.add_child(r_lbl)
 
 		hbox.add_child(info_vbox)
@@ -425,7 +425,7 @@ func _build_ai_assistant_card(card: PanelContainer) -> void:
 	for child in card.get_children(): child.free()
 
 	var style = StyleBoxFlat.new()
-	style.bg_color = Color(0.969, 0.953, 0.929, 0.6) # Soft background tint
+	style.bg_color = Color(0.975, 0.965, 0.945, 0.6) # Soft background tint
 	style.border_width_left = 1; style.border_width_top = 1; style.border_width_right = 1; style.border_width_bottom = 1
 	style.border_color = _get_active_secondary_color()
 	style.corner_radius_top_left = 12; style.corner_radius_top_right = 12; style.corner_radius_bottom_left = 12; style.corner_radius_bottom_right = 12
@@ -494,8 +494,8 @@ func _build_ai_assistant_card(card: PanelContainer) -> void:
 	for b in bullets:
 		var l = Label.new()
 		l.text = b
-		l.add_theme_font_size_override("font_size", 15)
-		l.add_theme_color_override("font_color", Color(0.15, 0.20, 0.28, 1.0))
+		l.add_theme_font_size_override("font_size", 14)
+		l.add_theme_color_override("font_color", Color(0.18, 0.24, 0.32, 1.0))
 		vbox.add_child(l)
 
 	var btn_hbox = HBoxContainer.new()
@@ -520,6 +520,16 @@ func _build_ai_assistant_card(card: PanelContainer) -> void:
 	btn_tasks.text = "View All Tasks"
 	btn_tasks.custom_minimum_size = Vector2(120, 40)
 	btn_tasks.add_theme_font_size_override("font_size", 15)
+
+	var task_style = StyleBoxFlat.new()
+	task_style.bg_color = Color(1.0, 1.0, 1.0, 1.0)
+	task_style.border_width_left = 1; task_style.border_width_top = 1; task_style.border_width_right = 1; task_style.border_width_bottom = 1
+	task_style.border_color = Color(0.84, 0.87, 0.92, 1.0)
+	task_style.corner_radius_top_left = 6; task_style.corner_radius_top_right = 6; task_style.corner_radius_bottom_left = 6; task_style.corner_radius_bottom_right = 6
+	btn_tasks.add_theme_stylebox_override("normal", task_style)
+	btn_tasks.add_theme_stylebox_override("hover", task_style)
+	btn_tasks.add_theme_color_override("font_color", Color(0.18, 0.24, 0.32, 1.0))
+
 	btn_tasks.pressed.connect(func(): _navigate("communications"))
 	btn_hbox.add_child(btn_tasks)
 
