@@ -4,7 +4,16 @@ extends RefCounted
 ## Canonical Registry of Production V1 Work Queue Definitions.
 ## Provides a single, centralized source of truth for all Action Center work queues.
 
+static func _parse_time_sql(col_name: String) -> String:
+	return "(CASE WHEN " + col_name + " LIKE '%AM%' OR " + col_name + " LIKE '%PM%' THEN (CAST(substr(" + col_name + ", 1, instr(" + col_name + ", ':') - 1) AS INTEGER) % 12 + CASE WHEN " + col_name + " LIKE '%PM%' THEN 12 ELSE 0 END) * 60 + CAST(substr(" + col_name + ", instr(" + col_name + ", ':') + 1, 2) AS INTEGER) ELSE CAST(substr(" + col_name + ", 1, instr(" + col_name + ", ':') - 1) AS INTEGER) * 60 + CAST(substr(" + col_name + ", instr(" + col_name + ", ':') + 1, 2) AS INTEGER) END)"
+
 static func get_registry() -> Dictionary:
+	var s_st = _parse_time_sql("s.start_time")
+	var s_end = _parse_time_sql("s.end_time")
+	var se_st = _parse_time_sql("se.start_time")
+	var se_end = _parse_time_sql("se.end_time")
+	var full_coverage_join = "se.shift_date = s.date_text AND se.area = s.room_location AND " + se_st + " <= " + s_st + " AND " + se_end + " >= " + s_end
+
 	return {
 		"overdue_callbacks": {
 			"queue_id": "overdue_callbacks",
@@ -42,7 +51,7 @@ static func get_registry() -> Dictionary:
 			"count_sql": "SELECT COUNT(*) AS cnt FROM people WHERE review_status = 'pending';",
 			"record_sql": "SELECT id, person_uuid, human_id, first_name, last_name, phone, email, primary_role, created_at FROM people WHERE review_status = 'pending' ORDER BY created_at ASC;",
 			"completion_sql": "UPDATE people SET review_status = 'reviewed', reviewed_at = datetime('now') WHERE id = ?;",
-			"primary_button": "Review Registrations",
+			"primary_button": "Begin Actions",
 			"queue_mode_supported": true
 		},
 		"uncovered_sessions": {
@@ -52,10 +61,10 @@ static func get_registry() -> Dictionary:
 			"target_view": "schedules",
 			"required_permission": "schedules.manage",
 			"urgency": "resource", # Purple accent
-			"count_sql": "SELECT COUNT(*) AS cnt FROM sessions s LEFT JOIN schedule_entries se ON (se.shift_date = s.date_text AND se.area = s.room_location) WHERE s.date_text BETWEEN date('now') AND date('now', '+14 days') AND s.is_active = 1 AND se.id IS NULL;",
-			"record_sql": "SELECT s.id, s.title, s.date_text, s.start_time, s.end_time, s.room_location FROM sessions s LEFT JOIN schedule_entries se ON (se.shift_date = s.date_text AND se.area = s.room_location) WHERE s.date_text BETWEEN date('now') AND date('now', '+14 days') AND s.is_active = 1 AND se.id IS NULL ORDER BY s.date_text ASC, s.start_time ASC;",
+			"count_sql": "SELECT COUNT(*) AS cnt FROM sessions s LEFT JOIN schedule_entries se ON (" + full_coverage_join + ") WHERE s.date_text BETWEEN date('now') AND date('now', '+14 days') AND s.is_active = 1 AND se.id IS NULL;",
+			"record_sql": "SELECT s.id, s.title, s.date_text, s.start_time, s.end_time, s.room_location FROM sessions s LEFT JOIN schedule_entries se ON (" + full_coverage_join + ") WHERE s.date_text BETWEEN date('now') AND date('now', '+14 days') AND s.is_active = 1 AND se.id IS NULL ORDER BY s.date_text ASC, s.start_time ASC;",
 			"completion_sql": "UPDATE schedule_entries SET notes = 'covered' WHERE id = ?;",
-			"primary_button": "Review Staffing",
+			"primary_button": "Begin Actions",
 			"queue_mode_supported": true
 		},
 		"pending_member_cards": {

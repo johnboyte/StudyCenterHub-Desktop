@@ -194,6 +194,72 @@ func run_tests() -> void:
 		return
 	print("PASS 4/18: Real constituent staffing assignment created legitimate schedule entry and removed session from queue.")
 
+	# 4b. Test Time-Span Coverage Engine Rules (Examples A - E)
+	print("[Test 4b] Testing full time-span coverage engine rules (Examples A-E)...")
+	# Seed test session: 4:00 PM - 5:00 PM on future date
+	db.execute("INSERT OR REPLACE INTO sessions (id, session_uuid, title, date_text, start_time, end_time, room_location, is_active) VALUES (999, 'sess-999', 'Test Session A-E', date('now', '+3 days'), '04:00 PM', '05:00 PM', 'Study Room #99', 1);")
+	var test_date = str(db.execute("SELECT date('now', '+3 days') as d;")["data"][0]["d"])
+
+	# Example A: Shift 3:00 - 6:00 PM (Full coverage, shift starts before and ends after) -> COVERED
+	db.execute("INSERT OR REPLACE INTO schedule_entries (entry_uuid, person_name, shift_role, shift_date, start_time, end_time, area) VALUES ('sh-ex-a', 'Staff A', 'Staff', ?, '03:00 PM', '06:00 PM', 'Study Room #99');", [test_date])
+	qc.start_queue("uncovered_sessions")
+	var items = qc.fetch_queue_records("uncovered_sessions")
+	var sess_999_uncovered = false
+	for it in items:
+		if it.get("id") == 999: sess_999_uncovered = true
+	if sess_999_uncovered:
+		print("FAIL: Example A (Session 4-5 PM, Shift 3-6 PM) should be COVERED.")
+		quit(1); return
+
+	# Example B: Shift 3:00 - 4:30 PM (Early ending shift) -> UNCOVERED
+	db.execute("DELETE FROM schedule_entries WHERE entry_uuid LIKE 'sh-ex-%';")
+	db.execute("INSERT OR REPLACE INTO schedule_entries (entry_uuid, person_name, shift_role, shift_date, start_time, end_time, area) VALUES ('sh-ex-b', 'Staff B', 'Staff', ?, '03:00 PM', '04:30 PM', 'Study Room #99');", [test_date])
+	items = qc.fetch_queue_records("uncovered_sessions")
+	sess_999_uncovered = false
+	for it in items:
+		if it.get("id") == 999: sess_999_uncovered = true
+	if not sess_999_uncovered:
+		print("FAIL: Example B (Session 4-5 PM, Shift 3-4:30 PM) should be UNCOVERED.")
+		quit(1); return
+
+	# Example C: Shift 4:30 - 6:00 PM (Late starting shift) -> UNCOVERED
+	db.execute("DELETE FROM schedule_entries WHERE entry_uuid LIKE 'sh-ex-%';")
+	db.execute("INSERT OR REPLACE INTO schedule_entries (entry_uuid, person_name, shift_role, shift_date, start_time, end_time, area) VALUES ('sh-ex-c', 'Staff C', 'Staff', ?, '04:30 PM', '06:00 PM', 'Study Room #99');", [test_date])
+	items = qc.fetch_queue_records("uncovered_sessions")
+	sess_999_uncovered = false
+	for it in items:
+		if it.get("id") == 999: sess_999_uncovered = true
+	if not sess_999_uncovered:
+		print("FAIL: Example C (Session 4-5 PM, Shift 4:30-6 PM) should be UNCOVERED.")
+		quit(1); return
+
+	# Example D: Shift 4:00 - 5:00 PM (Exact match) -> COVERED
+	db.execute("DELETE FROM schedule_entries WHERE entry_uuid LIKE 'sh-ex-%';")
+	db.execute("INSERT OR REPLACE INTO schedule_entries (entry_uuid, person_name, shift_role, shift_date, start_time, end_time, area) VALUES ('sh-ex-d', 'Staff D', 'Staff', ?, '04:00 PM', '05:00 PM', 'Study Room #99');", [test_date])
+	items = qc.fetch_queue_records("uncovered_sessions")
+	sess_999_uncovered = false
+	for it in items:
+		if it.get("id") == 999: sess_999_uncovered = true
+	if sess_999_uncovered:
+		print("FAIL: Example D (Session 4-5 PM, Shift 4-5 PM) should be COVERED.")
+		quit(1); return
+
+	# Example E: Shift 9:00 - 10:00 AM (Same room & date, wrong time) -> UNCOVERED
+	db.execute("DELETE FROM schedule_entries WHERE entry_uuid LIKE 'sh-ex-%';")
+	db.execute("INSERT OR REPLACE INTO schedule_entries (entry_uuid, person_name, shift_role, shift_date, start_time, end_time, area) VALUES ('sh-ex-e', 'Staff E', 'Staff', ?, '09:00 AM', '10:00 AM', 'Study Room #99');", [test_date])
+	items = qc.fetch_queue_records("uncovered_sessions")
+	sess_999_uncovered = false
+	for it in items:
+		if it.get("id") == 999: sess_999_uncovered = true
+	if not sess_999_uncovered:
+		print("FAIL: Example E (Session 4-5 PM, Shift 9-10 AM) should be UNCOVERED.")
+		quit(1); return
+
+	# Clean up test session 999 and test shift
+	db.execute("DELETE FROM sessions WHERE id = 999;")
+	db.execute("DELETE FROM schedule_entries WHERE entry_uuid LIKE 'sh-ex-%';")
+	print("PASS 4b: Time-span coverage engine rules (Examples A-E) verified 100% successfully.")
+
 	# 5. Test Full Production V1 Home Action Center (All 5 Queues Operational)
 	print("[Test 5] Verifying all 5 Production V1 Action Center queues operational...")
 	var home = load("res://app/scenes/home_view.tscn").instantiate()
