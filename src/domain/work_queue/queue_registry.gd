@@ -16,7 +16,8 @@ static func get_registry() -> Dictionary:
 			"count_sql": "SELECT COUNT(*) AS cnt FROM voicemails WHERE status = 'new' AND due_date IS NOT NULL AND due_date != '' AND due_date < date('now', 'localtime');",
 			"record_sql": "SELECT id, voicemail_id, from_number, caller_name, message_text, due_date, status, created_at FROM voicemails WHERE status = 'new' AND due_date IS NOT NULL AND due_date != '' AND due_date < date('now', 'localtime') ORDER BY due_date ASC;",
 			"completion_sql": "UPDATE voicemails SET status = 'completed', updated_at = datetime('now') WHERE id = ?;",
-			"primary_button": "Start Queue"
+			"primary_button": "Start Queue",
+			"queue_mode_supported": false
 		},
 		"unanswered_messages": {
 			"queue_id": "unanswered_messages",
@@ -28,7 +29,8 @@ static func get_registry() -> Dictionary:
 			"count_sql": "SELECT COUNT(*) AS cnt FROM voicemails WHERE status = 'new' AND created_at <= datetime('now', '-2 hours');",
 			"record_sql": "SELECT id, voicemail_id, from_number, caller_name, message_text, status, created_at FROM voicemails WHERE status = 'new' AND created_at <= datetime('now', '-2 hours') ORDER BY created_at ASC;",
 			"completion_sql": "UPDATE voicemails SET status = 'completed', updated_at = datetime('now') WHERE id = ?;",
-			"primary_button": "Reply to Messages"
+			"primary_button": "Reply to Messages",
+			"queue_mode_supported": false
 		},
 		"registrations_awaiting_review": {
 			"queue_id": "registrations_awaiting_review",
@@ -40,7 +42,8 @@ static func get_registry() -> Dictionary:
 			"count_sql": "SELECT COUNT(*) AS cnt FROM people WHERE created_at >= datetime('now', '-7 days');",
 			"record_sql": "SELECT id, person_uuid, human_id, first_name, last_name, phone, email, primary_role, created_at FROM people WHERE created_at >= datetime('now', '-7 days') ORDER BY created_at DESC;",
 			"completion_sql": "UPDATE people SET updated_at = datetime('now') WHERE id = ?;",
-			"primary_button": "Review Registrations"
+			"primary_button": "Review Registrations",
+			"queue_mode_supported": false
 		},
 		"uncovered_sessions": {
 			"queue_id": "uncovered_sessions",
@@ -52,7 +55,8 @@ static func get_registry() -> Dictionary:
 			"count_sql": "SELECT COUNT(*) AS cnt FROM sessions s LEFT JOIN schedule_entries se ON (se.shift_date = s.date_text AND se.area = s.room_location) WHERE s.date_text BETWEEN date('now') AND date('now', '+14 days') AND s.is_active = 1 AND se.id IS NULL;",
 			"record_sql": "SELECT s.id, s.title, s.date_text, s.start_time, s.room_location FROM sessions s LEFT JOIN schedule_entries se ON (se.shift_date = s.date_text AND se.area = s.room_location) WHERE s.date_text BETWEEN date('now') AND date('now', '+14 days') AND s.is_active = 1 AND se.id IS NULL ORDER BY s.date_text ASC, s.start_time ASC;",
 			"completion_sql": "INSERT INTO schedule_entries (shift_date, shift_role, person_name, area) VALUES (?, ?, ?, ?);",
-			"primary_button": "Review Staffing"
+			"primary_button": "Review Staffing",
+			"queue_mode_supported": false
 		},
 		"pending_member_cards": {
 			"queue_id": "pending_member_cards",
@@ -64,7 +68,8 @@ static func get_registry() -> Dictionary:
 			"count_sql": "SELECT COUNT(*) AS cnt FROM card_print_queue q WHERE q.status = 'pending';",
 			"record_sql": "SELECT q.id, q.queue_uuid, q.person_id, q.person_uuid, q.status, q.added_at, p.first_name, p.last_name, p.primary_role FROM card_print_queue q JOIN people p ON (q.person_id = p.id) WHERE q.status = 'pending' ORDER BY q.added_at ASC;",
 			"completion_sql": "UPDATE card_print_queue SET status = 'printed', printed_at = datetime('now') WHERE id = ?;",
-			"primary_button": "Issue Passes"
+			"primary_button": "Issue Passes",
+			"queue_mode_supported": true
 		}
 	}
 

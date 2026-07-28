@@ -39,18 +39,24 @@ func configure_card(data: Dictionary) -> void:
 
 	if title_label:
 		title_label.text = title
-	
+
 	if count_badge:
 		count_badge.text = str(count) + " Item" + ("s" if count != 1 else "") + " Need Action"
-	
+
 	if detail_label:
 		detail_label.text = detail
 		detail_label.visible = not detail.is_empty()
-	
+
+	var is_supported = data.get("queue_mode_supported", true)
+
 	if primary_button:
-		primary_button.text = btn_label
-		primary_button.disabled = (count == 0)
-	
+		if is_supported:
+			primary_button.text = btn_label
+			primary_button.disabled = (count == 0)
+		else:
+			primary_button.text = btn_label + " (Unavailable)"
+			primary_button.disabled = true
+
 	_apply_urgency_style(urgency)
 
 func _apply_urgency_style(urgency: String) -> void:

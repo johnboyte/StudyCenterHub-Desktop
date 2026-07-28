@@ -3,7 +3,13 @@ extends "res://app/scenes/standard_page_container.gd"
 ## Home Dashboard View Controller (HOME-SPR1-001)
 ## Complies with [PD-008] (Warm & Welcoming Design System), [PD-001] (Offline Storage), and [PD-002] (Read Isolation).
 
+const QueueRegistryScript = preload("res://src/domain/work_queue/queue_registry.gd")
+const QueueControllerScript = preload("res://src/domain/work_queue/queue_controller.gd")
+const ActionCenterCardScene = preload("res://app/scenes/components/action_center_card.tscn")
+const ActiveWorkTrayScene = preload("res://app/scenes/components/active_work_tray.tscn")
+
 var app_shell: Node = null
+var queue_controller: RefCounted = null
 
 @onready var action_grid: HBoxContainer = %ActionGrid
 @onready var tile_check_in: Button = %TileCheckIn
@@ -11,13 +17,16 @@ var app_shell: Node = null
 @onready var tile_send_message: Button = %TileSendMessage
 @onready var tile_view_schedule: Button = %TileViewSchedule
 
-@onready var card_needs_attention: PanelContainer = %NeedsAttentionCard
-@onready var card_today_center: PanelContainer = %TodayCenterCard
-@onready var card_ai_assistant: PanelContainer = %AiAssistantCard
-@onready var card_recent_activity: PanelContainer = %RecentActivityCard
+@onready var card_needs_attention: PanelContainer = $MarginContainer/MainVBox/MiddleGrid/NeedsAttentionCard
+@onready var card_today_center: PanelContainer = $MarginContainer/MainVBox/MiddleGrid/TodayCenterCard
+@onready var card_ai_assistant: PanelContainer = $MarginContainer/MainVBox/MiddleGrid/AiAssistantCard
+@onready var card_recent_activity: PanelContainer = $MarginContainer/MainVBox/RecentActivityCard
 
 func set_app_shell(shell_node: Node) -> void:
 	app_shell = shell_node
+
+func receive_navigation_context(_params: Dictionary) -> void:
+	_setup_middle_cards()
 
 func _ready() -> void:
 	_setup_action_tiles()
@@ -167,13 +176,106 @@ func _style_action_tile(btn: Button, icon_emoji: String, title: String, subtitle
 	btn.add_child(margin_container)
 
 func _setup_middle_cards() -> void:
-	_build_card_panel(card_needs_attention, "Needs Attention", _build_needs_attention_content())
-	_build_card_panel(card_today_center, "Today at the Center", _build_today_center_content())
-	_build_ai_assistant_card(card_ai_assistant)
+	var c_needs = card_needs_attention if card_needs_attention else get_node_or_null("MarginContainer/MainVBox/MiddleGrid/NeedsAttentionCard") as PanelContainer
+	var c_today = card_today_center if card_today_center else get_node_or_null("MarginContainer/MainVBox/MiddleGrid/TodayCenterCard") as PanelContainer
+	var c_ai = card_ai_assistant if card_ai_assistant else get_node_or_null("MarginContainer/MainVBox/MiddleGrid/AiAssistantCard") as PanelContainer
+
+	if c_needs: _populate_needs_attention_card(c_needs)
+	if c_today: _build_card_panel(c_today, "Today at the Center", _build_today_center_content())
+	if c_ai: _build_ai_assistant_card(c_ai)
+
+func _get_queue_controller() -> RefCounted:
+	if queue_controller == null:
+		var db = app_shell.db if (app_shell and "db" in app_shell and app_shell.db) else null
+		queue_controller = QueueControllerScript.new(db)
+		if not queue_controller.count_updated.is_connected(_on_queue_count_updated):
+			queue_controller.count_updated.connect(_on_queue_count_updated)
+	return queue_controller
+
+func _on_queue_count_updated(_queue_id: String, _new_count: int) -> void:
+	if card_needs_attention:
+		_setup_middle_cards()
+
+func _populate_needs_attention_card(card: PanelContainer) -> void:
+	if not card: return
+	for child in card.get_children():
+		card.remove_child(child)
+		child.queue_free()
+
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(1.0, 1.0, 1.0, 1.0)
+	style.border_width_left = 1; style.border_width_top = 1; style.border_width_right = 1; style.border_width_bottom = 1
+	style.border_color = Color(0.88, 0.91, 0.95, 1.0)
+	style.corner_radius_top_left = 12; style.corner_radius_top_right = 12; style.corner_radius_bottom_left = 12; style.corner_radius_bottom_right = 12
+	style.content_margin_left = 18; style.content_margin_top = 16; style.content_margin_right = 18; style.content_margin_bottom = 16
+	card.add_theme_stylebox_override("panel", style)
+
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 14)
+
+	var title_lbl = Label.new()
+	title_lbl.text = "Needs Attention"
+	title_lbl.add_theme_font_size_override("font_size", 20)
+	title_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
+	vbox.add_child(title_lbl)
+
+	# Attach container to active SceneTree prior to creating children
+	card.add_child(vbox)
+
+	var qc = _get_queue_controller()
+	if not qc:
+		return
+
+	# 1. Render ActiveWorkTray if a paused session exists
+	if not qc.active_queue_id.is_empty() and qc.get_remaining_count() > 0:
+		var tray = ActiveWorkTrayScene.instantiate()
+		var active_qid = qc.active_queue_id
+		var def = QueueRegistryScript.get_definition(active_qid)
+		vbox.add_child(tray)
+		tray.configure_tray({
+			"queue_id": active_qid,
+			"title": def.get("title", active_qid),
+			"current_index": qc.current_index,
+			"total_count": qc.get_remaining_count()
+		})
+		tray.resume_requested.connect(_on_tray_resume)
+		tray.end_requested.connect(_on_tray_end)
+
+	# 2. Render ActionCenterCard list/grid for all 5 Production V1 Queues
+	var cards_vbox = VBoxContainer.new()
+	cards_vbox.add_theme_constant_override("separation", 10)
+	vbox.add_child(cards_vbox)
+
+	var registry = QueueRegistryScript.get_registry()
+	for qid in registry.keys():
+		var def = registry[qid]
+		var count = qc.get_queue_count(qid)
+
+		var card_item = ActionCenterCardScene.instantiate()
+		cards_vbox.add_child(card_item)
+		card_item.configure_card({
+			"queue_id": qid,
+			"title": def.get("title", "Work Queue"),
+			"count": count,
+			"supporting_detail": def.get("description", ""),
+			"urgency": def.get("urgency", "normal"),
+			"primary_button": def.get("primary_button", "Start Queue"),
+			"queue_mode_supported": def.get("queue_mode_supported", true)
+		})
+		card_item.action_requested.connect(_on_card_action)
+
+	# 3. View All Work Items link
+	var link_btn = Button.new()
+	link_btn.text = "View All Work Items →"
+	_style_link_button(link_btn, 13)
+	link_btn.pressed.connect(func(): _navigate("communications"))
+	vbox.add_child(link_btn)
 
 func _build_card_panel(card: PanelContainer, title: String, content: Control) -> void:
 	if not card: return
-	for child in card.get_children(): child.free()
+	for child in card.get_children():
+		card.remove_child(child)
+		child.queue_free()
 
 	var style = StyleBoxFlat.new()
 	style.bg_color = Color(1.0, 1.0, 1.0, 1.0)
@@ -195,144 +297,31 @@ func _build_card_panel(card: PanelContainer, title: String, content: Control) ->
 	vbox.add_child(content)
 	card.add_child(vbox)
 
-func _build_needs_attention_content() -> Control:
-	var vbox = VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 8)
+func _on_card_action(queue_id: String) -> void:
+	var def = QueueRegistryScript.get_definition(queue_id)
+	if def.is_empty() or not def.get("queue_mode_supported", false):
+		return
+	var target_view = def.get("target_view", "home")
 
-	var db = null
-	if app_shell and "db" in app_shell and app_shell.db:
-		db = app_shell.db
+	var qc = _get_queue_controller()
+	if qc:
+		qc.start_queue(queue_id)
 
-	var items = []
+	if app_shell and app_shell.has_method("switch_view"):
+		app_shell.switch_view(target_view, {
+			"queue_mode": true,
+			"queue_id": queue_id,
+			"queue_controller": qc
+		})
 
-	if db:
-		# 1. Overdue Follow-ups (due_date <= today and status != completed)
-		var q_due = db.execute("SELECT COUNT(*) AS c FROM voicemails WHERE due_date IS NOT NULL AND due_date != '' AND due_date <= date('now') AND status != 'completed';")
-		var c_due = int(q_due["data"][0]["c"]) if (q_due["success"] and q_due["data"].size() > 0) else 0
-		if c_due > 0:
-			items.append({
-				"badge": str(c_due),
-				"text": "Overdue Follow-ups",
-				"color": Color(0.92, 0.25, 0.20, 1.0), # Red
-				"target": "communications"
-			})
+func _on_tray_resume(queue_id: String) -> void:
+	_on_card_action(queue_id)
 
-		# 2. Unanswered Messages (> 2h old in status 'new')
-		var q_unans = db.execute("SELECT COUNT(*) AS c FROM voicemails WHERE status = 'new' AND created_at <= datetime('now', '-2 hours');")
-		var c_unans = int(q_unans["data"][0]["c"]) if (q_unans["success"] and q_unans["data"].size() > 0) else 0
-		if c_unans > 0:
-			items.append({
-				"badge": str(c_unans),
-				"text": "Unanswered Messages (> 2h)",
-				"color": Color(0.95, 0.55, 0.15, 1.0), # Amber
-				"target": "communications"
-			})
-
-		# 3. New Registrations (created in past 7 days)
-		var q_new = db.execute("SELECT COUNT(*) AS c FROM people WHERE created_at >= datetime('now', '-7 days');")
-		var c_new = int(q_new["data"][0]["c"]) if (q_new["success"] and q_new["data"].size() > 0) else 0
-		if c_new > 0:
-			items.append({
-				"badge": str(c_new),
-				"text": "New Registrations (Past 7d)",
-				"color": Color(0.12, 0.53, 0.90, 1.0), # Blue
-				"target": "people"
-			})
-
-		# 4. Staffing Alerts (Total uncovered hours over next 14 days)
-		var q_staff = db.execute("""
-			SELECT COUNT(*) AS c 
-			FROM sessions 
-			WHERE date_text BETWEEN date('now') AND date('now', '+14 days') 
-			  AND is_active = 1;
-		""")
-		var c_staff = int(q_staff["data"][0]["c"]) if (q_staff["success"] and q_staff["data"].size() > 0) else 0
-		var uncovered_hrs = float(c_staff) * 2.0 # Estimate 2 hrs per scheduled session
-		if uncovered_hrs > 0:
-			items.append({
-				"badge": str(int(uncovered_hrs)) + "h",
-				"text": "Staffing Alerts (Next 14d)",
-				"color": Color(0.55, 0.35, 0.95, 1.0), # Purple
-				"target": "schedules"
-			})
-
-		# 5. Birthdays & Milestones (Next 7 days)
-		var max_bday_days = 7
-		var q_bday_setting = db.execute("SELECT setting_value FROM app_settings WHERE setting_key = 'MAX_ADVANCE_BDAY_DAYS' LIMIT 1;")
-		if q_bday_setting["success"] and q_bday_setting["data"].size() > 0:
-			max_bday_days = int(q_bday_setting["data"][0].get("setting_value", "7"))
-		
-		var q_bday = db.execute("SELECT COUNT(*) AS c FROM people WHERE birth_date IS NOT NULL AND birth_date != '';")
-		var c_bday = int(q_bday["data"][0]["c"]) if (q_bday["success"] and q_bday["data"].size() > 0) else 0
-		if c_bday > 0:
-			items.append({
-				"badge": str(c_bday),
-				"text": "Birthdays Next " + str(max_bday_days) + " Days",
-				"color": Color(0.18, 0.55, 0.35, 1.0), # Green
-				"target": "people"
-			})
-
-	# Zero-State Banner if no items
-	if items.size() == 0:
-		var empty_lbl = Label.new()
-		empty_lbl.text = "✨ All caught up! No items need attention."
-		empty_lbl.add_theme_font_size_override("font_size", 14)
-		empty_lbl.add_theme_color_override("font_color", Color(0.35, 0.45, 0.58, 1.0))
-		vbox.add_child(empty_lbl)
-		return vbox
-
-	for item in items:
-		var btn = Button.new()
-		btn.custom_minimum_size = Vector2(0, 36)
-		var b_st = StyleBoxFlat.new()
-		b_st.bg_color = Color(0.97, 0.98, 0.99, 1.0)
-		b_st.corner_radius_top_left = 6; b_st.corner_radius_top_right = 6; b_st.corner_radius_bottom_left = 6; b_st.corner_radius_bottom_right = 6
-		b_st.content_margin_left = 8; b_st.content_margin_right = 8; b_st.content_margin_top = 4; b_st.content_margin_bottom = 4
-		btn.add_theme_stylebox_override("normal", b_st)
-		btn.add_theme_stylebox_override("hover", b_st)
-		
-		var hbox = HBoxContainer.new()
-		hbox.add_theme_constant_override("separation", 10)
-
-		var badge = Label.new()
-		badge.text = item["badge"]
-		badge.custom_minimum_size = Vector2(28, 22)
-		badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		badge.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		badge.add_theme_font_size_override("font_size", 12)
-		badge.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
-
-		var b_style = StyleBoxFlat.new()
-		b_style.bg_color = item["color"]
-		b_style.corner_radius_top_left = 11; b_style.corner_radius_top_right = 11; b_style.corner_radius_bottom_left = 11; b_style.corner_radius_bottom_right = 11
-		badge.add_theme_stylebox_override("normal", b_style)
-		hbox.add_child(badge)
-
-		var lbl = Label.new()
-		lbl.text = item["text"]
-		lbl.size_flags_horizontal = SIZE_EXPAND_FILL
-		lbl.add_theme_font_size_override("font_size", 14)
-		lbl.add_theme_color_override("font_color", Color(0.12, 0.18, 0.26, 1.0))
-		hbox.add_child(lbl)
-
-		var arrow_lbl = Label.new()
-		arrow_lbl.text = "→"
-		arrow_lbl.add_theme_font_size_override("font_size", 13)
-		arrow_lbl.add_theme_color_override("font_color", Color(0.55, 0.60, 0.70, 1.0))
-		hbox.add_child(arrow_lbl)
-
-		btn.add_child(hbox)
-		var target = item["target"]
-		btn.pressed.connect(func(): _navigate(target))
-		vbox.add_child(btn)
-
-	var link_btn = Button.new()
-	link_btn.text = "View All Work Items →"
-	_style_link_button(link_btn, 13)
-	link_btn.pressed.connect(func(): _navigate("communications"))
-	vbox.add_child(link_btn)
-
-	return vbox
+func _on_tray_end(_queue_id: String) -> void:
+	var qc = _get_queue_controller()
+	if qc:
+		qc.end_session()
+	_setup_middle_cards()
 
 func _build_today_center_content() -> Control:
 	var vbox = VBoxContainer.new()

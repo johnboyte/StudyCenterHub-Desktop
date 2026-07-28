@@ -418,6 +418,12 @@ func switch_view(view_name: String, params: Dictionary = {}) -> bool:
 				current_view_node.db = db
 			if current_view_node.has_method("set_app_shell"):
 				current_view_node.set_app_shell(self)
+	elif view_name == "card_print_queue":
+		var dialog_script = load("res://app/scenes/card_print_queue_dialog.gd")
+		if dialog_script:
+			current_view_node = dialog_script.new(self, db)
+			if current_view_node.has_method("show_dialog"):
+				current_view_node.show_dialog()
 	else:
 		return false
 
