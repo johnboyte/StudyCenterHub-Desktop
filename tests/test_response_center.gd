@@ -14,10 +14,8 @@ func _init() -> void:
 
 	var db_path = ProjectSettings.globalize_path("user://studycenterhub_test_response_center.db")
 	
-	# Delete any existing test database file first
-	var dir = DirAccess.open("user://")
-	if dir and dir.file_exists("studycenterhub_test_response_center.db"):
-		dir.remove("studycenterhub_test_response_center.db")
+	if FileAccess.file_exists(db_path):
+		DirAccess.remove_absolute(db_path)
 
 	var db = SQLiteDatabaseScript.new(db_path)
 	

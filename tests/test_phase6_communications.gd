@@ -176,6 +176,7 @@ func run_all_38_tests() -> void:
 	# End-to-End Communication Integration Test
 	db.execute("UPDATE session_signups SET communication_needed = 1 WHERE person_id = 201 AND session_id = ?;", [sess_id])
 	var e2e_dispatch = sch_service.send_session_communication_atomic(sess_id, "confirmed", "SMS", "E2E Test Subject", "Hello {first_name}, E2E body test.", "")
+	comms_service.process_scheduled_communications_atomic("worker_primary")
 	var e2e_log = db.execute("SELECT status, status_detail FROM communications_log WHERE recipient_person_id = 201 AND message_body LIKE '%E2E body test%';")
 	var e2e_need = db.execute("SELECT communication_needed FROM session_signups WHERE person_id = 201 AND session_id = ?;", [sess_id])
 	var e2e_audit = db.execute("SELECT COUNT(*) as cnt FROM session_audit_log WHERE session_id = ? AND action = 'CommunicationSent';", [sess_id])

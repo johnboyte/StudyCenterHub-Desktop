@@ -60,16 +60,42 @@ func execute(sql: String, args: Array = []) -> Dictionary:
 	return {"success": true, "error": "", "data": data}
 
 func execute_transaction(statements: Array) -> Dictionary:
-	var sql_block = "PRAGMA journal_mode = WAL;\nPRAGMA foreign_keys = ON;\nBEGIN TRANSACTION;\n"
+	var pragma_block = ".bail on\nPRAGMA foreign_keys = ON;\n"
+	var sql_block = "BEGIN TRANSACTION;\n"
 	for stmt in statements:
 		if stmt is String:
-			sql_block += stmt + ";\n"
+			var s = stmt.replace("PRAGMA journal_mode = WAL;", "").replace("PRAGMA journal_mode=WAL;", "")
+			sql_block += s + ";\n"
 		elif stmt is Dictionary and stmt.has("sql"):
 			var sql = stmt["sql"]
 			var args = stmt.get("args", [])
-			sql_block += _format_sql(sql, args) + ";\n"
+			var formatted = _format_sql(sql, args).replace("PRAGMA journal_mode = WAL;", "").replace("PRAGMA journal_mode=WAL;", "")
+			sql_block += formatted + ";\n"
 	sql_block += "COMMIT;\n"
-	return execute(sql_block)
+
+	var full_script = pragma_block + sql_block
+
+	var tmp_path = ProjectSettings.globalize_path("user://tmp_tx_" + str(Time.get_ticks_usec()) + ".sql")
+	var f = FileAccess.open(tmp_path, FileAccess.WRITE)
+	if f:
+		f.store_string(full_script)
+		f.close()
+
+	var output = []
+	var exit_code = OS.execute(sqlite_binary, ["-json", db_path, ".read '" + tmp_path + "'"], output, true)
+	DirAccess.remove_absolute(tmp_path)
+
+	if exit_code != 0:
+		var err_msg = output[0] if output.size() > 0 else "Transaction failed"
+		return {"success": false, "error": err_msg, "data": []}
+
+	var data = []
+	if output.size() > 0 and output[0].strip_edges() != "":
+		var json = JSON.new()
+		if json.parse(output[0]) == OK and json.data is Array:
+			data = json.data
+
+	return {"success": true, "error": "", "data": data}
 
 func _format_sql(sql: String, args: Array) -> String:
 	if args.size() == 0:

@@ -295,18 +295,39 @@ func reorder_shifts_in_day_atomic(target_date: String, ordered_uuids: Array) -> 
 	return res
 
 func delete_shifts_by_uuids_atomic(entry_uuids: Array) -> Dictionary:
-	if entry_uuids.size() == 0:
-		return {"success": true, "error": ""}
-
-	var stmts = []
-	for uuid_val in entry_uuids:
-		stmts.append({
-			"sql": "DELETE FROM schedule_entries WHERE entry_uuid = ?;",
-			"args": [str(uuid_val)]
-		})
-
-	var res = db.execute_transaction(stmts)
+	if entry_uuids.size() == 0: return {"success": true, "error": ""}
+	var placeholders = []
+	for u in entry_uuids: placeholders.append("?")
+	var q = "DELETE FROM schedule_entries WHERE entry_uuid IN (" + ", ".join(placeholders) + ");"
+	var res = db.execute(q, entry_uuids)
 	return res
+
+func copy_paste_shifts_atomic(shifts: Array) -> Dictionary:
+	var created_uuids = []
+	for s in shifts:
+		var name = str(s.get("person_name", ""))
+		var role = str(s.get("shift_role", ""))
+		var date = str(s.get("shift_date", ""))
+		var st = str(s.get("start_time", ""))
+		var et = str(s.get("end_time", ""))
+		var area = str(s.get("area", ""))
+		var notes = str(s.get("notes", ""))
+		var res = create_shift_entry_atomic(name, role, date, st, et, area, notes)
+		if res["success"]:
+			created_uuids.append(res["entry_uuid"])
+		else:
+			return {"success": false, "error": res.get("error", "Copy failed"), "created_uuids": created_uuids}
+	return {"success": true, "error": "", "created_uuids": created_uuids}
+
+func cut_paste_shifts_atomic(items: Array) -> Dictionary:
+	for item in items:
+		var uuid = str(item.get("entry_uuid", ""))
+		var target_date = str(item.get("target_date", ""))
+		var q = "UPDATE schedule_entries SET shift_date = ? WHERE entry_uuid = ?;"
+		var res = db.execute(q, [target_date, uuid])
+		if not res["success"]:
+			return {"success": false, "error": res.get("error", "Cut/paste failed")}
+	return {"success": true, "error": ""}
 
 # ==================== TAB 2: SESSION & WAITLIST MANAGEMENT ====================
 

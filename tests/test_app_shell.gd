@@ -37,6 +37,9 @@ func run_all_tests() -> void:
 	var shell_scene = load("res://app/scenes/app_shell.tscn")
 	assert_true(shell_scene != null, "AppShell scene file loaded successfully.")
 
+	db.execute("INSERT OR REPLACE INTO people (id, person_uuid, human_id, first_name, last_name, primary_role) VALUES (1, 'usr_staff_1', 'STF-001', 'John', 'Smith', 'Staff');")
+	db.execute("INSERT OR REPLACE INTO staff_pins (person_id, pin_hash, role) VALUES (1, 'hash123', 'Staff');")
+
 	var shell = shell_scene.instantiate()
 	shell.db = db
 	root.add_child(shell)
@@ -44,15 +47,17 @@ func run_all_tests() -> void:
 	assert_true(shell.current_view_name == "home", "Default active view is Home.")
 
 	# Test Team Leader Dropdown & ACTIVE_SUPERVISOR setting update
-	var dropdown = shell.get_node_or_null("MainHBox/MainContentVBox/TopHeaderBar/TopMargin/TopHBox/TeamLeaderHBox/TeamLeaderDropdown") as OptionButton
+	var dropdown = shell.find_child("TeamLeaderDropdown", true, false) as OptionButton
+
 	assert_true(dropdown != null and dropdown.item_count >= 1, "Today's Team Leader dropdown populated with staff options.")
 
-	shell._on_team_leader_selected(0)
-	var leader_name = dropdown.get_item_text(0)
-	var setting_res = db.execute("SELECT setting_value FROM app_settings WHERE setting_key = 'ACTIVE_SUPERVISOR';")
-	assert_true(setting_res["success"] and setting_res["data"].size() > 0, "ACTIVE_SUPERVISOR setting persisted to SQLite app_settings.")
-	if setting_res["data"].size() > 0:
-		assert_true(setting_res["data"][0]["setting_value"] == leader_name, "Selected Team Leader name saved correctly in database.")
+	if dropdown != null and dropdown.item_count > 0:
+		shell._on_team_leader_selected(0)
+		var leader_name = dropdown.get_item_text(0)
+		var setting_res = db.execute("SELECT setting_value FROM app_settings WHERE setting_key = 'ACTIVE_SUPERVISOR';")
+		assert_true(setting_res["success"] and setting_res["data"].size() > 0, "ACTIVE_SUPERVISOR setting persisted to SQLite app_settings.")
+		if setting_res["data"].size() > 0:
+			assert_true(setting_res["data"][0]["setting_value"] == leader_name, "Selected Team Leader name saved correctly in database.")
 
 	# Test View Switching
 	shell.switch_view("people")
@@ -65,10 +70,10 @@ func run_all_tests() -> void:
 	var home_view = shell.current_view_node
 	assert_true(home_view != null, "HomeView instantiated and attached to ContentContainer.")
 
-	var middle_grid = home_view.get_node_or_null("MarginContainer/ScrollContainer/MainVBox/MiddleGrid")
+	var middle_grid = home_view.find_child("MiddleGrid", true, false)
 	assert_true(middle_grid != null and middle_grid.get_child_count() == 3, "Home Dashboard renders 3 middle operational cards (Needs Attention, Today at Center, AI Assistant).")
 
-	var activity_card = home_view.get_node_or_null("MarginContainer/ScrollContainer/MainVBox/RecentActivityCard")
+	var activity_card = home_view.find_child("RecentActivityCard", true, false)
 	assert_true(activity_card != null, "Home Dashboard renders Recent Activity feed section.")
 
 	# Test Read Isolation (PD-002)

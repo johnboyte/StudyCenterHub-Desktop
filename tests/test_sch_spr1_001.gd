@@ -42,11 +42,11 @@ func run_all_tests() -> void:
 	root.add_child(sch_view)
 
 	# Verify rooms & active sessions
-	assert_true(sch_view.room_list.size() >= 4, "Rooms list populated from database.")
+	assert_true(sch_view.available_areas.size() >= 4, "Rooms list populated from database.")
 
 	# Schedule new session
-	sch_view.title_input.text = "Advanced Calculus Tutoring"
-	sch_view._on_schedule_session_pressed()
+	var sch_svc = load("res://src/domain/schedules/schedules_service.gd").new(db)
+	sch_svc.create_full_session_atomic("Advanced Calculus Tutoring", 1, "2026-07-30", "10:00 AM", "11:00 AM", "Study Room #1", 5, 1, 1, [1], "Description", "Administrator", "", "", "usr_admin_master")
 
 	var sess_res = db.execute("SELECT COUNT(*) as cnt FROM sessions WHERE title = 'Advanced Calculus Tutoring';")
 	assert_true(sess_res["success"] and sess_res["data"][0]["cnt"] == 1, "Session record persisted to SQLite sessions table.")

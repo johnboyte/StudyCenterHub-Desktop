@@ -148,9 +148,9 @@ func send_message_atomic(recipient_person: Dictionary, channel: String, message_
 	var msg_uuid = "msg_" + _generate_uuid()
 	var event_uuid = "evt_" + _generate_uuid()
 
-	var person_id = int(recipient_person.get("id", 0))
+	var person_id = int(recipient_person.get("person_id", 0))
 	if person_id == 0:
-		person_id = int(recipient_person.get("person_id", 0))
+		person_id = int(recipient_person.get("id", 0))
 
 	var person_uuid = str(recipient_person.get("person_uuid", ""))
 	var first_name = str(recipient_person.get("first_name", ""))
@@ -611,6 +611,27 @@ func save_ivr_voice_settings(voice_name: String, language: String) -> bool:
 	var q = "INSERT OR REPLACE INTO ivr_settings (id, voice_name, language) VALUES (1, ?, ?);"
 	var res = db.execute(q, [voice_name, language])
 	return res["success"]
+
+func get_phone_settings() -> Dictionary:
+	var res = db.execute("SELECT setting_key, setting_value FROM app_settings WHERE setting_key LIKE 'PHONE_%';")
+	var dict = {
+		"on_call_person_id": "",
+		"rollover_rings": 4,
+		"tts_greeting_active": true,
+		"automated_greeter_tts": "",
+		"automated_greeter_audio": ""
+	}
+	if res["success"]:
+		for row in res["data"]:
+			var key = String(row.get("setting_key", ""))
+			var val = String(row.get("setting_value", ""))
+			match key:
+				"PHONE_ON_CALL_PERSON_ID": dict["on_call_person_id"] = val
+				"PHONE_ROLLOVER_RINGS": dict["rollover_rings"] = int(val) if val.is_valid_int() else 4
+				"PHONE_TTS_GREETING_ACTIVE": dict["tts_greeting_active"] = (val == "1" or val.to_lower() == "true")
+				"PHONE_AUTOMATED_GREETER_TTS": dict["automated_greeter_tts"] = val
+				"PHONE_AUTOMATED_GREETER_AUDIO": dict["automated_greeter_audio"] = val
+	return dict
 
 func save_phone_settings(on_call: String, rings: int, tts_active: bool, tts_text: String, audio_base64: String) -> bool:
 	var stmts = [

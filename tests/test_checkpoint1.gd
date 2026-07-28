@@ -29,7 +29,7 @@ func _init() -> void:
 	print("PASS 1/6: SQLite initialized & schema migrations executed.")
 
 	# Test 2: Device Identity Registration
-	var dev_res = db.execute("INSERT INTO device_identity (device_id, device_name, role) VALUES ('dev_macbook_test', 'MacBook Test Rig', 'Primary Node');")
+	var dev_res = db.execute("INSERT INTO device_identity (device_uuid, device_name, device_type) VALUES ('dev_macbook_test', 'MacBook Test Rig', 'desktop');")
 	if not dev_res["success"]:
 		print("FAIL: Device identity registration failed: ", dev_res["error"])
 		quit(1)

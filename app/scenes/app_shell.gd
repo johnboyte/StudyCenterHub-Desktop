@@ -181,6 +181,8 @@ func _populate_team_leaders() -> void:
 	if not team_leader_dropdown: return
 	team_leader_dropdown.clear()
 
+	db.execute("CREATE TABLE IF NOT EXISTS app_settings (setting_key TEXT PRIMARY KEY, setting_value TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT (datetime('now')));")
+
 	var staff_list = ["John Boyte", "Sarah Johnson", "Michael Brown", "Emily Davis"]
 
 	var p_res = db.execute("SELECT first_name, last_name FROM people ORDER BY last_name ASC, first_name ASC;")
@@ -215,14 +217,8 @@ func _on_team_leader_selected(index: int) -> void:
 	var name = team_leader_dropdown.get_item_text(index)
 	_update_header_for_current_view(name.split(" ")[0])
 
-	db.execute("""
-		CREATE TABLE IF NOT EXISTS app_settings (
-			setting_key TEXT PRIMARY KEY,
-			setting_value TEXT NOT NULL,
-			updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-		);
-	""")
-	db.execute("INSERT OR REPLACE INTO app_settings (setting_key, setting_value, updated_at) VALUES ('ACTIVE_SUPERVISOR', ?, datetime('now'));", [name])
+	db.execute("CREATE TABLE IF NOT EXISTS app_settings (setting_key TEXT PRIMARY KEY, setting_value TEXT NOT NULL);")
+	db.execute("INSERT OR REPLACE INTO app_settings (setting_key, setting_value) VALUES ('ACTIVE_SUPERVISOR', ?);", [name])
 
 func _update_header_for_current_view(first_name: String = "") -> void:
 	if first_name == "":
