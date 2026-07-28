@@ -264,8 +264,8 @@ func run_tests() -> void:
 	print("[Test 4c] Testing Prompt 2 Session Staffing Requirement & Queue Counts...")
 	# 1. Verify Migration 0035 default staffing_requirement = 'DEDICATED_SESSION_STAFF'
 	db.execute("INSERT INTO sessions (id, session_uuid, title, date_text, start_time, end_time, room_location, is_active) VALUES (888, 'sess-888', 'Default Dedicated Session', date('now', '+2 days'), '03:00 PM', '05:00 PM', 'Study Room #88', 1);")
-	var col_check = db.execute("SELECT staffing_requirement FROM sessions WHERE id = 888;")
-	if not col_check["success"] or col_check["data"][0]["staffing_requirement"] != "DEDICATED_SESSION_STAFF":
+	var req_col_check = db.execute("SELECT staffing_requirement FROM sessions WHERE id = 888;")
+	if not req_col_check["success"] or req_col_check["data"][0]["staffing_requirement"] != "DEDICATED_SESSION_STAFF":
 		print("FAIL: Migration 0035 default staffing_requirement is not DEDICATED_SESSION_STAFF.")
 		quit(1); return
 
