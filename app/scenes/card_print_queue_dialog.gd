@@ -6,10 +6,16 @@ extends CanvasLayer
 const SQLiteDatabaseScript = preload("res://src/infrastructure/database/sqlite_database.gd")
 const QrGenerator = preload("res://src/domain/sync/qr_code_generator.gd")
 const MembershipCardEngine = preload("res://src/domain/sync/membership_card_engine.gd")
+const WorkQueueHeaderBarScene = preload("res://app/scenes/components/work_queue_header_bar.tscn")
+const QueueControllerScript = preload("res://src/domain/work_queue/queue_controller.gd")
 
 var db: RefCounted
 var parent_node: Node
 var current_filter: String = "pending" # "pending", "printed", "needs_reprint", "all"
+
+var is_queue_mode: bool = false
+var queue_controller: RefCounted = null
+var header_bar_instance: Node = null
 
 var root_panel: PanelContainer
 var item_container: VBoxContainer
@@ -19,12 +25,60 @@ var filter_reprint_btn: Button
 var filter_all_btn: Button
 var status_summary_lbl: Label
 
-func _init(p_parent: Node = null) -> void:
+func _init(p_parent: Node = null, p_db: RefCounted = null) -> void:
 	parent_node = p_parent
-	if parent_node and "db" in parent_node and parent_node.db:
+	if p_db != null:
+		db = p_db
+	elif parent_node and "db" in parent_node and parent_node.db:
 		db = parent_node.db
 	else:
 		db = SQLiteDatabaseScript.new()
+
+func receive_navigation_context(params: Dictionary) -> void:
+	if params.get("queue_mode", false) == true:
+		configure_queue_mode(params)
+
+func configure_queue_mode(params: Dictionary = {}) -> void:
+	is_queue_mode = true
+	if params.has("queue_controller") and params["queue_controller"] != null:
+		queue_controller = params["queue_controller"]
+	else:
+		queue_controller = QueueControllerScript.new(db)
+
+	if queue_controller:
+		if db:
+			queue_controller.db = db
+		if queue_controller.active_items.size() == 0:
+			queue_controller.start_queue("pending_member_cards")
+
+	if root_panel and not header_bar_instance:
+		_attach_header_bar()
+
+func _attach_header_bar() -> void:
+	if not root_panel or header_bar_instance: return
+	var main_vbox = root_panel.get_child(0) if root_panel.get_child_count() > 0 else null
+	if main_vbox:
+		header_bar_instance = WorkQueueHeaderBarScene.instantiate()
+		main_vbox.add_child(header_bar_instance)
+		main_vbox.move_child(header_bar_instance, 0)
+		
+		var cur_idx = queue_controller.current_index if queue_controller else 0
+		var rem_count = queue_controller.get_remaining_count() if queue_controller else 0
+		header_bar_instance.configure_header("Pending Member Cards", cur_idx, rem_count)
+		header_bar_instance.pause_requested.connect(_on_queue_pause)
+		header_bar_instance.exit_requested.connect(_on_queue_exit)
+
+func _on_queue_pause() -> void:
+	if header_bar_instance and queue_controller:
+		header_bar_instance.update_progress(queue_controller.current_index, queue_controller.get_remaining_count())
+
+func _on_queue_exit() -> void:
+	if queue_controller:
+		queue_controller.end_session()
+	if header_bar_instance:
+		header_bar_instance.queue_free()
+		header_bar_instance = null
+	is_queue_mode = false
 
 func show_dialog() -> void:
 	layer = 100
@@ -148,6 +202,9 @@ func show_dialog() -> void:
 
 	if parent_node:
 		parent_node.add_child(self)
+
+	if is_queue_mode:
+		_attach_header_bar()
 
 	refresh_queue_list()
 
@@ -359,8 +416,12 @@ func _open_card_preview(person_data: Dictionary, token: String) -> void:
 	btn_print.text = "🖨️ Print Card"
 	btn_print.custom_minimum_size = Vector2(140, 40)
 	btn_print.pressed.connect(func():
-		# Mark as printed in card queue
-		db.execute("UPDATE card_print_queue SET status = 'printed', printed_at = datetime('now') WHERE person_id = ?;", [person_data.get("id")])
+		if is_queue_mode and queue_controller:
+			queue_controller.complete_current_item([person_data.get("id")])
+			if header_bar_instance and header_bar_instance.has_method("update_progress"):
+				header_bar_instance.update_progress(queue_controller.current_index, queue_controller.get_remaining_count())
+		else:
+			db.execute("UPDATE card_print_queue SET status = 'printed', printed_at = datetime('now') WHERE person_id = ?;", [person_data.get("id")])
 		title.text = "✅ Print Job Sent Successfully (Status: Printed)"
 		refresh_queue_list()
 	)

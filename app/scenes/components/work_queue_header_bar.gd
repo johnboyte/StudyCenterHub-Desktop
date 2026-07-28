@@ -22,25 +22,28 @@ func _ready() -> void:
 		_apply_exit_button_styles()
 
 func configure_header(title: String, current_index: int, total_count: int) -> void:
-	if title_label:
-		title_label.text = "⚡ WORK QUEUE: " + title
+	var title_lbl = title_label if title_label else get_node_or_null("MarginContainer/MainHBox/TitleLabel") as Label
+	if title_lbl:
+		title_lbl.text = "⚡ WORK QUEUE: " + title
 	update_progress(current_index, total_count)
 
 func update_progress(current_index: int, total_count: int) -> void:
 	var idx = current_index + 1
 	if idx < 0: idx = 0
 	
-	if count_label:
+	var lbl = count_label if count_label else get_node_or_null("MarginContainer/MainHBox/ProgressHBox/CountLabel") as Label
+	if lbl:
 		if total_count > 0:
-			count_label.text = "Item " + str(idx) + " of " + str(total_count)
+			lbl.text = "Item " + str(idx) + " of " + str(total_count)
 		else:
-			count_label.text = "Queue Empty"
+			lbl.text = "Queue Empty"
 	
-	if progress_bar:
+	var pbar = progress_bar if progress_bar else get_node_or_null("MarginContainer/MainHBox/ProgressHBox/ProgressBar") as ProgressBar
+	if pbar:
 		if total_count > 0:
-			progress_bar.value = (float(idx) / float(total_count)) * 100.0
+			pbar.value = (float(idx) / float(total_count)) * 100.0
 		else:
-			progress_bar.value = 100.0
+			pbar.value = 100.0
 
 func _apply_pause_button_styles() -> void:
 	if not btn_pause: return
