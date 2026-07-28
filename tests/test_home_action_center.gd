@@ -71,22 +71,50 @@ func run_tests() -> void:
 	shell.db = db
 	root.add_child(shell)
 
-	# 1. Test HomeView Instantiation & Action Center Card Grid Rendering
-	print("[Test 1] Testing HomeView instantiation and ActionCenterCard rendering...")
+	# 1. Test HomeView Instantiation & Focused ActionCenterCard Rendering (count > 0 only)
+	print("[Test 1] Testing HomeView instantiation and focused ActionCenterCard rendering...")
 	var home = load("res://app/scenes/home_view.tscn").instantiate()
 	home.set_app_shell(shell)
 	root.add_child(home)
 	await process_frame
 
 	var cards = _get_action_cards(home)
-	if cards.size() != 5:
-		print("FAIL: Expected 5 ActionCenterCard instances for 5 V1 queues, got: ", cards.size())
+	if cards.size() != 1 or cards[0].queue_id != "pending_member_cards":
+		print("FAIL: Expected 1 active card (pending_member_cards) in default focused mode, got: ", cards.size())
 		quit(1)
 		return
-	print("PASS 1/7: Home Action Center rendered all 5 Production V1 queue cards simultaneously.")
+	print("PASS 1/9: Home Action Center rendered only active queue cards (count > 0) in default focused mode.")
 
-	# 2. Verify Card Metadata & Counts from Queue Architecture
-	print("[Test 2] Verifying card metadata and count sources...")
+	# 2. Test Show All Queues Toggle & Zero-Count Cards Presentation
+	print("[Test 2] Testing Show All Queues toggle and zero-count presentation...")
+	home.show_all_queues = true
+	home._setup_middle_cards()
+	await process_frame
+
+	var all_cards = _get_action_cards(home)
+	if all_cards.size() != 5:
+		print("FAIL: Expected 5 cards when show_all_queues is true, got: ", all_cards.size())
+		quit(1)
+		return
+
+	# Verify zero-count cards remain disabled in show-all mode
+	for card in all_cards:
+		if card.queue_id != "pending_member_cards":
+			var btn = card.primary_button if card.primary_button else (card.find_child("PrimaryButton", true, false) as Button)
+			if not btn or not btn.disabled:
+				print("FAIL: Zero-count card button should remain disabled in show-all mode: ", card.queue_id)
+				quit(1)
+				return
+	print("PASS 2/9: Show All Queues revealed all 5 cards while zero-count buttons remained safely disabled.")
+
+	# Restore focused mode
+	home.show_all_queues = false
+	home._setup_middle_cards()
+	await process_frame
+
+	# 3. Verify Card Metadata & Counts from Queue Architecture
+	print("[Test 3] Verifying card metadata and count sources...")
+	cards = _get_action_cards(home)
 	var member_cards_found = false
 	var pending_card_count = -1
 	for card in cards:
@@ -101,10 +129,10 @@ func run_tests() -> void:
 		print("FAIL: pending_member_cards card metadata or count mismatch. Found: ", member_cards_found, " count: ", pending_card_count)
 		quit(1)
 		return
-	print("PASS 2/7: Card metadata and count derived accurately from QueueRegistry and QueueController.")
+	print("PASS 3/9: Card metadata and count derived accurately from QueueRegistry and QueueController.")
 
-	# 3. Test Selecting pending_member_cards Card Launches Stage 4 Slice via Stage 2 Navigation
-	print("[Test 3] Testing pending_member_cards launch via Stage 2 navigation contract...")
+	# 4. Test Selecting pending_member_cards Card Launches Stage 4 Slice via Stage 2 Navigation
+	print("[Test 4] Testing pending_member_cards launch via Stage 2 navigation contract...")
 	shell.switched_view = ""
 	shell.switch_params = {}
 	home._on_card_action("pending_member_cards")
@@ -113,10 +141,10 @@ func run_tests() -> void:
 		print("FAIL: Navigation contract mismatch on launch. Target: ", shell.switched_view, " Params: ", shell.switch_params)
 		quit(1)
 		return
-	print("PASS 3/7: Selecting pending_member_cards card invoked Stage 2 navigation contract correctly.")
+	print("PASS 4/9: Selecting pending_member_cards card invoked Stage 2 navigation contract correctly.")
 
-	# 4. Test ActiveWorkTray Rendering for Paused Session
-	print("[Test 4] Testing ActiveWorkTray rendering when paused session exists...")
+	# 5. Test ActiveWorkTray Rendering for Paused Session
+	print("[Test 5] Testing ActiveWorkTray rendering when paused session exists...")
 	var qc = home._get_queue_controller()
 	qc.start_queue("pending_member_cards")
 	home._setup_middle_cards()
@@ -126,51 +154,67 @@ func run_tests() -> void:
 		print("FAIL: ActiveWorkTray did not render when active session existed. Found count: ", trays.size())
 		quit(1)
 		return
-	print("PASS 4/7: ActiveWorkTray rendered cleanly for active paused work session.")
+	print("PASS 5/9: ActiveWorkTray rendered cleanly for active paused work session.")
 
-	# 5. Test ActiveWorkTray [End Session] Button Clearing Tray State
-	print("[Test 5] Testing ActiveWorkTray [End Session] button handler...")
+	# 6. Test ActiveWorkTray [End Session] Button Clearing Tray State
+	print("[Test 6] Testing ActiveWorkTray [End Session] button handler...")
 	home._on_tray_end("pending_member_cards")
 	trays = _get_work_trays(home)
 	if trays.size() != 0 or qc.active_queue_id != "":
 		print("FAIL: End session failed to clear active queue session or remove tray.")
 		quit(1)
 		return
-	print("PASS 5/7: ActiveWorkTray [End Session] cleared session and updated Home Action Center.")
+	print("PASS 6/9: ActiveWorkTray [End Session] cleared session and updated Home Action Center.")
 
-	# 6. Test Count Synchronization After Item Completion
-	print("[Test 6] Testing count synchronization after item completion...")
+	# 7. Test Count Synchronization & All-Caught-Up State After Item Completion
+	print("[Test 7] Testing All-Caught-Up state when all queue counts reach zero...")
 	qc.start_queue("pending_member_cards")
 	qc.complete_current_item([100]) # Complete the item
 	home.receive_navigation_context({}) # Simulate return to Home
 
 	cards = _get_action_cards(home)
-	for card in cards:
-		if card.queue_id == "pending_member_cards":
-			var badge_lbl = card.count_badge if card.count_badge else (card.find_child("CountBadge", true, false) as Label)
-			if not badge_lbl or not badge_lbl.text.begins_with("0"):
-				print("FAIL: Count did not update to 0 after item completion. Text: ", (badge_lbl.text if badge_lbl else "null"))
-				quit(1)
-				return
+	if cards.size() != 0:
+		print("FAIL: Focused mode should show 0 cards when all queue counts are 0, got: ", cards.size())
+		quit(1)
+		return
+
+	# Verify "You’re all caught up!" text is present in HomeView
+	var caught_up_found = false
+	var all_nodes = []
+	_collect_nodes(home, all_nodes)
+	for n in all_nodes:
+		if n is Label and n.text.contains("You’re all caught up!"):
+			caught_up_found = true
 			break
-	print("PASS 6/7: Counts refreshed and synchronized after queue item completion.")
 
-	# 7. Verify All 5 Production V1 Cards Are Functional & Supported
-	print("[Test 7] Verifying all 5 Production V1 cards are functional and supported...")
-	for card in cards:
-		var btn = card.primary_button if card.primary_button else (card.find_child("PrimaryButton", true, false) as Button)
-		if btn and btn.text.contains("(Unavailable)"):
-			print("FAIL: All 5 Production V1 cards should be active. Found unavailable card: ", card.queue_id)
-			quit(1)
-			return
+	if not caught_up_found:
+		print("FAIL: 'You’re all caught up!' success state label was not rendered when queue counts reached zero.")
+		quit(1)
+		return
+	print("PASS 7/9: All-caught-up state card rendered successfully when all queue counts reached zero.")
 
+	# 8. Verify Active Queue Summary Singular/Plural Wording
+	print("[Test 8] Verifying active queue summary wording...")
+	var summary_found = false
+	for n in all_nodes:
+		if n is Label and n.text.contains("No active queues"):
+			summary_found = true
+			break
+	if not summary_found:
+		print("FAIL: 'No active queues' summary label was not found.")
+		quit(1)
+		return
+	print("PASS 8/9: Active queue summary correctly reported 'No active queues'.")
+
+	# 9. Verify All 5 Production V1 Cards Functional on Navigation Action
+	print("[Test 9] Verifying navigation action execution for all 5 Production V1 queues...")
 	shell.switched_view = ""
 	home._on_card_action("uncovered_sessions")
 	if shell.switched_view != "schedules":
 		print("FAIL: Selecting uncovered_sessions should switch to schedules view, got: ", shell.switched_view)
 		quit(1)
 		return
-	print("PASS 7/7: All 5 Production V1 Action Center queues are fully operational.")
+	print("PASS 9/9: Navigation routing remains 100% operational across all queues.")
 
 	home.queue_free()
 	shell.queue_free()

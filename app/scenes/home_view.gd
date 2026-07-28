@@ -10,6 +10,7 @@ const ActiveWorkTrayScene = preload("res://app/scenes/components/active_work_tra
 
 var app_shell: Node = null
 var queue_controller: RefCounted = null
+var show_all_queues: bool = false
 
 @onready var action_grid: HBoxContainer = %ActionGrid
 @onready var tile_check_in: Button = %TileCheckIn
@@ -213,18 +214,57 @@ func _populate_needs_attention_card(card: PanelContainer) -> void:
 	var vbox = VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 14)
 
-	var title_lbl = Label.new()
-	title_lbl.text = "Needs Attention"
-	title_lbl.add_theme_font_size_override("font_size", 20)
-	title_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
-	vbox.add_child(title_lbl)
-
 	# Attach container to active SceneTree prior to creating children
 	card.add_child(vbox)
 
 	var qc = _get_queue_controller()
 	if not qc:
 		return
+
+	# Calculate active queue count
+	var registry = QueueRegistryScript.get_registry()
+	var active_queue_count: int = 0
+	for qid in registry.keys():
+		if qc.get_queue_count(qid) > 0:
+			active_queue_count += 1
+
+	# Header HBox: Title + Active Queue Summary + Show All Toggle Button
+	var header_hbox = HBoxContainer.new()
+	header_hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vbox.add_child(header_hbox)
+
+	var title_hbox = HBoxContainer.new()
+	title_hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title_hbox.add_theme_constant_override("separation", 8)
+	header_hbox.add_child(title_hbox)
+
+	var title_lbl = Label.new()
+	title_lbl.text = "Needs Attention"
+	title_lbl.add_theme_font_size_override("font_size", 20)
+	title_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
+	title_hbox.add_child(title_lbl)
+
+	# Active Queue Summary
+	var summary_lbl = Label.new()
+	if active_queue_count == 1:
+		summary_lbl.text = "• 1 active queue"
+	elif active_queue_count > 1:
+		summary_lbl.text = "• " + str(active_queue_count) + " active queues"
+	else:
+		summary_lbl.text = "• No active queues"
+	summary_lbl.add_theme_font_size_override("font_size", 13)
+	summary_lbl.add_theme_color_override("font_color", Color(0.40, 0.46, 0.54, 1.0))
+	title_hbox.add_child(summary_lbl)
+
+	# Toggle Button
+	var toggle_btn = Button.new()
+	toggle_btn.text = "Hide Empty Queues" if show_all_queues else "Show All Queues"
+	_style_link_button(toggle_btn, 13)
+	toggle_btn.pressed.connect(func():
+		show_all_queues = not show_all_queues
+		_populate_needs_attention_card(card)
+	)
+	header_hbox.add_child(toggle_btn)
 
 	# 1. Render ActiveWorkTray if a paused session exists
 	if not qc.active_queue_id.is_empty() and qc.get_remaining_count() > 0:
@@ -241,28 +281,67 @@ func _populate_needs_attention_card(card: PanelContainer) -> void:
 		tray.resume_requested.connect(_on_tray_resume)
 		tray.end_requested.connect(_on_tray_end)
 
-	# 2. Render ActionCenterCard list/grid for all 5 Production V1 Queues
-	var cards_vbox = VBoxContainer.new()
-	cards_vbox.add_theme_constant_override("separation", 10)
-	vbox.add_child(cards_vbox)
+	# 2. Render ActionCenterCard list OR All-Caught-Up state
+	if active_queue_count == 0 and not show_all_queues:
+		# Calm All-Caught-Up Success State Card
+		var empty_panel = PanelContainer.new()
+		var empty_style = StyleBoxFlat.new()
+		empty_style.bg_color = Color(0.975, 0.99, 0.98, 1.0)
+		empty_style.border_width_left = 1; empty_style.border_width_top = 1; empty_style.border_width_right = 1; empty_style.border_width_bottom = 1
+		empty_style.border_color = Color(0.78, 0.88, 0.82, 1.0)
+		empty_style.corner_radius_top_left = 10; empty_style.corner_radius_top_right = 10; empty_style.corner_radius_bottom_left = 10; empty_style.corner_radius_bottom_right = 10
+		empty_style.content_margin_left = 20; empty_style.content_margin_top = 22; empty_style.content_margin_right = 20; empty_style.content_margin_bottom = 22
+		empty_panel.add_theme_stylebox_override("panel", empty_style)
+		vbox.add_child(empty_panel)
 
-	var registry = QueueRegistryScript.get_registry()
-	for qid in registry.keys():
-		var def = registry[qid]
-		var count = qc.get_queue_count(qid)
+		var empty_vbox = VBoxContainer.new()
+		empty_vbox.add_theme_constant_override("separation", 6)
+		empty_panel.add_child(empty_vbox)
 
-		var card_item = ActionCenterCardScene.instantiate()
-		cards_vbox.add_child(card_item)
-		card_item.configure_card({
-			"queue_id": qid,
-			"title": def.get("title", "Work Queue"),
-			"count": count,
-			"supporting_detail": def.get("description", ""),
-			"urgency": def.get("urgency", "normal"),
-			"primary_button": def.get("primary_button", "Begin Actions"),
-			"queue_mode_supported": def.get("queue_mode_supported", true)
-		})
-		card_item.action_requested.connect(_on_card_action)
+		var headline_hbox = HBoxContainer.new()
+		headline_hbox.add_theme_constant_override("separation", 8)
+		empty_vbox.add_child(headline_hbox)
+
+		var check_lbl = Label.new()
+		check_lbl.text = "✓"
+		check_lbl.add_theme_font_size_override("font_size", 18)
+		check_lbl.add_theme_color_override("font_color", Color(0.12, 0.52, 0.28, 1.0))
+		headline_hbox.add_child(check_lbl)
+
+		var caught_up_lbl = Label.new()
+		caught_up_lbl.text = "You’re all caught up!"
+		caught_up_lbl.add_theme_font_size_override("font_size", 16)
+		caught_up_lbl.add_theme_color_override("font_color", Color(0.12, 0.52, 0.28, 1.0))
+		headline_hbox.add_child(caught_up_lbl)
+
+		var sub_lbl = Label.new()
+		sub_lbl.text = "There are currently no outstanding Action Center items."
+		sub_lbl.add_theme_font_size_override("font_size", 14)
+		sub_lbl.add_theme_color_override("font_color", Color(0.38, 0.44, 0.52, 1.0))
+		empty_vbox.add_child(sub_lbl)
+	else:
+		var cards_vbox = VBoxContainer.new()
+		cards_vbox.add_theme_constant_override("separation", 10)
+		vbox.add_child(cards_vbox)
+
+		for qid in registry.keys():
+			var def = registry[qid]
+			var count = qc.get_queue_count(qid)
+
+			# In default mode (show_all_queues == false), show ONLY cards with count > 0
+			if count > 0 or show_all_queues:
+				var card_item = ActionCenterCardScene.instantiate()
+				cards_vbox.add_child(card_item)
+				card_item.configure_card({
+					"queue_id": qid,
+					"title": def.get("title", "Work Queue"),
+					"count": count,
+					"supporting_detail": def.get("description", ""),
+					"urgency": def.get("urgency", "normal"),
+					"primary_button": def.get("primary_button", "Begin Actions"),
+					"queue_mode_supported": def.get("queue_mode_supported", true)
+				})
+				card_item.action_requested.connect(_on_card_action)
 
 	# 3. View All Work Items link
 	var link_btn = Button.new()
