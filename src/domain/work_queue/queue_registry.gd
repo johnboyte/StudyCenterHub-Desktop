@@ -53,10 +53,10 @@ static func get_registry() -> Dictionary:
 			"required_permission": "schedules.manage",
 			"urgency": "resource", # Purple accent
 			"count_sql": "SELECT COUNT(*) AS cnt FROM sessions s LEFT JOIN schedule_entries se ON (se.shift_date = s.date_text AND se.area = s.room_location) WHERE s.date_text BETWEEN date('now') AND date('now', '+14 days') AND s.is_active = 1 AND se.id IS NULL;",
-			"record_sql": "SELECT s.id, s.title, s.date_text, s.start_time, s.room_location FROM sessions s LEFT JOIN schedule_entries se ON (se.shift_date = s.date_text AND se.area = s.room_location) WHERE s.date_text BETWEEN date('now') AND date('now', '+14 days') AND s.is_active = 1 AND se.id IS NULL ORDER BY s.date_text ASC, s.start_time ASC;",
+			"record_sql": "SELECT s.id, s.title, s.date_text, s.start_time, s.end_time, s.room_location FROM sessions s LEFT JOIN schedule_entries se ON (se.shift_date = s.date_text AND se.area = s.room_location) WHERE s.date_text BETWEEN date('now') AND date('now', '+14 days') AND s.is_active = 1 AND se.id IS NULL ORDER BY s.date_text ASC, s.start_time ASC;",
 			"completion_sql": "UPDATE schedule_entries SET notes = 'covered' WHERE id = ?;",
 			"primary_button": "Review Staffing",
-			"queue_mode_supported": false
+			"queue_mode_supported": true
 		},
 		"pending_member_cards": {
 			"queue_id": "pending_member_cards",

@@ -10,6 +10,7 @@ const SessionConfigServiceScript = preload("res://src/domain/schedules/session_c
 const WorkQueueHeaderBarScene = preload("res://app/scenes/components/work_queue_header_bar.tscn")
 const QueueControllerScript = preload("res://src/domain/work_queue/queue_controller.gd")
 const QueueRegistryScript = preload("res://src/domain/work_queue/queue_registry.gd")
+const SessionStaffAssignmentDialogScript = preload("res://app/scenes/components/session_staff_assignment_dialog.gd")
 
 var db: RefCounted:
 	set(value):
@@ -96,7 +97,14 @@ func _ready() -> void:
 	switch_top_tab("shifts")
 
 func receive_navigation_context(params: Dictionary) -> void:
-	_clear_queue_mode()
+	if params.get("queue_mode", false) == true:
+		var qid = params.get("queue_id", "")
+		if qid == "uncovered_sessions":
+			configure_queue_mode(params)
+		else:
+			_clear_queue_mode()
+	else:
+		_clear_queue_mode()
 
 func configure_queue_mode(params: Dictionary = {}) -> void:
 	is_queue_mode = true
@@ -227,21 +235,44 @@ func _refresh_queue_view() -> void:
 	vbox.add_child(btn_hbox)
 
 	var comp_btn = Button.new()
-	comp_btn.text = "✅ Assign Duty Worker Coverage"
+	comp_btn.text = "✅ Assign Staff Coverage"
 	comp_btn.custom_minimum_size = Vector2(220, 38)
 	var btn_st = StyleBoxFlat.new()
 	btn_st.bg_color = Color(0.55, 0.35, 0.95, 1.0)
 	btn_st.corner_radius_top_left = 6; btn_st.corner_radius_top_right = 6; btn_st.corner_radius_bottom_left = 6; btn_st.corner_radius_bottom_right = 6
 	comp_btn.add_theme_stylebox_override("normal", btn_st)
 	comp_btn.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
-	comp_btn.pressed.connect(func(): _on_complete_queue_item(date_txt, location_txt))
+	comp_btn.pressed.connect(func(): _open_staff_assignment_dialog(current_item))
 	btn_hbox.add_child(comp_btn)
 
-func _on_complete_queue_item(date_txt: String, location_txt: String) -> void:
-	if not queue_controller: return
-	var success = queue_controller.complete_current_item([date_txt, location_txt])
-	if success:
+func _open_staff_assignment_dialog(current_item: Dictionary) -> void:
+	var dlg = SessionStaffAssignmentDialogScript.new(db)
+	dlg.configure_session(current_item)
+	add_child(dlg)
+	dlg.popup_centered()
+	dlg.staff_assigned.connect(func(payload: Dictionary):
+		if sch_service:
+			sch_service.create_shift_entry_atomic(
+				payload["person_name"],
+				payload["shift_role"],
+				payload["shift_date"],
+				payload["start_time"],
+				payload["end_time"],
+				payload["area"],
+				payload["notes"]
+			)
+		else:
+			var sql = "INSERT INTO schedule_entries (entry_uuid, person_name, person_id, shift_role, shift_date, start_time, end_time, area, notes) VALUES (hex(randomblob(16)), ?, ?, ?, ?, ?, ?, ?, ?);"
+			db.execute(sql, [payload["person_name"], payload["person_id"], payload["shift_role"], payload["shift_date"], payload["start_time"], payload["end_time"], payload["area"], payload["notes"]])
+
+		if queue_controller:
+			queue_controller.start_queue(active_queue_id)
 		_refresh_queue_view()
+		dlg.queue_free()
+	)
+	dlg.assignment_cancelled.connect(func():
+		dlg.queue_free()
+	)
 
 func _init_database() -> void:
 	if not db:

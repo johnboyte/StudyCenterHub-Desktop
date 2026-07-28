@@ -188,16 +188,12 @@ func run_tests() -> void:
 	await process_frame
 
 	var reg = QueueRegistryScript.get_registry()
-	if not reg["overdue_callbacks"].get("queue_mode_supported", false) or not reg["unanswered_messages"].get("queue_mode_supported", false):
-		print("FAIL: QueueRegistry queue_mode_supported flag not set to true for communications queues.")
-		quit(1)
-		return
-
-	if not reg["registrations_awaiting_review"].get("queue_mode_supported", false) or reg["uncovered_sessions"].get("queue_mode_supported", true):
-		print("FAIL: QueueRegistry flags mismatch for registrations_awaiting_review or uncovered_sessions.")
-		quit(1)
-		return
-	print("PASS 8/14: QueueRegistry correctly enables active queues while preserving honest unavailable state for uncovered_sessions.")
+	for qid in reg.keys():
+		if not reg[qid].get("queue_mode_supported", false):
+			print("FAIL: All 5 Production V1 queues must have queue_mode_supported = true. Failed for: ", qid)
+			quit(1)
+			return
+	print("PASS 8/14: QueueRegistry correctly enables all 5 Production V1 queues.")
 
 	com_view.queue_free()
 	home.queue_free()
