@@ -306,6 +306,53 @@ func run_tests() -> void:
 	db.execute("DELETE FROM schedule_entries WHERE entry_uuid LIKE 'sh-%-888';")
 	print("PASS 4c: Prompt 2 Session Staffing Requirement & Queue Counts verified 100% successfully.")
 
+	# 4d. Test Uncovered Study Center Hours Queue (Prompt 3 Independent Operational Concern)
+	print("[Test 4d] Testing Prompt 3 Uncovered Study Center Hours Queue...")
+	# 1. Start queue for uncovered_center_hours
+	qc.start_queue("uncovered_center_hours")
+	var initial_hours_count = qc.get_remaining_count()
+	if initial_hours_count <= 0:
+		print("FAIL: Expected unstaffed operating hours in uncovered_center_hours queue, got count: ", initial_hours_count)
+		quit(1); return
+
+	var first_hours_item = qc.get_current_item()
+	var test_day_date = str(first_hours_item.get("date_text", ""))
+	var open_t = str(first_hours_item.get("open_time", "03:00 PM"))
+	var close_t = str(first_hours_item.get("close_time", "08:00 PM"))
+
+	# Verify queue item record fields
+	if not first_hours_item.has("date_text") or not first_hours_item.has("day_name") or not first_hours_item.has("open_time") or not first_hours_item.has("close_time"):
+		print("FAIL: uncovered_center_hours record missing required fields (date_text, day_name, open_time, close_time).")
+		quit(1); return
+
+	# 2. Add a partial staff shift (starts on time, ends early) -> STILL UNCOVERED
+	db.execute("INSERT INTO schedule_entries (entry_uuid, person_name, shift_role, shift_date, start_time, end_time, area) VALUES ('sh-p3-part', 'Partial Staff', 'Host', ?, ?, '04:00 PM', 'Gathering Room');", [test_day_date, open_t])
+	qc.start_queue("uncovered_center_hours")
+	if qc.get_remaining_count() != initial_hours_count:
+		print("FAIL: Partial coverage shift should NOT satisfy operating hours requirement.")
+		quit(1); return
+
+	# 3. Add 3 scheduled sessions on that day without staff -> Sessions DO NOT affect uncovered_center_hours
+	db.execute("INSERT INTO sessions (id, session_uuid, title, date_text, start_time, end_time, room_location, is_active) VALUES (777, 'sess-777', 'Unstaffed Session', ?, ?, ?, 'Gathering Room', 1);", [test_day_date, open_t, close_t])
+	qc.start_queue("uncovered_center_hours")
+	if qc.get_remaining_count() != initial_hours_count:
+		print("FAIL: Scheduled sessions should NOT affect uncovered_center_hours count.")
+		quit(1); return
+
+	# 4. Add full staff shift covering open_time to close_time -> Day becomes COVERED
+	db.execute("DELETE FROM schedule_entries WHERE entry_uuid = 'sh-p3-part';")
+	db.execute("INSERT INTO schedule_entries (entry_uuid, person_name, shift_role, shift_date, start_time, end_time, area) VALUES ('sh-p3-full', 'Full Staff', 'Supervisor', ?, ?, ?, 'Gathering Room');", [test_day_date, open_t, close_t])
+	qc.start_queue("uncovered_center_hours")
+	var new_hours_count = qc.get_remaining_count()
+	if new_hours_count != initial_hours_count - 1:
+		print("FAIL: Full coverage shift did not decrease uncovered_center_hours count by 1.")
+		quit(1); return
+
+	# Clean up Prompt 3 test records
+	db.execute("DELETE FROM sessions WHERE id = 777;")
+	db.execute("DELETE FROM schedule_entries WHERE entry_uuid LIKE 'sh-p3-%';")
+	print("PASS 4d: Prompt 3 Uncovered Study Center Hours Queue verified 100% successfully.")
+
 	# 5. Test Full Production V1 Home Action Center (All 5 Queues Operational)
 	print("[Test 5] Verifying all 5 Production V1 Action Center queues operational...")
 	var home = load("res://app/scenes/home_view.tscn").instantiate()

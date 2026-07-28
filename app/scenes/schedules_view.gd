@@ -99,7 +99,7 @@ func _ready() -> void:
 func receive_navigation_context(params: Dictionary) -> void:
 	if params.get("queue_mode", false) == true:
 		var qid = params.get("queue_id", "")
-		if qid == "uncovered_sessions":
+		if qid == "uncovered_sessions" or qid == "uncovered_center_hours":
 			configure_queue_mode(params)
 		else:
 			_clear_queue_mode()
@@ -246,19 +246,24 @@ func _refresh_queue_view() -> void:
 	if current_item.is_empty():
 		return
 
-	var title_txt = str(current_item.get("title", "Study Center Session"))
+	var is_center_hours_queue = (active_queue_id == "uncovered_center_hours")
+	var title_txt = str(current_item.get("title", current_item.get("day_name", "Study Center Operating Hours")))
 	var date_txt = str(current_item.get("date_text", ""))
-	var time_txt = str(current_item.get("start_time", ""))
-	var location_txt = str(current_item.get("room_location", "Study Center"))
+	var start_t = str(current_item.get("start_time", current_item.get("open_time", "")))
+	var end_t = str(current_item.get("end_time", current_item.get("close_time", "")))
+	var location_txt = str(current_item.get("room_location", "Main Study Center"))
 
 	var hdr_lbl = Label.new()
-	hdr_lbl.text = "UNCOVERED SESSION — " + title_txt
+	if is_center_hours_queue:
+		hdr_lbl.text = "UNCOVERED CENTER HOURS — " + str(current_item.get("day_name", "")) + " (" + date_txt + ")"
+	else:
+		hdr_lbl.text = "UNCOVERED SESSION — " + title_txt
 	hdr_lbl.add_theme_font_size_override("font_size", 16)
 	hdr_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
 	vbox.add_child(hdr_lbl)
 
 	var details_lbl = Label.new()
-	details_lbl.text = "📅 Date: " + date_txt + " | ⏰ Time: " + time_txt + " | 📍 Location: " + location_txt
+	details_lbl.text = "📅 Date: " + date_txt + " | ⏰ Hours: " + start_t + " - " + end_t + " | 📍 Location: " + location_txt
 	details_lbl.add_theme_font_size_override("font_size", 14)
 	details_lbl.add_theme_color_override("font_color", Color(0.20, 0.25, 0.32, 1.0))
 	vbox.add_child(details_lbl)
@@ -268,10 +273,10 @@ func _refresh_queue_view() -> void:
 	vbox.add_child(btn_hbox)
 
 	var comp_btn = Button.new()
-	comp_btn.text = "✅ Assign Staff Coverage"
+	comp_btn.text = "✅ Assign Shift Coverage"
 	comp_btn.custom_minimum_size = Vector2(220, 38)
 	var btn_st = StyleBoxFlat.new()
-	btn_st.bg_color = Color(0.55, 0.35, 0.95, 1.0)
+	btn_st.bg_color = Color(0.85, 0.47, 0.02, 1.0) if is_center_hours_queue else Color(0.55, 0.35, 0.95, 1.0)
 	btn_st.corner_radius_top_left = 6; btn_st.corner_radius_top_right = 6; btn_st.corner_radius_bottom_left = 6; btn_st.corner_radius_bottom_right = 6
 	comp_btn.add_theme_stylebox_override("normal", btn_st)
 	comp_btn.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
@@ -279,8 +284,16 @@ func _refresh_queue_view() -> void:
 	btn_hbox.add_child(comp_btn)
 
 func _open_staff_assignment_dialog(current_item: Dictionary) -> void:
+	var item_to_config = current_item.duplicate(true)
+	if not item_to_config.has("start_time") and item_to_config.has("open_time"):
+		item_to_config["start_time"] = item_to_config["open_time"]
+	if not item_to_config.has("end_time") and item_to_config.has("close_time"):
+		item_to_config["end_time"] = item_to_config["close_time"]
+	if not item_to_config.has("room_location"):
+		item_to_config["room_location"] = "Gathering Room"
+
 	var dlg = SessionStaffAssignmentDialogScript.new(db)
-	dlg.configure_session(current_item)
+	dlg.configure_session(item_to_config)
 	add_child(dlg)
 	dlg.popup_centered()
 	dlg.staff_assigned.connect(func(payload: Dictionary):

@@ -15,6 +15,11 @@ static func get_registry() -> Dictionary:
 	var req_col = "COALESCE(s.staffing_requirement, 'DEDICATED_SESSION_STAFF')"
 	var full_coverage_join = "((" + req_col + " = 'COVERED_BY_STUDY_CENTER_STAFF' AND se.shift_date = s.date_text AND se.area = s.room_location AND " + se_st + " <= " + s_st + " AND " + se_end + " >= " + s_end + ") OR (" + req_col + " != 'COVERED_BY_STUDY_CENTER_STAFF' AND (se.session_id = s.id OR (se.shift_date = s.date_text AND se.area = s.room_location AND " + se_st + " <= " + s_st + " AND " + se_end + " >= " + s_end + " AND (se.notes = 'covered' OR se.notes LIKE '%Assigned via Uncovered%')))))"
 
+	var h_open = _parse_time_sql("h.open_time")
+	var h_close = _parse_time_sql("h.close_time")
+	var date_cte = "WITH RECURSIVE next_14d(date_text, day_name) AS (SELECT date('now', 'localtime'), CASE strftime('%w', date('now', 'localtime')) WHEN '0' THEN 'Sunday' WHEN '1' THEN 'Monday' WHEN '2' THEN 'Tuesday' WHEN '3' THEN 'Wednesday' WHEN '4' THEN 'Thursday' WHEN '5' THEN 'Friday' WHEN '6' THEN 'Saturday' END UNION ALL SELECT date(date_text, '+1 day'), CASE strftime('%w', date(date_text, '+1 day')) WHEN '0' THEN 'Sunday' WHEN '1' THEN 'Monday' WHEN '2' THEN 'Tuesday' WHEN '3' THEN 'Wednesday' WHEN '4' THEN 'Thursday' WHEN '5' THEN 'Friday' WHEN '6' THEN 'Saturday' END FROM next_14d WHERE date_text < date('now', 'localtime', '+13 days'))"
+	var hours_coverage_join = "se.shift_date = d.date_text AND " + se_st + " <= " + h_open + " AND " + se_end + " >= " + h_close
+
 	return {
 		"overdue_callbacks": {
 			"queue_id": "overdue_callbacks",
@@ -64,6 +69,19 @@ static func get_registry() -> Dictionary:
 			"urgency": "resource", # Purple accent
 			"count_sql": "SELECT COUNT(*) AS cnt FROM sessions s LEFT JOIN schedule_entries se ON (" + full_coverage_join + ") WHERE s.date_text BETWEEN date('now') AND date('now', '+14 days') AND s.is_active = 1 AND se.id IS NULL;",
 			"record_sql": "SELECT s.id, s.title, s.date_text, s.start_time, s.end_time, s.room_location FROM sessions s LEFT JOIN schedule_entries se ON (" + full_coverage_join + ") WHERE s.date_text BETWEEN date('now') AND date('now', '+14 days') AND s.is_active = 1 AND se.id IS NULL ORDER BY s.date_text ASC, s.start_time ASC;",
+			"completion_sql": "UPDATE schedule_entries SET notes = 'covered' WHERE id = ?;",
+			"primary_button": "Begin Actions",
+			"queue_mode_supported": true
+		},
+		"uncovered_center_hours": {
+			"queue_id": "uncovered_center_hours",
+			"title": "Uncovered Center Hours (Next 14d)",
+			"description": "Published Study Center operating hours over the next 14 days lacking staff shift coverage",
+			"target_view": "schedules",
+			"required_permission": "schedules.manage",
+			"urgency": "urgent", # Amber accent
+			"count_sql": date_cte + " SELECT COUNT(*) AS cnt FROM next_14d d JOIN center_open_hours h ON (h.day_of_week = d.day_name AND h.is_closed = 0) LEFT JOIN schedule_entries se ON (" + hours_coverage_join + ") WHERE se.id IS NULL;",
+			"record_sql": date_cte + " SELECT d.date_text, d.day_name, h.open_time, h.close_time, h.id as id FROM next_14d d JOIN center_open_hours h ON (h.day_of_week = d.day_name AND h.is_closed = 0) LEFT JOIN schedule_entries se ON (" + hours_coverage_join + ") WHERE se.id IS NULL ORDER BY d.date_text ASC;",
 			"completion_sql": "UPDATE schedule_entries SET notes = 'covered' WHERE id = ?;",
 			"primary_button": "Begin Actions",
 			"queue_mode_supported": true
