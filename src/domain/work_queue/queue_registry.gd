@@ -14,10 +14,10 @@ static func get_registry() -> Dictionary:
 			"required_permission": "communications.manage",
 			"urgency": "critical", # Red accent
 			"count_sql": "SELECT COUNT(*) AS cnt FROM voicemails WHERE status = 'new' AND due_date IS NOT NULL AND due_date != '' AND due_date < date('now', 'localtime');",
-			"record_sql": "SELECT id, voicemail_id, from_number, caller_name, message_text, due_date, status, created_at FROM voicemails WHERE status = 'new' AND due_date IS NOT NULL AND due_date != '' AND due_date < date('now', 'localtime') ORDER BY due_date ASC;",
-			"completion_sql": "UPDATE voicemails SET status = 'completed', updated_at = datetime('now') WHERE id = ?;",
+			"record_sql": "SELECT id, voicemail_uuid, caller_phone, caller_name, transcription, due_date, status, created_at FROM voicemails WHERE status = 'new' AND due_date IS NOT NULL AND due_date != '' AND due_date < date('now', 'localtime') ORDER BY due_date ASC;",
+			"completion_sql": "UPDATE voicemails SET status = 'completed' WHERE id = ?;",
 			"primary_button": "Start Queue",
-			"queue_mode_supported": false
+			"queue_mode_supported": true
 		},
 		"unanswered_messages": {
 			"queue_id": "unanswered_messages",
@@ -27,10 +27,10 @@ static func get_registry() -> Dictionary:
 			"required_permission": "communications.view",
 			"urgency": "urgent", # Amber accent
 			"count_sql": "SELECT COUNT(*) AS cnt FROM voicemails WHERE status = 'new' AND created_at <= datetime('now', '-2 hours');",
-			"record_sql": "SELECT id, voicemail_id, from_number, caller_name, message_text, status, created_at FROM voicemails WHERE status = 'new' AND created_at <= datetime('now', '-2 hours') ORDER BY created_at ASC;",
-			"completion_sql": "UPDATE voicemails SET status = 'completed', updated_at = datetime('now') WHERE id = ?;",
+			"record_sql": "SELECT id, voicemail_uuid, caller_phone, caller_name, transcription, status, created_at FROM voicemails WHERE status = 'new' AND created_at <= datetime('now', '-2 hours') ORDER BY created_at ASC;",
+			"completion_sql": "UPDATE voicemails SET status = 'completed' WHERE id = ?;",
 			"primary_button": "Reply to Messages",
-			"queue_mode_supported": false
+			"queue_mode_supported": true
 		},
 		"registrations_awaiting_review": {
 			"queue_id": "registrations_awaiting_review",

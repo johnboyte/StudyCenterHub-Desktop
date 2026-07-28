@@ -158,15 +158,15 @@ func run_tests() -> void:
 	# 7. Verify Unsupported Queues Are Disabled & Do Not Launch Ordinary Destination Pages
 	print("[Test 7] Verifying unsupported queue cards do not launch ordinary pages...")
 	shell.switched_view = ""
-	home._on_card_action("overdue_callbacks")
+	home._on_card_action("registrations_awaiting_review")
 	if shell.switched_view != "":
-		print("FAIL: Unsupported queue overdue_callbacks should not switch views, got: ", shell.switched_view)
+		print("FAIL: Unsupported queue registrations_awaiting_review should not switch views, got: ", shell.switched_view)
 		quit(1)
 		return
 
 	for card in cards:
-		if card.queue_id == "overdue_callbacks":
-			var btn = card.primary_button if card.primary_button else (card.find_child("PrimaryButton", true, false) as Label)
+		if card.queue_id == "registrations_awaiting_review":
+			var btn = card.primary_button if card.primary_button else (card.find_child("PrimaryButton", true, false) as Button)
 			if not btn or not btn.disabled or not btn.text.contains("(Unavailable)"):
 				print("FAIL: Unsupported card button state mismatch. Disabled: ", (btn.disabled if btn else "null"), " Text: ", (btn.text if btn else "null"))
 				quit(1)

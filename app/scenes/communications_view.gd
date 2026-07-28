@@ -6,6 +6,9 @@ extends "res://app/scenes/standard_page_container.gd"
 const SQLiteDatabaseScript = preload("res://src/infrastructure/database/sqlite_database.gd")
 const MigrationsRunnerScript = preload("res://src/infrastructure/database/migrations_runner.gd")
 const CommunicationsServiceScript = preload("res://src/domain/communications/communications_service.gd")
+const WorkQueueHeaderBarScene = preload("res://app/scenes/components/work_queue_header_bar.tscn")
+const QueueControllerScript = preload("res://src/domain/work_queue/queue_controller.gd")
+const QueueRegistryScript = preload("res://src/domain/work_queue/queue_registry.gd")
 
 var db: RefCounted:
 	set(value):
@@ -23,6 +26,13 @@ var _selected_phone_filter: String = ""
 var _active_person_id: int = -1  # linked_person_id of current supervisor
 var _active_supervisor_name: String = ""
 
+# Queue Mode Members
+var is_queue_mode: bool = false
+var active_queue_id: String = ""
+var queue_controller: RefCounted = null
+var header_bar_instance: Control = null
+var queue_card_container: PanelContainer = null
+
 @onready var channel_dropdown: OptionButton = %ChannelDropdown
 @onready var recipient_dropdown: OptionButton = %RecipientDropdown
 @onready var template_dropdown: OptionButton = %TemplateDropdown
@@ -39,6 +49,171 @@ func _ready() -> void:
 	_populate_dropdowns()
 	_connect_signals()
 	_refresh_all_feeds()
+
+func receive_navigation_context(params: Dictionary) -> void:
+	if params.get("queue_mode", false) == true:
+		var qid = params.get("queue_id", "")
+		if qid == "overdue_callbacks" or qid == "unanswered_messages":
+			configure_queue_mode(params)
+		else:
+			_clear_queue_mode()
+	else:
+		_clear_queue_mode()
+
+func configure_queue_mode(params: Dictionary = {}) -> void:
+	is_queue_mode = true
+	active_queue_id = params.get("queue_id", "overdue_callbacks")
+
+	if params.has("queue_controller") and params["queue_controller"] != null:
+		queue_controller = params["queue_controller"]
+	else:
+		queue_controller = QueueControllerScript.new(db)
+
+	if queue_controller:
+		if db: queue_controller.db = db
+		if queue_controller.active_queue_id != active_queue_id or queue_controller.active_items.size() == 0:
+			queue_controller.start_queue(active_queue_id)
+
+	_attach_header_bar()
+	_refresh_queue_view()
+
+func _attach_header_bar() -> void:
+	if header_bar_instance: return
+
+	var parent_container = get_child(0) if get_child_count() > 0 else self
+	if parent_container:
+		header_bar_instance = WorkQueueHeaderBarScene.instantiate()
+		parent_container.add_child(header_bar_instance)
+		if parent_container.has_method("move_child"):
+			parent_container.move_child(header_bar_instance, 0)
+
+		var cur_idx = queue_controller.current_index if queue_controller else 0
+		var rem_count = queue_controller.get_remaining_count() if queue_controller else 0
+		var def = QueueRegistryScript.get_definition(active_queue_id)
+		var q_title = def.get("title", "Work Queue")
+		header_bar_instance.configure_header(q_title, cur_idx, rem_count)
+		header_bar_instance.pause_requested.connect(_on_queue_pause)
+		header_bar_instance.exit_requested.connect(_on_queue_exit)
+
+func _clear_queue_mode() -> void:
+	is_queue_mode = false
+	active_queue_id = ""
+	if header_bar_instance:
+		header_bar_instance.queue_free()
+		header_bar_instance = null
+	if queue_card_container:
+		queue_card_container.queue_free()
+		queue_card_container = null
+
+func _on_queue_pause() -> void:
+	if header_bar_instance and queue_controller:
+		header_bar_instance.update_progress(queue_controller.current_index, queue_controller.get_remaining_count())
+
+func _on_queue_exit() -> void:
+	if queue_controller:
+		queue_controller.end_session()
+	_clear_queue_mode()
+
+func _refresh_queue_view() -> void:
+	if not is_queue_mode: return
+
+	var def = QueueRegistryScript.get_definition(active_queue_id)
+	var q_title = def.get("title", "Work Queue")
+	var cur_idx = queue_controller.current_index if queue_controller else 0
+	var rem_count = queue_controller.get_remaining_count() if queue_controller else 0
+
+	if header_bar_instance:
+		header_bar_instance.update_progress(cur_idx, rem_count)
+
+	if not queue_card_container:
+		queue_card_container = PanelContainer.new()
+		var parent_container = get_child(0) if get_child_count() > 0 else self
+		if parent_container:
+			parent_container.add_child(queue_card_container)
+			if parent_container.has_method("move_child") and header_bar_instance:
+				parent_container.move_child(queue_card_container, 1)
+
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(0.98, 0.99, 1.0, 1.0)
+	style.border_width_left = 2; style.border_width_top = 2; style.border_width_right = 2; style.border_width_bottom = 2
+	style.border_color = Color(0.12, 0.53, 0.90, 1.0)
+	style.corner_radius_top_left = 12; style.corner_radius_top_right = 12; style.corner_radius_bottom_left = 12; style.corner_radius_bottom_right = 12
+	style.content_margin_left = 20; style.content_margin_top = 18; style.content_margin_right = 20; style.content_margin_bottom = 18
+	queue_card_container.add_theme_stylebox_override("panel", style)
+
+	for child in queue_card_container.get_children():
+		queue_card_container.remove_child(child)
+		child.queue_free()
+
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 14)
+	queue_card_container.add_child(vbox)
+
+	if rem_count == 0 or not queue_controller:
+		var empty_lbl = Label.new()
+		empty_lbl.text = "✨ Queue Complete! All items in " + q_title + " have been resolved."
+		empty_lbl.add_theme_font_size_override("font_size", 16)
+		empty_lbl.add_theme_color_override("font_color", Color(0.18, 0.55, 0.35, 1.0))
+		vbox.add_child(empty_lbl)
+
+		var exit_btn = Button.new()
+		exit_btn.text = "Return to Standard Communications"
+		exit_btn.custom_minimum_size = Vector2(240, 36)
+		exit_btn.pressed.connect(_on_queue_exit)
+		vbox.add_child(exit_btn)
+		return
+
+	var current_item = queue_controller.get_current_item()
+	if current_item.is_empty():
+		return
+
+	var item_id = current_item.get("id", 0)
+	var caller = current_item.get("caller_name", "Unknown Caller")
+	var phone = current_item.get("from_number", current_item.get("caller_phone", ""))
+	var text = current_item.get("message_text", current_item.get("transcription", ""))
+	var due = current_item.get("due_date", "")
+
+	var hdr_lbl = Label.new()
+	hdr_lbl.text = "CURRENT QUEUE ITEM — " + str(caller) + " (" + str(phone) + ")"
+	hdr_lbl.add_theme_font_size_override("font_size", 16)
+	hdr_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
+	vbox.add_child(hdr_lbl)
+
+	if due != "":
+		var due_lbl = Label.new()
+		due_lbl.text = "⏰ Callback Due: " + str(due)
+		due_lbl.add_theme_font_size_override("font_size", 13)
+		due_lbl.add_theme_color_override("font_color", Color(0.85, 0.25, 0.20, 1.0))
+		vbox.add_child(due_lbl)
+
+	var txt_lbl = Label.new()
+	txt_lbl.text = "Message: \"" + str(text) + "\""
+	txt_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD
+	txt_lbl.add_theme_font_size_override("font_size", 14)
+	txt_lbl.add_theme_color_override("font_color", Color(0.20, 0.25, 0.32, 1.0))
+	vbox.add_child(txt_lbl)
+
+	var btn_hbox = HBoxContainer.new()
+	btn_hbox.add_theme_constant_override("separation", 12)
+	vbox.add_child(btn_hbox)
+
+	var comp_btn = Button.new()
+	comp_btn.text = "✅ Mark Completed & Next"
+	comp_btn.custom_minimum_size = Vector2(200, 38)
+	var btn_st = StyleBoxFlat.new()
+	btn_st.bg_color = Color(0.12, 0.53, 0.90, 1.0)
+	btn_st.corner_radius_top_left = 6; btn_st.corner_radius_top_right = 6; btn_st.corner_radius_bottom_left = 6; btn_st.corner_radius_bottom_right = 6
+	comp_btn.add_theme_stylebox_override("normal", btn_st)
+	comp_btn.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
+	comp_btn.pressed.connect(func(): _on_complete_queue_item(item_id))
+	btn_hbox.add_child(comp_btn)
+
+func _on_complete_queue_item(item_id: int) -> void:
+	if not queue_controller: return
+	var success = queue_controller.complete_current_item([item_id])
+	if success:
+		_refresh_queue_view()
+		_refresh_all_feeds()
 
 func _init_database() -> void:
 	if not db:
