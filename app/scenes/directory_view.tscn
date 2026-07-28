@@ -1,0 +1,316 @@
+[gd_scene load_steps=2 format=3 uid="uid://directory_view_scene_001"]
+
+[ext_resource type="Script" path="res://app/scenes/directory_view.gd" id="1_dir_script"]
+
+[node name="DirectoryView" type="MarginContainer"]
+layout_mode = 2
+script = ExtResource("1_dir_script")
+
+[node name="MarginContainer" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 0
+theme_override_constants/margin_top = 0
+theme_override_constants/margin_right = 0
+theme_override_constants/margin_bottom = 0
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="HeaderBar" type="HBoxContainer" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="TitleVBox" type="VBoxContainer" parent="MarginContainer/VBoxContainer/HeaderBar"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+
+[node name="TitleLabel" type="Label" parent="MarginContainer/VBoxContainer/HeaderBar/TitleVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.12, 0.16, 0.22, 1)
+theme_override_font_sizes/font_size = 24
+text = "Directory"
+
+[node name="SubTitleLabel" type="Label" parent="MarginContainer/VBoxContainer/HeaderBar/TitleVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.35, 0.42, 0.52, 1)
+theme_override_font_sizes/font_size = 15
+text = "Search and review individual Person records."
+
+[node name="FilterContainer" type="HBoxContainer" parent="MarginContainer/VBoxContainer/HeaderBar"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="BtnFilterAll" type="Button" parent="MarginContainer/VBoxContainer/HeaderBar/FilterContainer"]
+custom_minimum_size = Vector2(100, 38)
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "All (0)"
+
+[node name="BtnFilterActive" type="Button" parent="MarginContainer/VBoxContainer/HeaderBar/FilterContainer"]
+custom_minimum_size = Vector2(100, 38)
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "Active (0)"
+
+[node name="BtnFilterPending" type="Button" parent="MarginContainer/VBoxContainer/HeaderBar/FilterContainer"]
+custom_minimum_size = Vector2(105, 38)
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "Pending (0)"
+
+[node name="BtnFilterInactive" type="Button" parent="MarginContainer/VBoxContainer/HeaderBar/FilterContainer"]
+custom_minimum_size = Vector2(105, 38)
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "Inactive (0)"
+
+[node name="BtnAddPersonPlaceholder" type="Button" parent="MarginContainer/VBoxContainer/HeaderBar"]
+custom_minimum_size = Vector2(140, 38)
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 15
+text = "➕ Add Member"
+
+[node name="SubHeaderBar" type="HBoxContainer" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="SearchInput" type="LineEdit" parent="MarginContainer/VBoxContainer/SubHeaderBar"]
+custom_minimum_size = Vector2(0, 46)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 17
+placeholder_text = "Search by name, phone, or human ID... (Press / or Ctrl+K)"
+
+[node name="ResultsCountLabel" type="Label" parent="MarginContainer/VBoxContainer/SubHeaderBar"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "0 constituents visible"
+
+[node name="MainSplit" type="HSplitContainer" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="RosterPanel" type="PanelContainer" parent="MarginContainer/VBoxContainer/MainSplit"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_stretch_ratio = 0.36
+
+[node name="RosterScroll" type="ScrollContainer" parent="MarginContainer/VBoxContainer/MainSplit/RosterPanel"]
+layout_mode = 2
+
+[node name="RosterContainer" type="VBoxContainer" parent="MarginContainer/VBoxContainer/MainSplit/RosterPanel/RosterScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="LoadingState" type="Label" parent="MarginContainer/VBoxContainer/MainSplit/RosterPanel"]
+visible = false
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "Loading Directory constituents..."
+horizontal_alignment = 1
+
+[node name="EmptyState" type="Label" parent="MarginContainer/VBoxContainer/MainSplit/RosterPanel"]
+visible = false
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "No constituents in Directory yet."
+horizontal_alignment = 1
+
+[node name="NoResultsState" type="Label" parent="MarginContainer/VBoxContainer/MainSplit/RosterPanel"]
+visible = false
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "No constituents found matching search."
+horizontal_alignment = 1
+
+[node name="ErrorState" type="Label" parent="MarginContainer/VBoxContainer/MainSplit/RosterPanel"]
+visible = false
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "Unable to load Directory. Please try again."
+horizontal_alignment = 1
+
+[node name="WorkspacePanel" type="PanelContainer" parent="MarginContainer/VBoxContainer/MainSplit"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_stretch_ratio = 0.64
+
+[node name="WorkspaceMargin" type="MarginContainer" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 20
+theme_override_constants/margin_top = 20
+theme_override_constants/margin_right = 20
+theme_override_constants/margin_bottom = 20
+
+[node name="NoSelectionWorkspace" type="Label" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+text = "Select a person to view their workspace."
+horizontal_alignment = 1
+vertical_alignment = 1
+autowrap_mode = 2
+
+[node name="SelectedWorkspaceVBox" type="VBoxContainer" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="WorkspaceHeader" type="PanelContainer" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox"]
+layout_mode = 2
+
+[node name="HeaderMargin" type="MarginContainer" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/WorkspaceHeader"]
+layout_mode = 2
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 14
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 14
+
+[node name="HeaderVBox" type="VBoxContainer" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/WorkspaceHeader/HeaderMargin"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="TitleHBox" type="HBoxContainer" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/WorkspaceHeader/HeaderMargin/HeaderVBox"]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="BtnToggleRoster" type="Button" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/WorkspaceHeader/HeaderMargin/HeaderVBox/TitleHBox"]
+custom_minimum_size = Vector2(130, 42)
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+text = "◀ Hide Roster"
+
+[node name="AvatarInitials" type="Label" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/WorkspaceHeader/HeaderMargin/HeaderVBox/TitleHBox"]
+custom_minimum_size = Vector2(48, 48)
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "AZ"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="NameLabel" type="Label" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/WorkspaceHeader/HeaderMargin/HeaderVBox/TitleHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 26
+text = "Aaron Zimmerman"
+vertical_alignment = 1
+autowrap_mode = 2
+
+[node name="MetaHBox" type="HBoxContainer" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/WorkspaceHeader/HeaderMargin/HeaderVBox"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="HumanIdLabel" type="Label" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/WorkspaceHeader/HeaderMargin/HeaderVBox/MetaHBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Human ID: P-20260720-0001"
+
+[node name="StatusBadge" type="Label" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/WorkspaceHeader/HeaderMargin/HeaderVBox/MetaHBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Status: Active"
+
+[node name="GradeBadge" type="Label" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/WorkspaceHeader/HeaderMargin/HeaderVBox/MetaHBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Year: 10th"
+
+[node name="SectionTabBar" type="HBoxContainer" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="TabProfile" type="Button" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/SectionTabBar"]
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 17
+text = "Profile"
+
+[node name="TabNotes" type="Button" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/SectionTabBar"]
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 17
+text = "Notes"
+
+[node name="TabCommunications" type="Button" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/SectionTabBar"]
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 17
+text = "Communications"
+
+[node name="TabParticipation" type="Button" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/SectionTabBar"]
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 17
+text = "Participation"
+
+[node name="TabOverview" type="Button" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/SectionTabBar"]
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 17
+text = "Overview"
+
+[node name="TabHistory" type="Button" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/SectionTabBar"]
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 17
+text = "History"
+
+[node name="WorkspaceScroll" type="ScrollContainer" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox"]
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="SectionStack" type="VBoxContainer" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/WorkspaceScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 16
+
+[node name="OverviewSection" type="VBoxContainer" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/WorkspaceScroll/SectionStack"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 16
+
+[node name="ProfileSection" type="VBoxContainer" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/WorkspaceScroll/SectionStack"]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 16
+
+[node name="NotesSection" type="VBoxContainer" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/WorkspaceScroll/SectionStack"]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 16
+
+[node name="ParticipationSection" type="VBoxContainer" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/WorkspaceScroll/SectionStack"]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 16
+
+[node name="CommunicationsSection" type="VBoxContainer" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/WorkspaceScroll/SectionStack"]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 16
+
+[node name="HistorySection" type="VBoxContainer" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/WorkspaceScroll/SectionStack"]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 16

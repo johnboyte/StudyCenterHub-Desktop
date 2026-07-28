@@ -1,0 +1,100 @@
+[gd_scene load_steps=2 format=3 uid="uid://admin_view_scene_001"]
+
+[ext_resource type="Script" path="res://app/scenes/administration_view.gd" id="1_admin_script"]
+
+[node name="AdministrationView" type="MarginContainer"]
+layout_mode = 2
+script = ExtResource("1_admin_script")
+
+[node name="MarginContainer" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 0
+theme_override_constants/margin_top = 0
+theme_override_constants/margin_right = 0
+theme_override_constants/margin_bottom = 0
+
+[node name="MainVBox" type="VBoxContainer" parent="MarginContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 16
+
+[node name="HeaderVBox" type="VBoxContainer" parent="MarginContainer/MainVBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+
+[node name="TitleLabel" type="Label" parent="MarginContainer/MainVBox/HeaderVBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.12, 0.16, 0.22, 1)
+theme_override_font_sizes/font_size = 24
+text = "Administration & Platform Control Center"
+autowrap_mode = 2
+
+[node name="SubtitleLabel" type="Label" parent="MarginContainer/MainVBox/HeaderVBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.35, 0.42, 0.52, 1)
+theme_override_font_sizes/font_size = 15
+text = "Manage subscription module licensing (PD-006), role permissions (PD-009), white-label branding, and Twilio SMS/Voice Gateway integration."
+autowrap_mode = 2
+
+[node name="TabHBox" type="HFlowContainer" parent="MarginContainer/MainVBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/h_separation = 8
+theme_override_constants/v_separation = 8
+
+[node name="BtnTabModules" type="Button" parent="MarginContainer/MainVBox/TabHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+text = "📦 Subscription & Modules"
+
+[node name="BtnTabRbac" type="Button" parent="MarginContainer/MainVBox/TabHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+text = "🔐 Role Access"
+
+[node name="BtnTabBranding" type="Button" parent="MarginContainer/MainVBox/TabHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+text = "🎨 White-Label & Vocabulary"
+
+[node name="BtnTabTwilio" type="Button" parent="MarginContainer/MainVBox/TabHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+text = "📞 Twilio Integration"
+
+[node name="BtnTabHeaderMessages" type="Button" parent="MarginContainer/MainVBox/TabHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+text = "📣 Top Header Messages"
+
+[node name="BtnTabBirthday" type="Button" parent="MarginContainer/MainVBox/TabHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+text = "🎂 Birthday Recognition"
+
+[node name="ContentCard" type="PanelContainer" parent="MarginContainer/MainVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3

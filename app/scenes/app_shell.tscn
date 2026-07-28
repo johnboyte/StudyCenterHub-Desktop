@@ -1,0 +1,269 @@
+[gd_scene load_steps=3 format=3 uid="uid://app_shell_scene_001"]
+
+[ext_resource type="Script" path="res://app/scenes/app_shell.gd" id="1_shell_script"]
+[ext_resource type="Script" path="res://app/scenes/standard_page_container.gd" id="2_page_container_script"]
+
+[node name="AppShell" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_shell_script")
+
+[node name="SidebarPanel" type="PanelContainer" parent="."]
+custom_minimum_size = Vector2(260, 0)
+layout_mode = 1
+anchors_preset = 9
+anchor_bottom = 1.0
+offset_right = 260.0
+grow_vertical = 2
+
+[node name="SidebarMargin" type="MarginContainer" parent="SidebarPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 24
+theme_override_constants/margin_top = 20
+theme_override_constants/margin_right = 20
+theme_override_constants/margin_bottom = 20
+
+[node name="SidebarVBox" type="VBoxContainer" parent="SidebarPanel/SidebarMargin"]
+layout_mode = 2
+theme_override_constants/separation = 20
+
+[node name="BrandHBox" type="HBoxContainer" parent="SidebarPanel/SidebarMargin/SidebarVBox"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="LogoIcon" type="Label" parent="SidebarPanel/SidebarMargin/SidebarVBox/BrandHBox"]
+custom_minimum_size = Vector2(32, 32)
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "🧡"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="BrandTitle" type="Label" parent="SidebarPanel/SidebarMargin/SidebarVBox/BrandHBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 20
+text = "StudyCenterHub"
+
+[node name="NavScroll" type="ScrollContainer" parent="SidebarPanel/SidebarMargin/SidebarVBox"]
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="NavVBox" type="VBoxContainer" parent="SidebarPanel/SidebarMargin/SidebarVBox/NavScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 6
+
+[node name="BtnNavHome" type="Button" parent="SidebarPanel/SidebarMargin/SidebarVBox/NavScroll/NavVBox"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "  🏠   Home"
+alignment = 0
+
+[node name="BtnNavPeople" type="Button" parent="SidebarPanel/SidebarMargin/SidebarVBox/NavScroll/NavVBox"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "  👥   People"
+alignment = 0
+
+[node name="BtnNavCommunications" type="Button" parent="SidebarPanel/SidebarMargin/SidebarVBox/NavScroll/NavVBox"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "  💬   Communications"
+alignment = 0
+
+[node name="BtnNavAttendance" type="Button" parent="SidebarPanel/SidebarMargin/SidebarVBox/NavScroll/NavVBox"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "  📋   Check In"
+alignment = 0
+
+[node name="BtnNavSchedules" type="Button" parent="SidebarPanel/SidebarMargin/SidebarVBox/NavScroll/NavVBox"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "  📅   Schedules"
+alignment = 0
+
+[node name="BtnNavVolunteers" type="Button" parent="SidebarPanel/SidebarMargin/SidebarVBox/NavScroll/NavVBox"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "  🤝   Volunteers"
+alignment = 0
+
+[node name="BtnNavPathways" type="Button" parent="SidebarPanel/SidebarMargin/SidebarVBox/NavScroll/NavVBox"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "  📈   Pathways"
+alignment = 0
+
+[node name="BtnNavAdministration" type="Button" parent="SidebarPanel/SidebarMargin/SidebarVBox/NavScroll/NavVBox"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "  ⚙️   Administration"
+alignment = 0
+
+[node name="BtnNavReports" type="Button" parent="SidebarPanel/SidebarMargin/SidebarVBox/NavScroll/NavVBox"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "  📊   Reports"
+alignment = 0
+
+[node name="BtnNavSettings" type="Button" parent="SidebarPanel/SidebarMargin/SidebarVBox/NavScroll/NavVBox"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "  🛠️   Settings"
+alignment = 0
+
+[node name="ProfileCard" type="PanelContainer" parent="SidebarPanel/SidebarMargin/SidebarVBox"]
+layout_mode = 2
+
+[node name="ProfileMargin" type="MarginContainer" parent="SidebarPanel/SidebarMargin/SidebarVBox/ProfileCard"]
+layout_mode = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="ProfileHBox" type="HBoxContainer" parent="SidebarPanel/SidebarMargin/SidebarVBox/ProfileCard/ProfileMargin"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="ProfileAvatar" type="Label" parent="SidebarPanel/SidebarMargin/SidebarVBox/ProfileCard/ProfileMargin/ProfileHBox"]
+custom_minimum_size = Vector2(36, 36)
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "JS"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="ProfileVBox" type="VBoxContainer" parent="SidebarPanel/SidebarMargin/SidebarVBox/ProfileCard/ProfileMargin/ProfileHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ProfileName" type="Label" parent="SidebarPanel/SidebarMargin/SidebarVBox/ProfileCard/ProfileMargin/ProfileHBox/ProfileVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.97, 1, 1)
+theme_override_font_sizes/font_size = 15
+text = "John Smith"
+
+[node name="ProfileRole" type="Label" parent="SidebarPanel/SidebarMargin/SidebarVBox/ProfileCard/ProfileMargin/ProfileHBox/ProfileVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.75, 0.82, 0.9, 1)
+theme_override_font_sizes/font_size = 13
+text = "Executive Director"
+
+[node name="ContentArea" type="PanelContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 260.0
+offset_top = 74.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="PageScroll" type="ScrollContainer" parent="ContentArea"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+horizontal_scroll_mode = 3
+
+[node name="StandardPageContainer" type="MarginContainer" parent="ContentArea/PageScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+script = ExtResource("2_page_container_script")
+
+[node name="ContentContainer" type="PanelContainer" parent="ContentArea/PageScroll/StandardPageContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="TopHeaderBar" type="PanelContainer" parent="."]
+custom_minimum_size = Vector2(0, 74)
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 260.0
+offset_bottom = 74.0
+grow_horizontal = 2
+
+[node name="TopMargin" type="MarginContainer" parent="TopHeaderBar"]
+layout_mode = 2
+theme_override_constants/margin_left = 24
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 24
+theme_override_constants/margin_bottom = 12
+
+[node name="TopHBox" type="HBoxContainer" parent="TopHeaderBar/TopMargin"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="GreetingVBox" type="VBoxContainer" parent="TopHeaderBar/TopMargin/TopHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="GreetingLabel" type="Label" parent="TopHeaderBar/TopMargin/TopHBox/GreetingVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.08, 0.12, 0.18, 1)
+theme_override_font_sizes/font_size = 24
+text = "Good morning, John!"
+clip_text = true
+
+[node name="GreetingSubtitle" type="Label" parent="TopHeaderBar/TopMargin/TopHBox/GreetingVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.25, 0.32, 0.42, 1)
+theme_override_font_sizes/font_size = 15
+text = "Here's what's happening at StudyCenter today."
+autowrap_mode = 2
+
+[node name="TeamLeaderHBox" type="HBoxContainer" parent="TopHeaderBar/TopMargin/TopHBox"]
+layout_mode = 2
+size_flags_horizontal = 4
+theme_override_constants/separation = 6
+
+[node name="TeamLeaderLabel" type="Label" parent="TopHeaderBar/TopMargin/TopHBox/TeamLeaderHBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.35, 0.42, 0.52, 1)
+theme_override_font_sizes/font_size = 14
+text = "Team Leader:"
+
+[node name="TeamLeaderDropdown" type="OptionButton" parent="TopHeaderBar/TopMargin/TopHBox/TeamLeaderHBox"]
+custom_minimum_size = Vector2(250, 32)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 14
+fit_to_longest_item = false
+clip_text = true
+
+[node name="DatePill" type="Label" parent="TopHeaderBar/TopMargin/TopHBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.15, 0.2, 0.28, 1)
+theme_override_font_sizes/font_size = 15
+text = "📅 Monday, May 20, 2024"
+
+[node name="WeatherPill" type="Label" parent="TopHeaderBar/TopMargin/TopHBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.15, 0.2, 0.28, 1)
+theme_override_font_sizes/font_size = 15
+text = "☀️ 72°"

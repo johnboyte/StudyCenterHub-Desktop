@@ -1,3 +1,17 @@
 # Godot 4+ specific ignores
 .godot/
 /android/
+
+# macOS
+.DS_Store
+
+# Local binaries and temporary work
+.bin/
+scratch/
+staging
+
+# Gateway local configuration and logs
+gateway/config.php
+gateway/tunnel-config.yml
+gateway/*.log
+gateway/*.err

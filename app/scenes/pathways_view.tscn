@@ -1,0 +1,131 @@
+[gd_scene load_steps=2 format=3 uid="uid://pathways_view_scene_001"]
+
+[ext_resource type="Script" path="res://app/scenes/pathways_view.gd" id="1_pw_script"]
+
+[node name="PathwaysView" type="MarginContainer"]
+layout_mode = 2
+script = ExtResource("1_pw_script")
+
+[node name="MarginContainer" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 0
+theme_override_constants/margin_top = 0
+theme_override_constants/margin_right = 0
+theme_override_constants/margin_bottom = 0
+
+[node name="MainVBox" type="VBoxContainer" parent="MarginContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 16
+
+[node name="HeaderVBox" type="VBoxContainer" parent="MarginContainer/MainVBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+
+[node name="TitleLabel" type="Label" parent="MarginContainer/MainVBox/HeaderVBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.12, 0.16, 0.22, 1)
+theme_override_font_sizes/font_size = 24
+text = "Discipleship Pathways Management (Real Life, Fellows, LEAD)"
+autowrap_mode = 2
+
+[node name="SubtitleLabel" type="Label" parent="MarginContainer/MainVBox/HeaderVBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.35, 0.42, 0.52, 1)
+theme_override_font_sizes/font_size = 15
+text = "Manage constituent track enrollments, certificate completions, current academic years, and milestone progress."
+autowrap_mode = 2
+
+[node name="ControlCard" type="PanelContainer" parent="MarginContainer/MainVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ControlMargin" type="MarginContainer" parent="MarginContainer/MainVBox/ControlCard"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/margin_left = 18
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 18
+theme_override_constants/margin_bottom = 16
+
+[node name="ControlVBox" type="VBoxContainer" parent="MarginContainer/MainVBox/ControlCard/ControlMargin"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 12
+
+[node name="PersonHBox" type="HBoxContainer" parent="MarginContainer/MainVBox/ControlCard/ControlMargin/ControlVBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 12
+
+[node name="PersonDropdown" type="OptionButton" parent="MarginContainer/MainVBox/ControlCard/ControlMargin/ControlVBox/PersonHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 14
+
+[node name="BtnSavePathway" type="Button" parent="MarginContainer/MainVBox/ControlCard/ControlMargin/ControlVBox/PersonHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(180, 40)
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "💾 Save Enrollment"
+
+[node name="TracksHFlow" type="HFlowContainer" parent="MarginContainer/MainVBox/ControlCard/ControlMargin/ControlVBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/h_separation = 16
+theme_override_constants/v_separation = 8
+
+[node name="ChkRealLife" type="CheckBox" parent="MarginContainer/MainVBox/ControlCard/ControlMargin/ControlVBox/TracksHFlow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "🌱 Real Life"
+
+[node name="ChkFellows" type="CheckBox" parent="MarginContainer/MainVBox/ControlCard/ControlMargin/ControlVBox/TracksHFlow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "🎓 Fellows"
+
+[node name="ChkFellowsCert" type="CheckBox" parent="MarginContainer/MainVBox/ControlCard/ControlMargin/ControlVBox/TracksHFlow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "📜 Fellows Cert"
+
+[node name="ChkLead" type="CheckBox" parent="MarginContainer/MainVBox/ControlCard/ControlMargin/ControlVBox/TracksHFlow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "⚡ LEAD Track"
+
+[node name="ChkLeadCert" type="CheckBox" parent="MarginContainer/MainVBox/ControlCard/ControlMargin/ControlVBox/TracksHFlow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "📜 LEAD Cert"
+
+[node name="LeadYearDropdown" type="OptionButton" parent="MarginContainer/MainVBox/ControlCard/ControlMargin/ControlVBox/TracksHFlow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(140, 40)
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+
+[node name="RosterCard" type="PanelContainer" parent="MarginContainer/MainVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3

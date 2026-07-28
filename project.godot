@@ -11,14 +11,14 @@ config_version=5
 [application]
 
 config/name="StudyCenterHub - Desktop"
-run/main_scene="res://app/hello_world.tscn"
+run/main_scene="res://app/scenes/app_shell.tscn"
 config/features=PackedStringArray("4.7", "Forward Plus")
 config/icon="res://icon.svg"
 
 [display]
 
-window/size/viewport_width=1024
-window/size/viewport_height=768
+window/size/viewport_width=1600
+window/size/viewport_height=950
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
 

@@ -1,0 +1,86 @@
+[gd_scene load_steps=2 format=3 uid="uid://reports_view_scene_001"]
+
+[ext_resource type="Script" path="res://app/scenes/reports_view.gd" id="1_rep_script"]
+
+[node name="ReportsView" type="MarginContainer"]
+layout_mode = 2
+script = ExtResource("1_rep_script")
+
+[node name="MarginContainer" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 0
+theme_override_constants/margin_top = 0
+theme_override_constants/margin_right = 0
+theme_override_constants/margin_bottom = 0
+
+[node name="MainVBox" type="VBoxContainer" parent="MarginContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 16
+
+[node name="HeaderVBox" type="VBoxContainer" parent="MarginContainer/MainVBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+
+[node name="TitleLabel" type="Label" parent="MarginContainer/MainVBox/HeaderVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.12, 0.16, 0.22, 1)
+theme_override_font_sizes/font_size = 24
+text = "Operational Reports & Ministry Analytics"
+autowrap_mode = 2
+
+[node name="SubtitleLabel" type="Label" parent="MarginContainer/MainVBox/HeaderVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.35, 0.42, 0.52, 1)
+theme_override_font_sizes/font_size = 15
+text = "Real-time KPI metrics, attendance distribution, grade breakdown, and one-click CSV report export."
+autowrap_mode = 2
+
+[node name="ControlHBox" type="HBoxContainer" parent="MarginContainer/MainVBox"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="BtnRefreshStats" type="Button" parent="MarginContainer/MainVBox/ControlHBox"]
+custom_minimum_size = Vector2(180, 40)
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "📊 Refresh Analytics"
+
+[node name="BtnExportCsv" type="Button" parent="MarginContainer/MainVBox/ControlHBox"]
+custom_minimum_size = Vector2(200, 40)
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "📄 Export Roster CSV"
+
+[node name="KpiGrid" type="GridContainer" parent="MarginContainer/MainVBox"]
+layout_mode = 2
+theme_override_constants/h_separation = 16
+theme_override_constants/v_separation = 16
+columns = 2
+
+[node name="CardKpi1" type="PanelContainer" parent="MarginContainer/MainVBox/KpiGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="CardKpi2" type="PanelContainer" parent="MarginContainer/MainVBox/KpiGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="CardKpi3" type="PanelContainer" parent="MarginContainer/MainVBox/KpiGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="CardKpi4" type="PanelContainer" parent="MarginContainer/MainVBox/KpiGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="BreakdownCard" type="PanelContainer" parent="MarginContainer/MainVBox"]
+layout_mode = 2
+size_flags_vertical = 3

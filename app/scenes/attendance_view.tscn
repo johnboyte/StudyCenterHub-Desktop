@@ -1,0 +1,317 @@
+[gd_scene load_steps=2 format=3 uid="uid://attendance_view_scene_001"]
+
+[ext_resource type="Script" path="res://app/scenes/attendance_view.gd" id="1_att_script"]
+
+[node name="AttendanceView" type="MarginContainer"]
+layout_mode = 2
+script = ExtResource("1_att_script")
+
+[node name="MarginContainer" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 0
+theme_override_constants/margin_top = 0
+theme_override_constants/margin_right = 0
+theme_override_constants/margin_bottom = 0
+
+[node name="MainVBox" type="VBoxContainer" parent="MarginContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 22
+
+[node name="TopBarHBox" type="HBoxContainer" parent="MarginContainer/MainVBox"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="HeaderVBox" type="VBoxContainer" parent="MarginContainer/MainVBox/TopBarHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+
+[node name="TitleLabel" type="Label" parent="MarginContainer/MainVBox/TopBarHBox/HeaderVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.12, 0.16, 0.22, 1)
+theme_override_font_sizes/font_size = 24
+text = "Check In Assistant"
+
+[node name="ShiftLeadHBox" type="HBoxContainer" parent="MarginContainer/MainVBox/TopBarHBox"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="ShiftLeadLabel" type="Label" parent="MarginContainer/MainVBox/TopBarHBox/ShiftLeadHBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.35, 0.42, 0.52, 1)
+theme_override_font_sizes/font_size = 16
+text = "🛡️ SHIFT LEAD:"
+
+[node name="ShiftLeadDropdown" type="OptionButton" parent="MarginContainer/MainVBox/TopBarHBox/ShiftLeadHBox"]
+custom_minimum_size = Vector2(180, 42)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+
+[node name="BtnSignInStatus" type="Button" parent="MarginContainer/MainVBox/TopBarHBox/ShiftLeadHBox"]
+custom_minimum_size = Vector2(100, 42)
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 16
+text = "Sign In"
+
+[node name="HeroTerminalCard" type="PanelContainer" parent="MarginContainer/MainVBox"]
+layout_mode = 2
+
+[node name="HeroMargin" type="MarginContainer" parent="MarginContainer/MainVBox/HeroTerminalCard"]
+layout_mode = 2
+theme_override_constants/margin_left = 22
+theme_override_constants/margin_top = 22
+theme_override_constants/margin_right = 22
+theme_override_constants/margin_bottom = 22
+
+[node name="HeroVBox" type="VBoxContainer" parent="MarginContainer/MainVBox/HeroTerminalCard/HeroMargin"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="PillTabsHBox" type="HBoxContainer" parent="MarginContainer/MainVBox/HeroTerminalCard/HeroMargin/HeroVBox"]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="BtnModeDaily" type="Button" parent="MarginContainer/MainVBox/HeroTerminalCard/HeroMargin/HeroVBox/PillTabsHBox"]
+custom_minimum_size = Vector2(240, 48)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 18
+text = "Daily Check In"
+
+[node name="BtnModeSession" type="Button" parent="MarginContainer/MainVBox/HeroTerminalCard/HeroMargin/HeroVBox/PillTabsHBox"]
+custom_minimum_size = Vector2(240, 48)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 18
+text = "Session Attendance"
+
+[node name="SessionSelectVBox" type="VBoxContainer" parent="MarginContainer/MainVBox/HeroTerminalCard/HeroMargin/HeroVBox"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="SessionLabel" type="Label" parent="MarginContainer/MainVBox/HeroTerminalCard/HeroMargin/HeroVBox/SessionSelectVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.596, 0.192, 0.255, 1)
+theme_override_font_sizes/font_size = 16
+text = "SELECT SCHEDULED SESSION"
+
+[node name="SessionDropdown" type="OptionButton" parent="MarginContainer/MainVBox/HeroTerminalCard/HeroMargin/HeroVBox/SessionSelectVBox"]
+custom_minimum_size = Vector2(0, 46)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.08, 0.12, 0.18, 1)
+theme_override_font_sizes/font_size = 16
+
+[node name="SearchHeaderHBox" type="HBoxContainer" parent="MarginContainer/MainVBox/HeroTerminalCard/HeroMargin/HeroVBox"]
+layout_mode = 2
+
+[node name="SearchTitleLabel" type="Label" parent="MarginContainer/MainVBox/HeroTerminalCard/HeroMargin/HeroVBox/SearchHeaderHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.596, 0.192, 0.255, 1)
+theme_override_font_sizes/font_size = 16
+text = "SCAN QR BADGE OR TYPE NAME"
+
+[node name="DirectoryCountLabel" type="Label" parent="MarginContainer/MainVBox/HeroTerminalCard/HeroMargin/HeroVBox/SearchHeaderHBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.25, 0.32, 0.42, 1)
+theme_override_font_sizes/font_size = 16
+text = "Directory members loaded: 0"
+
+[node name="SearchLineEdit" type="LineEdit" parent="MarginContainer/MainVBox/HeroTerminalCard/HeroMargin/HeroVBox"]
+custom_minimum_size = Vector2(0, 50)
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_placeholder_color = Color(0.75, 0.85, 1, 1)
+theme_override_font_sizes/font_size = 18
+placeholder_text = "Type Name or Scan Badge..."
+
+[node name="SuggestionList" type="ItemList" parent="MarginContainer/MainVBox/HeroTerminalCard/HeroMargin/HeroVBox"]
+visible = false
+custom_minimum_size = Vector2(0, 140)
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 17
+
+[node name="ToastPanel" type="PanelContainer" parent="MarginContainer/MainVBox/HeroTerminalCard/HeroMargin/HeroVBox"]
+visible = false
+layout_mode = 2
+
+[node name="ToastMargin" type="MarginContainer" parent="MarginContainer/MainVBox/HeroTerminalCard/HeroMargin/HeroVBox/ToastPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 14
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 14
+theme_override_constants/margin_bottom = 10
+
+[node name="ToastLabel" type="Label" parent="MarginContainer/MainVBox/HeroTerminalCard/HeroMargin/HeroVBox/ToastPanel/ToastMargin"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 15
+text = "✨ Check-In Complete! Member was also automatically checked in for Daily Attendance."
+
+[node name="ActionHBox" type="HBoxContainer" parent="MarginContainer/MainVBox/HeroTerminalCard/HeroMargin/HeroVBox"]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="PersonDropdown" type="OptionButton" parent="MarginContainer/MainVBox/HeroTerminalCard/HeroMargin/HeroVBox/ActionHBox"]
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 17
+
+[node name="BtnQuickCheckIn" type="Button" parent="MarginContainer/MainVBox/HeroTerminalCard/HeroMargin/HeroVBox/ActionHBox"]
+custom_minimum_size = Vector2(180, 48)
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 18
+text = "✔ CHECK IN"
+
+[node name="DailyOverviewCard" type="PanelContainer" parent="MarginContainer/MainVBox"]
+layout_mode = 2
+
+[node name="OverviewMargin" type="MarginContainer" parent="MarginContainer/MainVBox/DailyOverviewCard"]
+layout_mode = 2
+theme_override_constants/margin_left = 20
+theme_override_constants/margin_top = 18
+theme_override_constants/margin_right = 20
+theme_override_constants/margin_bottom = 18
+
+[node name="OverviewVBox" type="VBoxContainer" parent="MarginContainer/MainVBox/DailyOverviewCard/OverviewMargin"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="DateNavHBox" type="HBoxContainer" parent="MarginContainer/MainVBox/DailyOverviewCard/OverviewMargin/OverviewVBox"]
+layout_mode = 2
+
+[node name="DateInfoVBox" type="VBoxContainer" parent="MarginContainer/MainVBox/DailyOverviewCard/OverviewMargin/OverviewVBox/DateNavHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 3
+
+[node name="OverviewTitleLabel" type="Label" parent="MarginContainer/MainVBox/DailyOverviewCard/OverviewMargin/OverviewVBox/DateNavHBox/DateInfoVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.596, 0.192, 0.255, 1)
+theme_override_font_sizes/font_size = 16
+text = "DAILY ATTENDANCE OVERVIEW"
+
+[node name="DateLabel" type="Label" parent="MarginContainer/MainVBox/DailyOverviewCard/OverviewMargin/OverviewVBox/DateNavHBox/DateInfoVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.08, 0.12, 0.18, 1)
+theme_override_font_sizes/font_size = 34
+text = "Tuesday, July 21, 2026"
+
+[node name="ViewingSubtitle" type="Label" parent="MarginContainer/MainVBox/DailyOverviewCard/OverviewMargin/OverviewVBox/DateNavHBox/DateInfoVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.25, 0.32, 0.42, 1)
+theme_override_font_sizes/font_size = 16
+text = "Viewing today"
+
+[node name="NavBtnsHBox" type="HBoxContainer" parent="MarginContainer/MainVBox/DailyOverviewCard/OverviewMargin/OverviewVBox/DateNavHBox"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="BtnPrevDay" type="Button" parent="MarginContainer/MainVBox/DailyOverviewCard/OverviewMargin/OverviewVBox/DateNavHBox/NavBtnsHBox"]
+custom_minimum_size = Vector2(145, 44)
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 16
+text = "< Previous Day"
+
+[node name="BtnNextDay" type="Button" parent="MarginContainer/MainVBox/DailyOverviewCard/OverviewMargin/OverviewVBox/DateNavHBox/NavBtnsHBox"]
+custom_minimum_size = Vector2(125, 44)
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 16
+text = "Next Day >"
+
+[node name="BtnDatePick" type="Button" parent="MarginContainer/MainVBox/DailyOverviewCard/OverviewMargin/OverviewVBox/DateNavHBox/NavBtnsHBox"]
+custom_minimum_size = Vector2(165, 46)
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 20
+text = "📅 07/21/2026"
+
+[node name="MetricsGrid" type="GridContainer" parent="MarginContainer/MainVBox/DailyOverviewCard/OverviewMargin/OverviewVBox"]
+layout_mode = 2
+theme_override_constants/h_separation = 14
+theme_override_constants/v_separation = 14
+columns = 5
+
+[node name="LogCard" type="PanelContainer" parent="MarginContainer/MainVBox"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="BirthdayModal" type="ColorRect" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.65)
+
+[node name="ModalCenter" type="CenterContainer" parent="BirthdayModal"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="ModalCard" type="PanelContainer" parent="BirthdayModal/ModalCenter"]
+custom_minimum_size = Vector2(520, 0)
+layout_mode = 2
+
+[node name="ModalMargin" type="MarginContainer" parent="BirthdayModal/ModalCenter/ModalCard"]
+layout_mode = 2
+theme_override_constants/margin_left = 24
+theme_override_constants/margin_top = 22
+theme_override_constants/margin_right = 24
+theme_override_constants/margin_bottom = 22
+
+[node name="ModalVBox" type="VBoxContainer" parent="BirthdayModal/ModalCenter/ModalCard/ModalMargin"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="BdayHeaderHBox" type="HBoxContainer" parent="BirthdayModal/ModalCenter/ModalCard/ModalMargin/ModalVBox"]
+layout_mode = 2
+
+[node name="BdayTitle" type="Label" parent="BirthdayModal/ModalCenter/ModalCard/ModalMargin/ModalVBox/BdayHeaderHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(1, 0.85, 0.35, 1)
+theme_override_font_sizes/font_size = 22
+text = "🎂 Birthday Reminder"
+
+[node name="BdayBodyLabel" type="Label" parent="BirthdayModal/ModalCenter/ModalCard/ModalMargin/ModalVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 17
+autowrap_mode = 3
+text = "Hannah Abbott's birthday is Sunday, July 26. Today is the last day the center is open before her birthday."
+
+[node name="BdaySmsStatusLabel" type="Label" parent="BirthdayModal/ModalCenter/ModalCard/ModalMargin/ModalVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.737, 0.635, 0.439, 1)
+theme_override_font_sizes/font_size = 15
+text = "📲 Active shift team notified via SMS."
+
+[node name="BtnAcknowledgeBday" type="Button" parent="BirthdayModal/ModalCenter/ModalCard/ModalMargin/ModalVBox"]
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 18
+text = "Acknowledge and Close"

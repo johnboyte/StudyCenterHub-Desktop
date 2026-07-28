@@ -1,0 +1,81 @@
+[gd_scene load_steps=2 format=3 uid="uid://schedules_view_scene_001"]
+
+[ext_resource type="Script" path="res://app/scenes/schedules_view.gd" id="1_sch_script"]
+
+[node name="SchedulesView" type="MarginContainer"]
+layout_mode = 2
+script = ExtResource("1_sch_script")
+
+[node name="MarginContainer" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 0
+theme_override_constants/margin_top = 0
+theme_override_constants/margin_right = 0
+theme_override_constants/margin_bottom = 0
+
+[node name="MainVBox" type="VBoxContainer" parent="MarginContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 14
+
+[node name="HeaderVBox" type="VBoxContainer" parent="MarginContainer/MainVBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+
+[node name="TitleLabel" type="Label" parent="MarginContainer/MainVBox/HeaderVBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.12, 0.16, 0.22, 1)
+theme_override_font_sizes/font_size = 24
+text = "Scheduling & Operations Control Center"
+autowrap_mode = 2
+
+[node name="SubtitleLabel" type="Label" parent="MarginContainer/MainVBox/HeaderVBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.35, 0.42, 0.52, 1)
+theme_override_font_sizes/font_size = 15
+text = "Separated management for Staffing Schedule (Tab 1), Scheduled Sessions (Tab 2), and Study Center Operating Hours (Tab 3)."
+autowrap_mode = 2
+
+[node name="SubTabBarHBox" type="HBoxContainer" parent="MarginContainer/MainVBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 12
+
+[node name="BtnTabShifts" type="Button" parent="MarginContainer/MainVBox/SubTabBarHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 15
+text = "🗓️ Staffing Schedule & Roster"
+
+[node name="BtnTabSessions" type="Button" parent="MarginContainer/MainVBox/SubTabBarHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 15
+text = "🎓 Scheduled Sessions"
+
+[node name="BtnTabHours" type="Button" parent="MarginContainer/MainVBox/SubTabBarHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 15
+text = "⏰ Center Operating Hours"
+
+[node name="ContentCard" type="PanelContainer" parent="MarginContainer/MainVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3

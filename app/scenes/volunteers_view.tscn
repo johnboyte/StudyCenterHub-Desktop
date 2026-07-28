@@ -1,0 +1,89 @@
+[gd_scene load_steps=2 format=3 uid="uid://volunteers_view_scene_001"]
+
+[ext_resource type="Script" path="res://app/scenes/volunteers_view.gd" id="1_vol_script"]
+
+[node name="VolunteersView" type="MarginContainer"]
+layout_mode = 2
+script = ExtResource("1_vol_script")
+
+[node name="MarginContainer" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 0
+theme_override_constants/margin_top = 0
+theme_override_constants/margin_right = 0
+theme_override_constants/margin_bottom = 0
+
+[node name="MainVBox" type="VBoxContainer" parent="MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="HeaderVBox" type="VBoxContainer" parent="MarginContainer/MainVBox"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="TitleLabel" type="Label" parent="MarginContainer/MainVBox/HeaderVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.12, 0.16, 0.22, 1)
+theme_override_font_sizes/font_size = 24
+text = "Volunteers & Shift Roster Management"
+
+[node name="SubtitleLabel" type="Label" parent="MarginContainer/MainVBox/HeaderVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.35, 0.42, 0.52, 1)
+theme_override_font_sizes/font_size = 15
+text = "Assign volunteers to study sessions, track background check clearances, and manage shift coverage."
+
+[node name="AssignCard" type="PanelContainer" parent="MarginContainer/MainVBox"]
+layout_mode = 2
+
+[node name="AssignMargin" type="MarginContainer" parent="MarginContainer/MainVBox/AssignCard"]
+layout_mode = 2
+theme_override_constants/margin_left = 18
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 18
+theme_override_constants/margin_bottom = 16
+
+[node name="AssignVBox" type="VBoxContainer" parent="MarginContainer/MainVBox/AssignCard/AssignMargin"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="SelectHBox" type="HBoxContainer" parent="MarginContainer/MainVBox/AssignCard/AssignMargin/AssignVBox"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="VolunteerDropdown" type="OptionButton" parent="MarginContainer/MainVBox/AssignCard/AssignMargin/AssignVBox/SelectHBox"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 14
+
+[node name="SessionDropdown" type="OptionButton" parent="MarginContainer/MainVBox/AssignCard/AssignMargin/AssignVBox/SelectHBox"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 14
+
+[node name="ActionHBox" type="HBoxContainer" parent="MarginContainer/MainVBox/AssignCard/AssignMargin/AssignVBox"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="RoleDropdown" type="OptionButton" parent="MarginContainer/MainVBox/AssignCard/AssignMargin/AssignVBox/ActionHBox"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 14
+
+[node name="BtnAssignShift" type="Button" parent="MarginContainer/MainVBox/AssignCard/AssignMargin/AssignVBox/ActionHBox"]
+custom_minimum_size = Vector2(180, 40)
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "🤝 Assign Shift"
+
+[node name="ShiftLogCard" type="PanelContainer" parent="MarginContainer/MainVBox"]
+layout_mode = 2
+size_flags_vertical = 3

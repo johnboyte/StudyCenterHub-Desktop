@@ -1,0 +1,21 @@
+# Disable directory listing
+Options -Indexes
+
+# Block direct access to sensitive configuration files
+<FilesMatch "config\.php$">
+    Require all denied
+</FilesMatch>
+
+# Block direct access to database files and cached IVR configurations
+<FilesMatch "\.(db|json)$">
+    Require all denied
+</FilesMatch>
+
+RewriteEngine On
+
+# Exclude existing files and folders from rewrite rules
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+
+# Route all other /api/v1/ and webhook calls to index.php router
+RewriteRule ^(.*)$ index.php [QSA,L]
