@@ -259,7 +259,7 @@ func _populate_needs_attention_card(card: PanelContainer) -> void:
 			"count": count,
 			"supporting_detail": def.get("description", ""),
 			"urgency": def.get("urgency", "normal"),
-			"primary_button": def.get("primary_button", "Start Queue"),
+			"primary_button": def.get("primary_button", "Begin Actions"),
 			"queue_mode_supported": def.get("queue_mode_supported", true)
 		})
 		card_item.action_requested.connect(_on_card_action)

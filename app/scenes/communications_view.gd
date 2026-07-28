@@ -80,12 +80,18 @@ func configure_queue_mode(params: Dictionary = {}) -> void:
 func _attach_header_bar() -> void:
 	if header_bar_instance: return
 
-	var parent_container = get_child(0) if get_child_count() > 0 else self
+	var main_vbox = get_node_or_null("MarginContainer/MainVBox") as VBoxContainer
+	var parent_container = main_vbox if main_vbox else (get_child(0) if get_child_count() > 0 else self)
 	if parent_container:
 		header_bar_instance = WorkQueueHeaderBarScene.instantiate()
 		parent_container.add_child(header_bar_instance)
 		if parent_container.has_method("move_child"):
 			parent_container.move_child(header_bar_instance, 0)
+
+		# Hide standard page header during active Queue Mode to eliminate header overlap
+		var std_hdr = get_node_or_null("MarginContainer/MainVBox/HeaderVBox") as Control
+		if std_hdr:
+			std_hdr.visible = false
 
 		var cur_idx = queue_controller.current_index if queue_controller else 0
 		var rem_count = queue_controller.get_remaining_count() if queue_controller else 0
@@ -104,6 +110,11 @@ func _clear_queue_mode() -> void:
 	if queue_card_container:
 		queue_card_container.queue_free()
 		queue_card_container = null
+
+	# Restore standard page header upon exiting Queue Mode
+	var std_hdr = get_node_or_null("MarginContainer/MainVBox/HeaderVBox") as Control
+	if std_hdr:
+		std_hdr.visible = true
 
 func _on_queue_pause() -> void:
 	if header_bar_instance and queue_controller:
@@ -127,7 +138,8 @@ func _refresh_queue_view() -> void:
 
 	if not queue_card_container:
 		queue_card_container = PanelContainer.new()
-		var parent_container = get_child(0) if get_child_count() > 0 else self
+		var main_vbox = get_node_or_null("MarginContainer/MainVBox") as VBoxContainer
+		var parent_container = main_vbox if main_vbox else (get_child(0) if get_child_count() > 0 else self)
 		if parent_container:
 			parent_container.add_child(queue_card_container)
 			if parent_container.has_method("move_child") and header_bar_instance:
@@ -135,10 +147,10 @@ func _refresh_queue_view() -> void:
 
 	var style = StyleBoxFlat.new()
 	style.bg_color = Color(0.98, 0.99, 1.0, 1.0)
-	style.border_width_left = 2; style.border_width_top = 2; style.border_width_right = 2; style.border_width_bottom = 2
+	style.border_width_left = 1; style.border_width_top = 1; style.border_width_right = 1; style.border_width_bottom = 1
 	style.border_color = Color(0.12, 0.53, 0.90, 1.0)
-	style.corner_radius_top_left = 12; style.corner_radius_top_right = 12; style.corner_radius_bottom_left = 12; style.corner_radius_bottom_right = 12
-	style.content_margin_left = 20; style.content_margin_top = 18; style.content_margin_right = 20; style.content_margin_bottom = 18
+	style.corner_radius_top_left = 10; style.corner_radius_top_right = 10; style.corner_radius_bottom_left = 10; style.corner_radius_bottom_right = 10
+	style.content_margin_left = 18; style.content_margin_top = 16; style.content_margin_right = 18; style.content_margin_bottom = 16
 	queue_card_container.add_theme_stylebox_override("panel", style)
 
 	for child in queue_card_container.get_children():
@@ -146,7 +158,7 @@ func _refresh_queue_view() -> void:
 		child.queue_free()
 
 	var vbox = VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 14)
+	vbox.add_theme_constant_override("separation", 12)
 	queue_card_container.add_child(vbox)
 
 	if rem_count == 0 or not queue_controller:
@@ -173,25 +185,39 @@ func _refresh_queue_view() -> void:
 	var text = current_item.get("message_text", current_item.get("transcription", ""))
 	var due = current_item.get("due_date", "")
 
-	var hdr_lbl = Label.new()
-	hdr_lbl.text = "CURRENT QUEUE ITEM — " + str(caller) + " (" + str(phone) + ")"
-	hdr_lbl.add_theme_font_size_override("font_size", 16)
-	hdr_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
-	vbox.add_child(hdr_lbl)
+	# Structured Header Hierarchy: Current Person & Contact
+	var info_grid = VBoxContainer.new()
+	info_grid.add_theme_constant_override("separation", 4)
+
+	var person_lbl = Label.new()
+	person_lbl.text = "Current Person: " + str(caller)
+	person_lbl.add_theme_font_size_override("font_size", 16)
+	person_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
+	info_grid.add_child(person_lbl)
+
+	if phone != "":
+		var phone_lbl = Label.new()
+		phone_lbl.text = "Contact: " + str(phone)
+		phone_lbl.add_theme_font_size_override("font_size", 14)
+		phone_lbl.add_theme_color_override("font_color", Color(0.35, 0.42, 0.52, 1.0))
+		info_grid.add_child(phone_lbl)
 
 	if due != "":
 		var due_lbl = Label.new()
 		due_lbl.text = "⏰ Callback Due: " + str(due)
 		due_lbl.add_theme_font_size_override("font_size", 13)
 		due_lbl.add_theme_color_override("font_color", Color(0.85, 0.25, 0.20, 1.0))
-		vbox.add_child(due_lbl)
+		info_grid.add_child(due_lbl)
 
-	var txt_lbl = Label.new()
-	txt_lbl.text = "Message: \"" + str(text) + "\""
-	txt_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD
-	txt_lbl.add_theme_font_size_override("font_size", 14)
-	txt_lbl.add_theme_color_override("font_color", Color(0.20, 0.25, 0.32, 1.0))
-	vbox.add_child(txt_lbl)
+	vbox.add_child(info_grid)
+
+	if text != "":
+		var txt_lbl = Label.new()
+		txt_lbl.text = "Message: \"" + str(text) + "\""
+		txt_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD
+		txt_lbl.add_theme_font_size_override("font_size", 14)
+		txt_lbl.add_theme_color_override("font_color", Color(0.20, 0.25, 0.32, 1.0))
+		vbox.add_child(txt_lbl)
 
 	var btn_hbox = HBoxContainer.new()
 	btn_hbox.add_theme_constant_override("separation", 12)

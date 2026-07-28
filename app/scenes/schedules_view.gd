@@ -133,6 +133,11 @@ func _attach_header_bar() -> void:
 		if parent_container.has_method("move_child"):
 			parent_container.move_child(header_bar_instance, 0)
 
+		# Hide standard page header during active Queue Mode to eliminate header overlap
+		var std_hdr = get_node_or_null("MarginContainer/VBoxContainer/HeaderVBox") as Control
+		if std_hdr:
+			std_hdr.visible = false
+
 		var cur_idx = queue_controller.current_index if queue_controller else 0
 		var rem_count = queue_controller.get_remaining_count() if queue_controller else 0
 		var def = QueueRegistryScript.get_definition(active_queue_id)
@@ -150,6 +155,11 @@ func _clear_queue_mode() -> void:
 	if queue_card_container:
 		queue_card_container.queue_free()
 		queue_card_container = null
+
+	# Restore standard page header upon exiting Queue Mode
+	var std_hdr = get_node_or_null("MarginContainer/VBoxContainer/HeaderVBox") as Control
+	if std_hdr:
+		std_hdr.visible = true
 
 func _on_queue_pause() -> void:
 	if header_bar_instance and queue_controller:

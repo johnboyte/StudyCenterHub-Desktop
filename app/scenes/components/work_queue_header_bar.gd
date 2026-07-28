@@ -14,6 +14,7 @@ signal exit_requested()
 @onready var btn_exit: Button = $MarginContainer/MainHBox/ActionsHBox/BtnExit
 
 func _ready() -> void:
+	_apply_header_bar_style()
 	if btn_pause:
 		btn_pause.pressed.connect(func(): pause_requested.emit())
 		_apply_pause_button_styles()
@@ -21,10 +22,21 @@ func _ready() -> void:
 		btn_exit.pressed.connect(func(): exit_requested.emit())
 		_apply_exit_button_styles()
 
+func _apply_header_bar_style() -> void:
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(0.975, 0.985, 1.0, 1.0)
+	style.border_width_left = 1; style.border_width_top = 1; style.border_width_right = 1; style.border_width_bottom = 2
+	style.border_color = Color(0.86, 0.89, 0.94, 1.0)
+	style.corner_radius_top_left = 10; style.corner_radius_top_right = 10; style.corner_radius_bottom_left = 10; style.corner_radius_bottom_right = 10
+	style.content_margin_left = 16; style.content_margin_top = 10; style.content_margin_right = 16; style.content_margin_bottom = 10
+	add_theme_stylebox_override("panel", style)
+
 func configure_header(title: String, current_index: int, total_count: int) -> void:
 	var title_lbl = title_label if title_label else get_node_or_null("MarginContainer/MainHBox/TitleLabel") as Label
 	if title_lbl:
 		title_lbl.text = "⚡ WORK QUEUE: " + title
+		title_lbl.add_theme_font_size_override("font_size", 16)
+		title_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
 	update_progress(current_index, total_count)
 
 func update_progress(current_index: int, total_count: int) -> void:
@@ -37,6 +49,8 @@ func update_progress(current_index: int, total_count: int) -> void:
 			lbl.text = "Item " + str(idx) + " of " + str(total_count)
 		else:
 			lbl.text = "Queue Empty"
+		lbl.add_theme_font_size_override("font_size", 14)
+		lbl.add_theme_color_override("font_color", Color(0.35, 0.42, 0.52, 1.0))
 	
 	var pbar = progress_bar if progress_bar else get_node_or_null("MarginContainer/MainHBox/ProgressHBox/ProgressBar") as ProgressBar
 	if pbar:

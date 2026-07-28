@@ -35,7 +35,7 @@ func configure_card(data: Dictionary) -> void:
 	var count = int(data.get("count", 0))
 	var detail = data.get("supporting_detail", "")
 	var urgency = data.get("urgency", "normal").to_lower()
-	var btn_label = data.get("primary_button", "Start Queue")
+	var btn_label = data.get("primary_button", "Begin Actions")
 	var is_supported = data.get("queue_mode_supported", true)
 
 	if title_label:

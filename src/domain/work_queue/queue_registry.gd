@@ -16,7 +16,7 @@ static func get_registry() -> Dictionary:
 			"count_sql": "SELECT COUNT(*) AS cnt FROM voicemails WHERE status = 'new' AND due_date IS NOT NULL AND due_date != '' AND due_date < date('now', 'localtime');",
 			"record_sql": "SELECT id, voicemail_uuid, caller_phone, caller_name, transcription, due_date, status, created_at FROM voicemails WHERE status = 'new' AND due_date IS NOT NULL AND due_date != '' AND due_date < date('now', 'localtime') ORDER BY due_date ASC;",
 			"completion_sql": "UPDATE voicemails SET status = 'completed' WHERE id = ?;",
-			"primary_button": "Start Queue",
+			"primary_button": "Begin Actions",
 			"queue_mode_supported": true
 		},
 		"unanswered_messages": {
