@@ -22,20 +22,24 @@ func _init(db_instance = null) -> void:
 		db = SQLiteDatabaseScript.new()
 
 func get_queue_count(queue_id: String) -> int:
+	if queue_id == "uncovered_center_hours":
+		return fetch_queue_records("uncovered_center_hours").size()
 	var def = QueueRegistryScript.get_definition(queue_id)
 	if def.is_empty() or not db:
 		return 0
-	
+
 	var res = db.execute(def["count_sql"])
 	if res.get("success", false) and res.get("data", []).size() > 0:
 		return int(res["data"][0].get("cnt", 0))
 	return 0
 
 func fetch_queue_records(queue_id: String) -> Array:
+	if queue_id == "uncovered_center_hours":
+		return QueueRegistryScript.get_uncovered_center_hours_records(db)
 	var def = QueueRegistryScript.get_definition(queue_id)
 	if def.is_empty() or not db:
 		return []
-	
+
 	var res = db.execute(def["record_sql"])
 	if res.get("success", false):
 		return res.get("data", [])

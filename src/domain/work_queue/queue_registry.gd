@@ -7,6 +7,121 @@ extends RefCounted
 static func _parse_time_sql(col_name: String) -> String:
 	return "(CASE WHEN " + col_name + " LIKE '%AM%' OR " + col_name + " LIKE '%PM%' THEN (CAST(substr(" + col_name + ", 1, instr(" + col_name + ", ':') - 1) AS INTEGER) % 12 + CASE WHEN " + col_name + " LIKE '%PM%' THEN 12 ELSE 0 END) * 60 + CAST(substr(" + col_name + ", instr(" + col_name + ", ':') + 1, 2) AS INTEGER) ELSE CAST(substr(" + col_name + ", 1, instr(" + col_name + ", ':') - 1) AS INTEGER) * 60 + CAST(substr(" + col_name + ", instr(" + col_name + ", ':') + 1, 2) AS INTEGER) END)"
 
+static func parse_time_to_minutes(time_str: String) -> int:
+	var s = time_str.strip_edges().to_upper()
+	if s.is_empty(): return 0
+	var is_pm = s.contains("PM")
+	var is_am = s.contains("AM")
+	s = s.replace("AM", "").replace("PM", "").strip_edges()
+	var parts = s.split(":")
+	if parts.size() < 2: return 0
+	var hr = parts[0].to_int()
+	var mn = parts[1].to_int()
+	if is_pm and hr < 12:
+		hr += 12
+	elif is_am and hr == 12:
+		hr = 0
+	return hr * 60 + mn
+
+static func format_minutes_to_time(minutes: int) -> String:
+	var total_min = clamp(minutes, 0, 1439)
+	var hr = total_min / 60
+	var mn = total_min % 60
+	var suffix = "AM"
+	if hr >= 12:
+		suffix = "PM"
+		if hr > 12:
+			hr -= 12
+	elif hr == 0:
+		hr = 12
+	return "%02d:%02d %s" % [hr, mn, suffix]
+
+static func get_uncovered_center_hours_records(db: RefCounted) -> Array:
+	if not db: return []
+
+	var date_cte = "WITH RECURSIVE next_14d(date_text, day_name) AS (SELECT date('now', 'localtime'), CASE strftime('%w', date('now', 'localtime')) WHEN '0' THEN 'Sunday' WHEN '1' THEN 'Monday' WHEN '2' THEN 'Tuesday' WHEN '3' THEN 'Wednesday' WHEN '4' THEN 'Thursday' WHEN '5' THEN 'Friday' WHEN '6' THEN 'Saturday' END UNION ALL SELECT date(date_text, '+1 day'), CASE strftime('%w', date(date_text, '+1 day')) WHEN '0' THEN 'Sunday' WHEN '1' THEN 'Monday' WHEN '2' THEN 'Tuesday' WHEN '3' THEN 'Wednesday' WHEN '4' THEN 'Thursday' WHEN '5' THEN 'Friday' WHEN '6' THEN 'Saturday' END FROM next_14d WHERE date_text < date('now', 'localtime', '+13 days')) SELECT d.date_text, d.day_name, h.open_time, h.close_time, h.id as open_hours_id FROM next_14d d JOIN center_open_hours h ON (h.day_of_week = d.day_name AND h.is_closed = 0) ORDER BY d.date_text ASC;"
+
+	var res = db.execute(date_cte)
+	if not res.get("success", false):
+		return []
+
+	var open_days = res.get("data", [])
+	var uncovered_records = []
+
+	for day_info in open_days:
+		var d_text = str(day_info.get("date_text", ""))
+		var d_name = str(day_info.get("day_name", ""))
+		var open_str = str(day_info.get("open_time", ""))
+		var close_str = str(day_info.get("close_time", ""))
+		var open_hours_id = day_info.get("open_hours_id", 0)
+
+		var h_open = parse_time_to_minutes(open_str)
+		var h_close = parse_time_to_minutes(close_str)
+		if h_open >= h_close:
+			continue
+
+		var shift_sql = "SELECT entry_uuid, person_name, shift_role, start_time, end_time, area FROM schedule_entries WHERE shift_date = ? AND (area = 'Study Center' OR area = 'Gathering Room') AND person_name IS NOT NULL AND TRIM(person_name) != '';"
+		var shift_res = db.execute(shift_sql, [d_text])
+		var shifts = shift_res.get("data", []) if shift_res.get("success", false) else []
+
+		var covering_intervals = []
+		for s_item in shifts:
+			var s_st = parse_time_to_minutes(str(s_item.get("start_time", "")))
+			var s_end = parse_time_to_minutes(str(s_item.get("end_time", "")))
+
+			var clip_st = max(s_st, h_open)
+			var clip_end = min(s_end, h_close)
+			if clip_st < clip_end:
+				covering_intervals.append([clip_st, clip_end])
+
+		covering_intervals.sort_custom(func(a, b): return a[0] < b[0])
+
+		var merged = []
+		for cov in covering_intervals:
+			if merged.is_empty():
+				merged.append([cov[0], cov[1]])
+			else:
+				var last = merged[-1]
+				if cov[0] <= last[1]:
+					last[1] = max(last[1], cov[1])
+				else:
+					merged.append([cov[0], cov[1]])
+
+		var curr = h_open
+		for cov in merged:
+			if cov[0] > curr:
+				var unc_st_str = format_minutes_to_time(curr)
+				var unc_end_str = format_minutes_to_time(cov[0])
+				uncovered_records.append({
+					"id": open_hours_id,
+					"date_text": d_text,
+					"day_name": d_name,
+					"open_time": unc_st_str,
+					"close_time": unc_end_str,
+					"start_time": unc_st_str,
+					"end_time": unc_end_str,
+					"title": "Study Center Operating Hours",
+					"room_location": "Study Center"
+				})
+			curr = max(curr, cov[1])
+
+		if curr < h_close:
+			var unc_st_str = format_minutes_to_time(curr)
+			var unc_end_str = format_minutes_to_time(h_close)
+			uncovered_records.append({
+				"id": open_hours_id,
+				"date_text": d_text,
+				"day_name": d_name,
+				"open_time": unc_st_str,
+				"close_time": unc_end_str,
+				"start_time": unc_st_str,
+				"end_time": unc_end_str,
+				"title": "Study Center Operating Hours",
+				"room_location": "Study Center"
+			})
+
+	return uncovered_records
+
 static func get_registry() -> Dictionary:
 	var s_st = _parse_time_sql("s.start_time")
 	var s_end = _parse_time_sql("s.end_time")

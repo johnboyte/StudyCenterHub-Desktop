@@ -863,6 +863,10 @@ func _refresh_tab_content() -> void:
 	if not db: return
 	if not sch_service: sch_service = SchedulesServiceScript.new(db)
 
+	if is_queue_mode and queue_controller:
+		queue_controller.start_queue(active_queue_id)
+		_refresh_queue_view()
+
 	all_card_nodes.clear()
 	all_day_columns.clear()
 	for child in content_card.get_children():
