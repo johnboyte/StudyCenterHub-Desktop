@@ -30,6 +30,10 @@ func _init():
 		print("FAIL: DirectoryView db property was not set to AppShell db.")
 		quit(1); return
 
-	print("PASS: DirectoryView receives AppShell db property correctly.")
+	if shell.current_view_node.read_service != null and shell.current_view_node.read_service.db != db:
+		print("FAIL: DirectoryView read_service.db was not updated to active db instance.")
+		quit(1); return
+
+	print("PASS: DirectoryView receives AppShell db property and updates read_service cleanly.")
 	print("==========================================================")
 	quit(0)

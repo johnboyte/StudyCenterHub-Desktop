@@ -19,7 +19,14 @@ const WorkQueueHeaderBarScene = preload("res://app/scenes/components/work_queue_
 const QueueControllerScript = preload("res://src/domain/work_queue/queue_controller.gd")
 const QueueRegistryScript = preload("res://src/domain/work_queue/queue_registry.gd")
 
-var db: RefCounted
+var db: RefCounted:
+	set(value):
+		db = value
+		if db:
+			read_service = DirectoryReadServiceScript.new(db)
+			if is_node_ready():
+				call_deferred("refresh_view")
+
 var read_service: RefCounted
 var app_shell: Node = null
 
@@ -89,6 +96,7 @@ func _ready() -> void:
 	if not read_service:
 		_init_read_service()
 	_connect_signals()
+	call_deferred("refresh_view")
 
 func receive_navigation_context(params: Dictionary) -> void:
 	if params.get("queue_mode", false) == true:
