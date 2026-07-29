@@ -356,6 +356,8 @@ func switch_view(view_name: String, params: Dictionary = {}) -> bool:
 		var scene_res = load("res://app/scenes/directory_view.tscn")
 		if scene_res:
 			current_view_node = scene_res.instantiate()
+			if "db" in current_view_node:
+				current_view_node.db = db
 			if "read_service" in current_view_node:
 				current_view_node.read_service = read_service
 	elif view_name == "administration":
@@ -437,6 +439,8 @@ func switch_view(view_name: String, params: Dictionary = {}) -> bool:
 			current_view_node.offset_bottom = 0
 		if view_name == "kiosk":
 			if content_area: content_area.add_child(current_view_node)
+		elif view_name == "card_print_queue":
+			pass
 		else:
 			if content_container: content_container.add_child(current_view_node)
 
