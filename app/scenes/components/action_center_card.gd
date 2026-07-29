@@ -40,11 +40,13 @@ func configure_card(data: Dictionary) -> void:
 
 	if title_label:
 		title_label.text = title
+		title_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		title_label.add_theme_font_size_override("font_size", 16)
 		title_label.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
 
 	if count_badge:
 		count_badge.text = str(count) + " Item" + ("s" if count != 1 else "") + " Need Action"
+		count_badge.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		if count > 0:
 			count_badge.add_theme_font_size_override("font_size", 17)
 			count_badge.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
@@ -54,6 +56,7 @@ func configure_card(data: Dictionary) -> void:
 
 	if detail_label:
 		detail_label.text = detail
+		detail_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		detail_label.visible = not detail.is_empty()
 		detail_label.add_theme_font_size_override("font_size", 13)
 		detail_label.add_theme_color_override("font_color", Color(0.40, 0.46, 0.54, 1.0))

@@ -162,13 +162,15 @@ func _style_action_tile(btn: Button, icon_emoji: String, title: String, subtitle
 
 	var title_lbl = Label.new()
 	title_lbl.text = title
-	title_lbl.add_theme_font_size_override("font_size", 17)
+	title_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	title_lbl.add_theme_font_size_override("font_size", 16)
 	title_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
 	vbox.add_child(title_lbl)
 
 	var sub_lbl = Label.new()
 	sub_lbl.text = subtitle
-	sub_lbl.add_theme_font_size_override("font_size", 13)
+	sub_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	sub_lbl.add_theme_font_size_override("font_size", 12)
 	sub_lbl.add_theme_color_override("font_color", Color(0.38, 0.44, 0.52, 1.0))
 	vbox.add_child(sub_lbl)
 
@@ -181,9 +183,18 @@ func _setup_middle_cards() -> void:
 	var c_today = card_today_center if card_today_center else get_node_or_null("MarginContainer/MainVBox/MiddleGrid/TodayCenterCard") as PanelContainer
 	var c_ai = card_ai_assistant if card_ai_assistant else get_node_or_null("MarginContainer/MainVBox/MiddleGrid/AiAssistantCard") as PanelContainer
 
-	if c_needs: _populate_needs_attention_card(c_needs)
-	if c_today: _build_card_panel(c_today, "Today at the Center", _build_today_center_content())
-	if c_ai: _build_ai_assistant_card(c_ai)
+	if c_needs:
+		c_needs.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		c_needs.size_flags_stretch_ratio = 1.0
+		_populate_needs_attention_card(c_needs)
+	if c_today:
+		c_today.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		c_today.size_flags_stretch_ratio = 0.85
+		_build_card_panel(c_today, "Today at the Center", _build_today_center_content())
+	if c_ai:
+		c_ai.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		c_ai.size_flags_stretch_ratio = 0.85
+		_build_ai_assistant_card(c_ai)
 
 func _get_queue_controller() -> RefCounted:
 	if queue_controller == null:
@@ -462,29 +473,33 @@ func _build_today_center_content() -> Control:
 
 		var time_lbl = Label.new()
 		time_lbl.text = item["time"]
-		time_lbl.custom_minimum_size = Vector2(85, 0)
+		time_lbl.custom_minimum_size = Vector2(70, 0)
 		time_lbl.add_theme_font_size_override("font_size", 13)
 		time_lbl.add_theme_color_override("font_color", Color(0.18, 0.24, 0.34, 1.0))
 		hbox.add_child(time_lbl)
 
 		var info_vbox = VBoxContainer.new()
+		info_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		info_vbox.add_theme_constant_override("separation", 2)
 
 		var tag_lbl = Label.new()
 		tag_lbl.text = item["type"]
+		tag_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		tag_lbl.add_theme_font_size_override("font_size", 11)
 		tag_lbl.add_theme_color_override("font_color", item["color"])
 		info_vbox.add_child(tag_lbl)
 
 		var t_lbl = Label.new()
 		t_lbl.text = item["title"]
-		t_lbl.add_theme_font_size_override("font_size", 15)
+		t_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		t_lbl.add_theme_font_size_override("font_size", 14)
 		t_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
 		info_vbox.add_child(t_lbl)
 
 		var r_lbl = Label.new()
 		r_lbl.text = item["sub"]
-		r_lbl.add_theme_font_size_override("font_size", 13)
+		r_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		r_lbl.add_theme_font_size_override("font_size", 12)
 		r_lbl.add_theme_color_override("font_color", Color(0.40, 0.46, 0.54, 1.0))
 		info_vbox.add_child(r_lbl)
 
@@ -516,12 +531,14 @@ func _build_ai_assistant_card(card: PanelContainer) -> void:
 
 	var title_lbl = Label.new()
 	title_lbl.text = "💥 Ministry Assistant"
+	title_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	title_lbl.add_theme_font_size_override("font_size", 20)
 	title_lbl.add_theme_color_override("font_color", _get_active_theme_color())
 	vbox.add_child(title_lbl)
 
 	var sub_lbl = Label.new()
 	sub_lbl.text = "I've prepared your daily brief for today:"
+	sub_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	sub_lbl.add_theme_font_size_override("font_size", 15)
 	sub_lbl.add_theme_color_override("font_color", Color(0.25, 0.32, 0.42, 1.0))
 	vbox.add_child(sub_lbl)
@@ -573,17 +590,20 @@ func _build_ai_assistant_card(card: PanelContainer) -> void:
 	for b in bullets:
 		var l = Label.new()
 		l.text = b
+		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		l.add_theme_font_size_override("font_size", 14)
 		l.add_theme_color_override("font_color", Color(0.18, 0.24, 0.32, 1.0))
 		vbox.add_child(l)
 
 	var btn_hbox = HBoxContainer.new()
+	btn_hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	btn_hbox.add_theme_constant_override("separation", 10)
 
 	var btn_ask = Button.new()
 	btn_ask.text = "Ask Assistant"
-	btn_ask.custom_minimum_size = Vector2(130, 40)
-	btn_ask.add_theme_font_size_override("font_size", 15)
+	btn_ask.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	btn_ask.custom_minimum_size = Vector2(0, 40)
+	btn_ask.add_theme_font_size_override("font_size", 14)
 
 	var ask_style = StyleBoxFlat.new()
 	ask_style.bg_color = _get_active_theme_color()
@@ -597,8 +617,9 @@ func _build_ai_assistant_card(card: PanelContainer) -> void:
 
 	var btn_tasks = Button.new()
 	btn_tasks.text = "View All Tasks"
-	btn_tasks.custom_minimum_size = Vector2(120, 40)
-	btn_tasks.add_theme_font_size_override("font_size", 15)
+	btn_tasks.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	btn_tasks.custom_minimum_size = Vector2(0, 40)
+	btn_tasks.add_theme_font_size_override("font_size", 14)
 
 	var task_style = StyleBoxFlat.new()
 	task_style.bg_color = Color(1.0, 1.0, 1.0, 1.0)
