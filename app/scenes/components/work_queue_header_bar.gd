@@ -39,6 +39,11 @@ func configure_header(title: String, current_index: int, total_count: int) -> vo
 		title_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
 	update_progress(current_index, total_count)
 
+func hide_exit_button() -> void:
+	var btn_x = btn_exit if btn_exit else get_node_or_null("MarginContainer/MainHBox/ActionsHBox/BtnExit") as Button
+	if btn_x:
+		btn_x.visible = false
+
 func update_progress(current_index: int, total_count: int) -> void:
 	var idx = current_index + 1
 	if idx < 0: idx = 0

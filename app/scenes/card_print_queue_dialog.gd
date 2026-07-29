@@ -66,7 +66,7 @@ func _attach_header_bar() -> void:
 		var rem_count = queue_controller.get_remaining_count() if queue_controller else 0
 		header_bar_instance.configure_header("Pending Member Cards", cur_idx, rem_count)
 		header_bar_instance.pause_requested.connect(_on_queue_pause)
-		header_bar_instance.exit_requested.connect(_on_queue_exit)
+		header_bar_instance.hide_exit_button()
 
 func _on_queue_pause() -> void:
 	if header_bar_instance and queue_controller:
@@ -130,7 +130,7 @@ func show_dialog() -> void:
 	var close_btn = Button.new()
 	close_btn.text = " ✕ "
 	close_btn.custom_minimum_size = Vector2(36, 36)
-	close_btn.pressed.connect(func(): queue_free())
+	close_btn.pressed.connect(func(): _on_queue_exit())
 	header_hbox.add_child(close_btn)
 	main_vbox.add_child(header_hbox)
 
