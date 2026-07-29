@@ -615,6 +615,8 @@ func update_full_session_atomic(session_id: int, title: String, session_type_id_
 	if changed_fields.size() == 0 and not force_fail_step:
 		return {"success": true, "error": "", "no_changes": true, "session_id": session_id, "session_uuid": session_uuid}
 
+	var stmts = []
+
 	# Statement 1: Update Session Row
 	stmts.append({
 		"sql": "UPDATE sessions SET title = ?, session_type_id = ?, session_type = ?, date_text = ?, start_time = ?, end_time = ?, room_location = ?, max_capacity = ?, signup_required = ?, limit_signups = ?, description = ?, term_override = ?, type_override = ?, staffing_requirement = ?, updated_at = datetime('now') WHERE id = ?;",

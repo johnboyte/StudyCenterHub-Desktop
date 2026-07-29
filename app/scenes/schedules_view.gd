@@ -1836,6 +1836,12 @@ func open_list_manager_modal(type_title: String, list_ref: Array, on_update_cb: 
 	dialog.popup_centered()
 
 func _render_shift_cards(container: PanelContainer, hours_data: Dictionary) -> void:
+	var main_st = StyleBoxFlat.new()
+	main_st.bg_color = Color(0.96, 0.97, 0.99, 1.0)
+	main_st.corner_radius_top_left = 10; main_st.corner_radius_top_right = 10; main_st.corner_radius_bottom_left = 10; main_st.corner_radius_bottom_right = 10
+	main_st.content_margin_left = 10; main_st.content_margin_top = 10; main_st.content_margin_right = 10; main_st.content_margin_bottom = 10
+	container.add_theme_stylebox_override("panel", main_st)
+
 	var scroll = ScrollContainer.new(); scroll.size_flags_horizontal = SIZE_EXPAND_FILL; scroll.size_flags_vertical = SIZE_EXPAND_FILL
 	var hbox = HBoxContainer.new(); hbox.size_flags_horizontal = SIZE_EXPAND_FILL; hbox.add_theme_constant_override("separation", 10)
 
@@ -3563,7 +3569,7 @@ class DayColumnControl extends PanelContainer:
 		main_view = view
 
 		var st = StyleBoxFlat.new()
-		st.bg_color = Color(1.0, 0.97, 0.95, 1.0) if is_target_day else Color(0.98, 0.99, 1.0, 1.0)
+		st.bg_color = Color(1.0, 0.97, 0.95, 1.0) if is_target_day else Color(0.96, 0.97, 0.99, 1.0)
 		st.border_width_left = 2 if is_target_day else 1
 		st.border_width_top = 2 if is_target_day else 1
 		st.border_width_right = 2 if is_target_day else 1
