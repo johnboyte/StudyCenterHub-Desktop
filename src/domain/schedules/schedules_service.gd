@@ -200,9 +200,13 @@ func create_shift_entry_atomic(person_name: String, shift_role: String, shift_da
 	var device_uuid = "dev_macbook_primary_node"
 	var sess_id_val = int(session_id) if (session_id != null and str(session_id).is_valid_int() and int(session_id) > 0) else null
 
+	var clean_area = area.strip_edges()
+	if clean_area == "" or clean_area == "Gathering Room":
+		clean_area = "Study Center"
+
 	var stmt1 = {
 		"sql": "INSERT INTO schedule_entries (entry_uuid, person_name, shift_role, shift_date, start_time, end_time, area, notes, session_id, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 999);",
-		"args": [entry_uuid, person_name, shift_role, shift_date, start_time, end_time, area, notes, sess_id_val]
+		"args": [entry_uuid, person_name, shift_role, shift_date, start_time, end_time, clean_area, notes, sess_id_val]
 	}
 
 	var payload_dict = {

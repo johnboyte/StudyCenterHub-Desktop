@@ -16,10 +16,10 @@ var warning_label: Label
 var assign_button: Button
 
 const VALID_ROLES = [
-	"Shift Supervisor (Staff)",
-	"Study Tutor (Intern)",
-	"Check-In Host (Vol)",
-	"AV Tech (Staff)"
+	"Volunteer",
+	"Intern",
+	"Staff",
+	"Team Leader"
 ]
 
 func _init(database: RefCounted = null) -> void:
@@ -77,9 +77,9 @@ func _build_ui() -> void:
 	person_dropdown.item_selected.connect(_on_selection_changed)
 	vbox.add_child(person_dropdown)
 
-	# Role Selection
+	# Classification Selection
 	var r_hdr = Label.new()
-	r_hdr.text = "Select Shift Role:"
+	r_hdr.text = "Select Staff Classification:"
 	r_hdr.add_theme_font_size_override("font_size", 13)
 	vbox.add_child(r_hdr)
 
@@ -114,7 +114,7 @@ func _load_people() -> void:
 
 	if not db: return
 
-	var res = db.execute("SELECT id, person_uuid, human_id, first_name, last_name, primary_role FROM people ORDER BY last_name ASC, first_name ASC;")
+	var res = db.execute("SELECT id, person_uuid, human_id, first_name, last_name, primary_role, COALESCE(staff_classification, 'Staff') as staff_classification FROM people ORDER BY last_name ASC, first_name ASC;")
 	if res.get("success", false):
 		var rows = res.get("data", [])
 		for r in rows:
@@ -123,15 +123,16 @@ func _load_people() -> void:
 			var name = (fn + " " + ln).strip_edges()
 			if name == "": name = "Unnamed (" + str(r.get("human_id", "")) + ")"
 			var pid = int(r.get("id", 0))
-			var role = str(r.get("primary_role", "Participant"))
+			var cls_val = str(r.get("staff_classification", r.get("primary_role", "Staff")))
+			if cls_val.contains("Supervisor") or cls_val == "Shift Supervisor": cls_val = "Team Leader"
 
 			eligible_people.append({
 				"id": pid,
 				"name": name,
-				"role": role,
+				"role": cls_val,
 				"person_uuid": str(r.get("person_uuid", ""))
 			})
-			person_dropdown.add_item(name + " [" + role + "]", eligible_people.size())
+			person_dropdown.add_item(name + " [" + cls_val + "]", eligible_people.size())
 
 	_validate_form()
 
@@ -151,6 +152,13 @@ func _on_selection_changed(idx: int) -> void:
 	selected_person_idx = idx
 	if person_dropdown:
 		person_dropdown.selected = idx
+	if idx > 0 and idx <= eligible_people.size():
+		var sel_p = eligible_people[idx - 1]
+		var cls_name = sel_p.get("role", "Staff")
+		for r_idx in range(VALID_ROLES.size()):
+			if VALID_ROLES[r_idx] == cls_name:
+				if role_dropdown: role_dropdown.selected = r_idx
+				break
 	_validate_form()
 
 func _validate_form() -> void:
@@ -186,7 +194,7 @@ func _on_confirmed() -> void:
 		return
 
 	var sel_person = eligible_people[p_idx - 1]
-	var sel_role = VALID_ROLES[role_dropdown.selected] if (role_dropdown and role_dropdown.selected >= 0 and role_dropdown.selected < VALID_ROLES.size()) else "Shift Supervisor (Staff)"
+	var sel_role = VALID_ROLES[role_dropdown.selected] if (role_dropdown and role_dropdown.selected >= 0 and role_dropdown.selected < VALID_ROLES.size()) else "Team Leader"
 
 	var payload = {
 		"session_id": int(session_data.get("id", 0)),

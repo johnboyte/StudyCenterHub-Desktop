@@ -45,7 +45,7 @@ var queue_card_container: PanelContainer = null
 
 # Front-End Editable Lists for Center Areas & Shift Roles
 var available_areas: Array = ["Study Center", "Gathering Room", "Kitchen", "Study Room #1", "Study Room #2", "Study Room #3", "The Study", "The Back Porch", "Whole Center"]
-var available_roles: Array = ["Shift Supervisor (Staff)", "Study Tutor (Intern)", "Check-In Host (Vol)", "AV Tech (Staff)"]
+var available_roles: Array = ["Volunteer", "Intern", "Staff", "Team Leader"]
 
 # Standardized Time Selector Options (Used throughout the app!)
 const STANDARD_TIME_SLOTS = [
@@ -1227,8 +1227,8 @@ func open_shift_modal(existing_shift_data: Dictionary = {}) -> void:
 	mvbox.add_child(search_hbox)
 	mvbox.add_child(opt_person)
 
-	# 2. Shift Role Selector (Front-End Add & Manage Roles!)
-	var lbl_role = Label.new(); lbl_role.text = "Shift Role:"; lbl_role.add_theme_font_size_override("font_size", 13)
+	# 2. Staff Classification Selector
+	var lbl_role = Label.new(); lbl_role.text = "Staff Classification:"; lbl_role.add_theme_font_size_override("font_size", 13)
 	mvbox.add_child(lbl_role)
 
 	var role_hbox = HBoxContainer.new(); role_hbox.add_theme_constant_override("separation", 8)
@@ -1243,9 +1243,8 @@ func open_shift_modal(existing_shift_data: Dictionary = {}) -> void:
 
 	var btn_manage_roles = Button.new(); btn_manage_roles.text = "⚙️ Manage Roles"; btn_manage_roles.custom_minimum_size = Vector2(130, 36)
 	_style_outline_button(btn_manage_roles)
-	btn_manage_roles.pressed.connect(func():
-		open_list_manager_modal("Role", available_roles, populate_roles)
-	)
+	btn_manage_roles.disabled = true
+	btn_manage_roles.tooltip_text = "Staff Classifications are standardized (Volunteer, Intern, Staff, Team Leader)"
 
 	role_hbox.add_child(opt_role)
 	role_hbox.add_child(btn_manage_roles)
@@ -1253,6 +1252,7 @@ func open_shift_modal(existing_shift_data: Dictionary = {}) -> void:
 
 	if is_edit_mode:
 		var cur_role = str(existing_shift_data.get("shift_role", ""))
+		if cur_role.contains("Supervisor") or cur_role == "Shift Supervisor": cur_role = "Team Leader"
 		if not cur_role in available_roles: available_roles.append(cur_role); populate_roles.call()
 		for i in range(available_roles.size()):
 			if available_roles[i] == cur_role: opt_role.select(i); break
@@ -1320,7 +1320,7 @@ func open_shift_modal(existing_shift_data: Dictionary = {}) -> void:
 
 	mvbox.add_child(time_hbox)
 
-	# 5. Center or Area Selector
+	# 5. Center or Area Selector (Default to Study Center & Disable Selection)
 	var lbl_area = Label.new(); lbl_area.text = "Center or Area:"; lbl_area.add_theme_font_size_override("font_size", 13)
 	mvbox.add_child(lbl_area)
 
@@ -1334,9 +1334,13 @@ func open_shift_modal(existing_shift_data: Dictionary = {}) -> void:
 
 	populate_areas.call()
 	opt_area.select(0) # Default = "Study Center"
+	opt_area.disabled = true
+	opt_area.tooltip_text = "Area selection disabled — defaulting to Study Center"
 
 	var btn_manage_areas = Button.new(); btn_manage_areas.text = "⚙️ Manage Areas"; btn_manage_areas.custom_minimum_size = Vector2(130, 36)
 	_style_outline_button(btn_manage_areas)
+	btn_manage_areas.disabled = true
+	btn_manage_areas.tooltip_text = "Area scheduling will be enabled in a future release"
 	btn_manage_areas.pressed.connect(func():
 		open_list_manager_modal("Area", available_areas, populate_areas)
 	)
@@ -3533,18 +3537,47 @@ class ShiftCardControl extends PanelContainer:
 		add_theme_stylebox_override("panel", st)
 
 		var ivbox = VBoxContainer.new()
-		var name = str(shift_data.get("person_name", ""))
-		var role = str(shift_data.get("shift_role", ""))
-		var area = str(shift_data.get("area", ""))
+		ivbox.add_theme_constant_override("separation", 2)
 
-		var prefix = "✂️ " if is_pending_cut else ("☑️ " if is_selected else "👤 ")
-		var n_lbl = Label.new(); n_lbl.text = prefix + name
-		n_lbl.add_theme_font_size_override("font_size", 15); n_lbl.add_theme_color_override("font_color", Color(0.12, 0.16, 0.22, 1.0))
+		var start_t = str(shift_data.get("start_time", ""))
+		var end_t = str(shift_data.get("end_time", ""))
+		var time_str = start_t + " - " + end_t if (start_t != "" and end_t != "") else ""
+
+		var name = str(shift_data.get("person_name", ""))
+		var role = str(shift_data.get("shift_role", "Staff"))
+		var area = str(shift_data.get("area", "Study Center"))
+		if area == "" or area == "null": area = "Study Center"
+
+		var prefix = "✂️ " if is_pending_cut else ("☑️ " if is_selected else "")
+
+		# 1. Operating Hours
+		if not time_str.is_empty():
+			var t_lbl = Label.new()
+			t_lbl.text = "🕒 " + time_str
+			t_lbl.add_theme_font_size_override("font_size", 12)
+			t_lbl.add_theme_color_override("font_color", Color(0.12, 0.45, 0.22, 1.0))
+			ivbox.add_child(t_lbl)
+
+		# 2. Person
+		var n_lbl = Label.new()
+		n_lbl.text = prefix + "👤 " + name
+		n_lbl.add_theme_font_size_override("font_size", 14)
+		n_lbl.add_theme_color_override("font_color", Color(0.12, 0.16, 0.22, 1.0))
 		ivbox.add_child(n_lbl)
 
-		var r_lbl = Label.new(); r_lbl.text = role + "\n" + area
-		r_lbl.add_theme_font_size_override("font_size", 13); r_lbl.add_theme_color_override("font_color", Color(0.22, 0.28, 0.38, 1.0))
+		# 3. Staff Classification
+		var r_lbl = Label.new()
+		r_lbl.text = role
+		r_lbl.add_theme_font_size_override("font_size", 12)
+		r_lbl.add_theme_color_override("font_color", Color(0.40, 0.46, 0.54, 1.0))
 		ivbox.add_child(r_lbl)
+
+		# 4. Study Center (Area)
+		var a_lbl = Label.new()
+		a_lbl.text = area
+		a_lbl.add_theme_font_size_override("font_size", 11)
+		a_lbl.add_theme_color_override("font_color", Color(0.55, 0.60, 0.68, 1.0))
+		ivbox.add_child(a_lbl)
 
 		add_child(ivbox)
 

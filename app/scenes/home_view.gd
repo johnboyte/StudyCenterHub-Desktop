@@ -451,7 +451,7 @@ func _build_today_center_content() -> Control:
 		items = [
 			{"time": "9:00 AM", "type": "📚 SESSION TODAY", "title": "Bible Study - Adults", "sub": "Fellowship Hall", "color": Color(0.12, 0.45, 0.85, 1.0)},
 			{"time": "11:00 AM", "type": "📚 SESSION TODAY", "title": "Youth Group", "sub": "Youth Room", "color": Color(0.12, 0.45, 0.85, 1.0)},
-			{"time": "3:00 PM", "type": "👤 WORKING TODAY", "title": "John Smith (Shift Supervisor)", "sub": "Assigned to: Gathering Room", "color": Color(0.15, 0.65, 0.35, 1.0)},
+			{"time": "3:00 PM", "type": "👤 WORKING TODAY", "title": "John Smith (Team Leader)", "sub": "Assigned to: Study Center", "color": Color(0.15, 0.65, 0.35, 1.0)},
 			{"time": "3:30 PM", "type": "👤 WORKING TODAY", "title": "Sarah Jenkins (Study Tutor)", "sub": "Assigned to: Study Room #1", "color": Color(0.15, 0.65, 0.35, 1.0)},
 			{"time": "🎂 Today", "type": "🎉 BIRTHDAY TODAY", "title": "Emily Watson's Birthday", "sub": "Constituent Role: Volunteer", "color": Color(0.85, 0.35, 0.65, 1.0)}
 		]

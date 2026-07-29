@@ -15,7 +15,7 @@ var active_tab: String = "modules"
 var twilio_service: RefCounted
 var config_service: RefCounted
 var selected_user_id: int = 0
-var selected_rbac_role: String = "Shift Supervisor"
+var selected_rbac_role: String = "Team Leader"
 
 @onready var btn_tab_modules: Button = %BtnTabModules
 @onready var btn_tab_rbac: Button = %BtnTabRbac
@@ -372,7 +372,7 @@ func _render_rbac_tab() -> void:
 
 	var role_opt = OptionButton.new(); role_opt.custom_minimum_size = Vector2(0, 46); _style_input_control(role_opt, 18)
 	role_opt.add_item("👑 Administrator (Full Authority)", 0)
-	role_opt.add_item("📋 Shift Supervisor", 1)
+	role_opt.add_item("📋 Team Leader", 1)
 	role_opt.add_item("👥 Staff Member", 2)
 	role_opt.add_item("🎓 Intern", 3)
 	role_opt.add_item("🤝 Volunteer", 4)

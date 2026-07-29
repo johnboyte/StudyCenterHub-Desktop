@@ -1068,21 +1068,24 @@ func _populate_profile_section(p: Dictionary) -> void:
 	bd_hbox.add_child(bd_edit); bd_hbox.add_child(bd_cal_btn)
 	bd_vbox.add_child(bd_lbl); bd_vbox.add_child(bd_hbox); form_grid.add_child(bd_vbox)
 
-	# Primary Role
+	# Primary Role / Staff Classification
 	var role_vbox = VBoxContainer.new(); role_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var role_lbl = Label.new(); role_lbl.text = "PRIMARY ROLE"; role_lbl.add_theme_font_size_override("font_size", 14); role_lbl.add_theme_color_override("font_color", Color(0.70, 0.78, 0.88, 1.0))
+	var role_lbl = Label.new(); role_lbl.text = "STAFF CLASSIFICATION"; role_lbl.add_theme_font_size_override("font_size", 14); role_lbl.add_theme_color_override("font_color", Color(0.70, 0.78, 0.88, 1.0))
 	var role_dropdown = OptionButton.new()
 	role_dropdown.add_item("Participant", 0)
 	role_dropdown.add_item("Staff", 1)
 	role_dropdown.add_item("Volunteer", 2)
 	role_dropdown.add_item("Intern", 3)
+	role_dropdown.add_item("Team Leader", 4)
 	
-	var r_val = _clean_str(p.get("primary_role", "Participant")).to_lower()
-	if r_val == "staff":
+	var r_val = _clean_str(p.get("staff_classification", p.get("primary_role", "Participant")))
+	if r_val.contains("Supervisor") or r_val == "Shift Supervisor" or r_val == "Team Leader":
+		role_dropdown.selected = 4
+	elif r_val.to_lower() == "staff":
 		role_dropdown.selected = 1
-	elif r_val == "volunteer":
+	elif r_val.to_lower() == "volunteer" or r_val.to_lower().contains("vol"):
 		role_dropdown.selected = 2
-	elif r_val == "intern":
+	elif r_val.to_lower() == "intern":
 		role_dropdown.selected = 3
 	else:
 		role_dropdown.selected = 0
@@ -1153,22 +1156,32 @@ func _populate_profile_section(p: Dictionary) -> void:
 		if db and p_uuid != "":
 			var pref_email = "School" if pe_dropdown.selected == 1 else "Main"
 			var role_sel_txt = role_dropdown.get_item_text(role_dropdown.selected)
-			var role_db_val = "Participant"
-			if role_sel_txt == "Staff":
-				role_db_val = "staff"
-			elif role_sel_txt == "Volunteer":
-				role_db_val = "volunteer"
-			elif role_sel_txt == "Intern":
-				role_db_val = "intern"
-				
+			var role_db_val = role_sel_txt
+
 			var flag_db_val = flag_dropdown.get_item_text(flag_dropdown.selected)
 			var grade_sel_txt = gr_dropdown.get_item_text(gr_dropdown.selected)
 			if grade_sel_txt == "None":
 				grade_sel_txt = ""
-			
-			db.execute("UPDATE people SET first_name = ?, last_name = ?, suffix = ?, phone = ?, email = ?, school_email = ?, preferred_email = ?, birthday = ?, primary_role = ?, flag_status = ?, grade = ? WHERE person_uuid = ?;",
-				[fn_edit.text.strip_edges(), ln_edit.text.strip_edges(), suf_edit.text.strip_edges(), ph_edit.text.strip_edges(), em_edit.text.strip_edges(), se_edit.text.strip_edges(), pref_email, _ui_to_db_date(bd_edit.text.strip_edges()), role_db_val, flag_db_val, grade_sel_txt, p_uuid])
-			refresh_view()
+
+			var old_cls = _clean_str(p.get("staff_classification", p.get("primary_role", "Participant")))
+			if old_cls.contains("Supervisor") or old_cls == "Shift Supervisor": old_cls = "Team Leader"
+
+			var full_name = (fn_edit.text.strip_edges() + " " + ln_edit.text.strip_edges()).strip_edges()
+			var pid = int(p.get("id", 0))
+
+			var execute_save = func():
+				db.execute("UPDATE people SET first_name = ?, last_name = ?, suffix = ?, phone = ?, email = ?, school_email = ?, preferred_email = ?, birthday = ?, primary_role = ?, staff_classification = ?, flag_status = ?, grade = ? WHERE person_uuid = ?;",
+					[fn_edit.text.strip_edges(), ln_edit.text.strip_edges(), suf_edit.text.strip_edges(), ph_edit.text.strip_edges(), em_edit.text.strip_edges(), se_edit.text.strip_edges(), pref_email, _ui_to_db_date(bd_edit.text.strip_edges()), role_db_val, role_db_val, flag_db_val, grade_sel_txt, p_uuid])
+				refresh_view()
+
+			if old_cls != role_sel_txt and role_sel_txt != "Participant":
+				var fut_res = db.execute("SELECT COUNT(*) AS cnt FROM schedule_entries WHERE (person_name = ? OR person_id = ?) AND shift_date >= date('now', 'localtime');", [full_name, pid])
+				var fut_cnt = int(fut_res["data"][0]["cnt"]) if fut_res["success"] and fut_res["data"].size() > 0 else 0
+				if fut_cnt > 0:
+					_show_future_shifts_warning_dialog(full_name, fut_cnt, old_cls, role_sel_txt, execute_save)
+					return
+
+			execute_save.call()
 	)
 	contact_card_vbox.add_child(btn_save_contact)
 
@@ -4096,4 +4109,28 @@ func _open_native_camera_dialog(on_capture_callback: Callable) -> void:
 
 	add_child(cam_dialog)
 	cam_dialog.popup_centered()
+
+func _show_future_shifts_warning_dialog(person_name: String, shift_count: int, old_cls: String, new_cls: String, on_confirm_callback: Callable) -> void:
+	var dlg = AcceptDialog.new()
+	dlg.title = "⚠️ Future Scheduled Shifts Warning"
+	dlg.dialog_text = person_name + " has " + str(shift_count) + " future scheduled shift" + ("s" if shift_count != 1 else "") + ".\n\nChanging Staff Classification from '" + old_cls + "' to '" + new_cls + "' may affect shift expectations.\n\nPlease review those shifts before continuing."
+	dlg.size = Vector2i(520, 220)
+	dlg.exclusive = true
+
+	var btn_jump = dlg.add_button("🗓️ Review Scheduled Shifts", false, "jump")
+	dlg.custom_action.connect(func(action):
+		if action == "jump":
+			dlg.queue_free()
+			if app_shell and app_shell.has_method("switch_view"):
+				app_shell.switch_view("schedules")
+	)
+	dlg.confirmed.connect(func():
+		dlg.queue_free()
+		on_confirm_callback.call()
+	)
+	dlg.canceled.connect(func():
+		dlg.queue_free()
+	)
+	add_child(dlg)
+	dlg.popup_centered()
 

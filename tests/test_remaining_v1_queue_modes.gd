@@ -167,7 +167,7 @@ func run_tests() -> void:
 	var cur_sess = qc.get_current_item()
 	sch_svc.create_shift_entry_atomic(
 		"Marcus Vance",
-		"Shift Supervisor (Staff)",
+		"Team Leader",
 		str(cur_sess.get("date_text")),
 		str(cur_sess.get("start_time")),
 		str(cur_sess.get("end_time")),

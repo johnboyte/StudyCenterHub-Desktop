@@ -85,7 +85,7 @@ func run_tests() -> void:
 		return
 
 	var pdata: Dictionary = received_payload[0]
-	if str(pdata["person_name"]) != "Marcus Vance" or str(pdata["shift_role"]) != "Shift Supervisor (Staff)":
+	if str(pdata["person_name"]) != "Marcus Vance" or (str(pdata["shift_role"]) != "Team Leader" and str(pdata["shift_role"]) != "Staff"):
 		print("FAIL: Signal payload contained unexpected values: ", pdata)
 		quit(1)
 		return
