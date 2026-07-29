@@ -79,6 +79,7 @@ func _on_queue_exit() -> void:
 		header_bar_instance.queue_free()
 		header_bar_instance = null
 	is_queue_mode = false
+	queue_free()
 
 func show_dialog() -> void:
 	layer = 100
