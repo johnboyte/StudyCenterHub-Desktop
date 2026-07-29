@@ -21,6 +21,7 @@ const QueueRegistryScript = preload("res://src/domain/work_queue/queue_registry.
 
 var db: RefCounted
 var read_service: RefCounted
+var app_shell: Node = null
 
 var current_filter: String = "all" # "all", "active", "pending", "inactive"
 var current_query: String = ""
