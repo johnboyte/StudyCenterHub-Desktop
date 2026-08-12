@@ -111,7 +111,11 @@ func create_person(person_data: Dictionary, device_uuid: String = "dev_macbook_p
 			var com_svc = CommunicationsServiceScript.new(db)
 			com_svc.email_digital_member_pass(person_id, "Staff Administrator")
 
-	return created_res
+	var response = created_res.duplicate()
+	if created_res["success"]:
+		response["person_uuid"] = person_uuid
+		response["event_uuid"] = event_uuid
+	return response
 
 func get_person_by_uuid(person_uuid: String) -> Dictionary:
 	if person_uuid == "":

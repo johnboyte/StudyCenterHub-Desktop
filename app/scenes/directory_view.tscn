@@ -227,19 +227,19 @@ text = "Year: 10th"
 layout_mode = 2
 theme_override_constants/separation = 6
 
+[node name="TabOverview" type="Button" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/SectionTabBar"]
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 17
+text = "Overview"
+
 [node name="TabProfile" type="Button" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/SectionTabBar"]
 custom_minimum_size = Vector2(0, 42)
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_font_sizes/font_size = 17
 text = "Profile"
-
-[node name="TabNotes" type="Button" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/SectionTabBar"]
-custom_minimum_size = Vector2(0, 42)
-layout_mode = 2
-size_flags_horizontal = 3
-theme_override_font_sizes/font_size = 17
-text = "Notes"
 
 [node name="TabCommunications" type="Button" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/SectionTabBar"]
 custom_minimum_size = Vector2(0, 42)
@@ -255,12 +255,12 @@ size_flags_horizontal = 3
 theme_override_font_sizes/font_size = 17
 text = "Participation"
 
-[node name="TabOverview" type="Button" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/SectionTabBar"]
+[node name="TabNotes" type="Button" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/SectionTabBar"]
 custom_minimum_size = Vector2(0, 42)
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_font_sizes/font_size = 17
-text = "Overview"
+text = "Notes"
 
 [node name="TabHistory" type="Button" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/SectionTabBar"]
 custom_minimum_size = Vector2(0, 42)
@@ -291,7 +291,7 @@ layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 16
 
-[node name="NotesSection" type="VBoxContainer" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/WorkspaceScroll/SectionStack"]
+[node name="CommunicationsSection" type="VBoxContainer" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/WorkspaceScroll/SectionStack"]
 visible = false
 layout_mode = 2
 size_flags_horizontal = 3
@@ -303,7 +303,7 @@ layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 16
 
-[node name="CommunicationsSection" type="VBoxContainer" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/WorkspaceScroll/SectionStack"]
+[node name="NotesSection" type="VBoxContainer" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/WorkspaceScroll/SectionStack"]
 visible = false
 layout_mode = 2
 size_flags_horizontal = 3

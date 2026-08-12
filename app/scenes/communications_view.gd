@@ -15,10 +15,12 @@ var db: RefCounted:
 		db = value
 		if db and is_node_ready():
 			com_service = CommunicationsServiceScript.new(db)
+			twilio_gateway = com_service.twilio_service
 			_populate_dropdowns()
 			_refresh_all_feeds()
 
 var com_service: RefCounted
+var twilio_gateway: RefCounted
 var person_list: Array = []
 var template_list: Array = []
 var staff_list: Array = []
@@ -44,11 +46,17 @@ var queue_card_container: PanelContainer = null
 @onready var log_card: PanelContainer = %LogCard
 
 func _ready() -> void:
+	add_to_group("sync_listeners")
 	_init_database()
 	_style_card()
 	_populate_dropdowns()
 	_connect_signals()
 	_refresh_all_feeds()
+
+func on_inbound_events_processed(count: int) -> void:
+	if count > 0 and is_inside_tree():
+		print("[CommunicationsView] Auto-refreshing worksheet feeds for ", count, " processed events.")
+		_refresh_all_feeds()
 
 func receive_navigation_context(params: Dictionary) -> void:
 	if params.get("queue_mode", false) == true:
@@ -201,57 +209,224 @@ func _refresh_queue_view() -> void:
 		return
 
 	var item_id = current_item.get("id", 0)
+
+	# --- QUEUE ITEM CARD BRANCHES BY ACTIVE_QUEUE_ID ---
+	if active_queue_id == "failed_outbound_messages":
+		_render_failed_outbound_queue_item(vbox, current_item)
+	elif active_queue_id == "unresolved_inbound_sms":
+		_render_unresolved_inbound_sms_item(vbox, current_item)
+	elif active_queue_id == "unclaimed_scheduled_broadcasts":
+		_render_unclaimed_broadcast_item(vbox, current_item)
+	else:
+		_render_default_voicemail_queue_item(vbox, current_item)
+
+func _render_failed_outbound_queue_item(vbox: VBoxContainer, item: Dictionary) -> void:
+	var item_id = int(item.get("id", 0))
+	var msg_uuid = str(item.get("message_uuid", ""))
+	var rec_name = str(item.get("recipient_name", "Constituent"))
+	var contact = str(item.get("recipient_contact", ""))
+	var body = str(item.get("message_body", ""))
+	var err_code = str(item.get("error_code", "ERR_DELIVERY_FAILED"))
+
+	var head = Label.new(); head.text = "⚠️ Outbound Delivery Failure — " + rec_name + " (" + contact + ")"
+	head.add_theme_font_size_override("font_size", 16); head.add_theme_color_override("font_color", Color(0.85, 0.25, 0.20, 1.0))
+	vbox.add_child(head)
+
+	var err_lbl = Label.new(); err_lbl.text = "Error Code: " + err_code + "  •  Status: Delivery Failed"
+	err_lbl.add_theme_font_size_override("font_size", 13); err_lbl.add_theme_color_override("font_color", Color(0.45, 0.50, 0.60, 1.0))
+	vbox.add_child(err_lbl)
+
+	var msg_lbl = Label.new(); msg_lbl.text = "Message: \"" + body + "\""
+	msg_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD; msg_lbl.add_theme_font_size_override("font_size", 14)
+	vbox.add_child(msg_lbl)
+
+	var btn_hbox = HBoxContainer.new(); btn_hbox.add_theme_constant_override("separation", 12)
+
+	var btn_retry = Button.new(); btn_retry.text = "⚡ Retry Delivery"; btn_retry.custom_minimum_size = Vector2(160, 38)
+	btn_retry.pressed.connect(func():
+		# Idempotent status update to 'queued' (NOT 'delivered') before gateway submission
+		db.execute("UPDATE communications_log SET delivery_status = 'queued', status_detail = 'Submitted to provider' WHERE id = ?;", [item_id])
+		if twilio_gateway:
+			var sim_res = twilio_gateway.simulate_twilio_sms(contact, body)
+			if sim_res.get("success", false):
+				db.execute("UPDATE communications_log SET provider_sid = ?, delivery_status = 'queued', status_detail = 'Submitted to provider' WHERE id = ?;", [sim_res.get("twilio_msg_sid", ""), item_id])
+		_on_complete_queue_item(item_id)
+	)
+	btn_hbox.add_child(btn_retry)
+
+	var btn_edit = Button.new(); btn_edit.text = "✏️ Edit Phone/Email"; btn_edit.custom_minimum_size = Vector2(160, 38)
+	btn_edit.pressed.connect(func():
+		var dlg = ConfirmationDialog.new(); dlg.title = "Update Recipient Contact Information"
+		var edit = LineEdit.new(); edit.text = contact
+		dlg.add_child(edit)
+		dlg.confirmed.connect(func():
+			var new_c = edit.text.strip_edges()
+			if new_c != "":
+				db.execute("UPDATE communications_log SET recipient_contact = ?, delivery_status = 'queued' WHERE id = ?;", [new_c, item_id])
+				_on_complete_queue_item(item_id)
+		)
+		add_child(dlg); dlg.popup_centered()
+	)
+	btn_hbox.add_child(btn_edit)
+
+	var btn_cancel = Button.new(); btn_cancel.text = "🚫 Cancel Message"; btn_cancel.custom_minimum_size = Vector2(140, 38)
+	btn_cancel.pressed.connect(func():
+		var dlg = ConfirmationDialog.new(); dlg.title = "Cancel Failed Outbound Message"
+		var l = Label.new(); l.text = "Are you sure you want to cancel this failed outbound message?"
+		dlg.add_child(l)
+		dlg.confirmed.connect(func():
+			db.execute("UPDATE communications_log SET delivery_status = 'cancelled' WHERE id = ?;", [item_id])
+			_on_complete_queue_item(item_id)
+		)
+		add_child(dlg); dlg.popup_centered()
+	)
+	btn_hbox.add_child(btn_cancel)
+	vbox.add_child(btn_hbox)
+
+func _render_unresolved_inbound_sms_item(vbox: VBoxContainer, item: Dictionary) -> void:
+	var item_id = int(item.get("id", 0))
+	var phone = str(item.get("from_phone_e164", item.get("caller_phone", "")))
+	var body = str(item.get("raw_body", item.get("transcription", "")))
+	var recv_at = str(item.get("received_at", item.get("created_at", "")))
+
+	var head = Label.new(); head.text = "💬 Inbound SMS Text from " + phone
+	head.add_theme_font_size_override("font_size", 16); head.add_theme_color_override("font_color", Color(0.12, 0.53, 0.90, 1.0))
+	vbox.add_child(head)
+
+	var time_lbl = Label.new(); time_lbl.text = "Received: " + recv_at + "  •  Follow-Up Status: Unresolved"
+	time_lbl.add_theme_font_size_override("font_size", 13); time_lbl.add_theme_color_override("font_color", Color(0.45, 0.50, 0.60, 1.0))
+	vbox.add_child(time_lbl)
+
+	var msg_lbl = Label.new(); msg_lbl.text = "Text Message: \"" + body + "\""
+	msg_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD; msg_lbl.add_theme_font_size_override("font_size", 14)
+	vbox.add_child(msg_lbl)
+
+	var reply_edit = TextEdit.new(); reply_edit.placeholder_text = "Type SMS reply to constituent..."; reply_edit.custom_minimum_size = Vector2(0, 80)
+	vbox.add_child(reply_edit)
+
+	var btn_hbox = HBoxContainer.new(); btn_hbox.add_theme_constant_override("separation", 12)
+
+	var btn_reply = Button.new(); btn_reply.text = "💬 Send SMS Reply & Resolve"; btn_reply.custom_minimum_size = Vector2(210, 38)
+	btn_reply.pressed.connect(func():
+		var reply_text = reply_edit.text.strip_edges()
+		var send_ok = true
+		if reply_text != "":
+			if twilio_gateway:
+				var res = twilio_gateway.simulate_twilio_sms(phone, reply_text)
+				send_ok = res.get("success", false)
+			elif com_service:
+				var res = com_service.send_thread_reply_atomic(phone, reply_text)
+				send_ok = res.get("success", false)
+
+		if not send_ok:
+			var err_dlg = AcceptDialog.new(); err_dlg.title = "Dispatch Failed"
+			var l = Label.new(); l.text = "Failed to dispatch SMS reply to " + phone + ". Thread remains unresolved."
+			err_dlg.add_child(l); add_child(err_dlg); err_dlg.popup_centered()
+			return
+
+		db.execute("UPDATE inbound_sms_log SET is_read = 1, follow_up_status = 'Completed', follow_up_completed_at = datetime('now') WHERE id = ?;", [item_id])
+		_on_complete_queue_item(item_id)
+	)
+	btn_hbox.add_child(btn_reply)
+
+	var btn_complete = Button.new(); btn_complete.text = "✅ Mark Follow-Up Completed"; btn_complete.custom_minimum_size = Vector2(210, 38)
+	btn_complete.pressed.connect(func():
+		db.execute("UPDATE inbound_sms_log SET is_read = 1, follow_up_status = 'Completed', follow_up_completed_at = datetime('now') WHERE id = ?;", [item_id])
+		_on_complete_queue_item(item_id)
+	)
+	btn_hbox.add_child(btn_complete)
+	vbox.add_child(btn_hbox)
+
+func _render_unclaimed_broadcast_item(vbox: VBoxContainer, item: Dictionary) -> void:
+	var item_id = int(item.get("id", 0))
+	var aud = str(item.get("audience", "Target Group"))
+	var body = str(item.get("message_body", ""))
+	var sch_time = str(item.get("scheduled_time_local", ""))
+
+	var head = Label.new(); head.text = "📢 Stalled Scheduled Broadcast — " + aud
+	head.add_theme_font_size_override("font_size", 16); head.add_theme_color_override("font_color", Color(0.85, 0.45, 0.10, 1.0))
+	vbox.add_child(head)
+
+	var time_lbl = Label.new(); time_lbl.text = "Scheduled Send Time (Past Due): " + sch_time
+	time_lbl.add_theme_font_size_override("font_size", 13); time_lbl.add_theme_color_override("font_color", Color(0.85, 0.25, 0.20, 1.0))
+	vbox.add_child(time_lbl)
+
+	var msg_lbl = Label.new(); msg_lbl.text = "Broadcast Content: \"" + body + "\""
+	msg_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD; msg_lbl.add_theme_font_size_override("font_size", 14)
+	vbox.add_child(msg_lbl)
+
+	var btn_hbox = HBoxContainer.new(); btn_hbox.add_theme_constant_override("separation", 12)
+
+	var btn_send_now = Button.new(); btn_send_now.text = "⚡ Dispatch Broadcast Now"; btn_send_now.custom_minimum_size = Vector2(210, 38)
+	btn_send_now.pressed.connect(func():
+		# Idempotency check: verify broadcast is still scheduled
+		var cur_q = db.execute("SELECT status FROM scheduled_communications WHERE id = ? LIMIT 1;", [item_id])
+		if cur_q["success"] and cur_q["data"].size() > 0 and cur_q["data"][0]["status"] == "scheduled":
+			db.execute("UPDATE scheduled_communications SET status = 'sent' WHERE id = ?;", [item_id])
+			_on_complete_queue_item(item_id)
+	)
+	btn_hbox.add_child(btn_send_now)
+
+	var btn_resched = Button.new(); btn_resched.text = "📅 Reschedule"; btn_resched.custom_minimum_size = Vector2(140, 38)
+	btn_resched.pressed.connect(func():
+		var dlg = ConfirmationDialog.new(); dlg.title = "Reschedule Broadcast"
+		var edit = LineEdit.new(); edit.text = "2026-12-01 10:00:00"
+		dlg.add_child(edit)
+		dlg.confirmed.connect(func():
+			var new_time = edit.text.strip_edges()
+			if new_time != "":
+				db.execute("UPDATE scheduled_communications SET scheduled_time_local = ?, scheduled_time_utc = ?, status = 'scheduled' WHERE id = ?;", [new_time, new_time, item_id])
+				_on_complete_queue_item(item_id)
+		)
+		add_child(dlg); dlg.popup_centered()
+	)
+	btn_hbox.add_child(btn_resched)
+
+	var btn_cancel = Button.new(); btn_cancel.text = "🚫 Cancel Broadcast"; btn_cancel.custom_minimum_size = Vector2(160, 38)
+	btn_cancel.pressed.connect(func():
+		var dlg = ConfirmationDialog.new(); dlg.title = "Cancel Scheduled Broadcast"
+		var l = Label.new(); l.text = "Are you sure you want to cancel this scheduled broadcast?"
+		dlg.add_child(l)
+		dlg.confirmed.connect(func():
+			db.execute("UPDATE scheduled_communications SET status = 'cancelled' WHERE id = ?;", [item_id])
+			_on_complete_queue_item(item_id)
+		)
+		add_child(dlg); dlg.popup_centered()
+	)
+	btn_hbox.add_child(btn_cancel)
+	vbox.add_child(btn_hbox)
+
+func _render_default_voicemail_queue_item(vbox: VBoxContainer, current_item: Dictionary) -> void:
+	var item_id = current_item.get("id", 0)
 	var caller = current_item.get("caller_name", "Unknown Caller")
 	var phone = current_item.get("from_number", current_item.get("caller_phone", ""))
 	var text = current_item.get("message_text", current_item.get("transcription", ""))
 	var due = current_item.get("due_date", "")
 
-	# Structured Header Hierarchy: Current Person & Contact
-	var info_grid = VBoxContainer.new()
-	info_grid.add_theme_constant_override("separation", 4)
-
-	var person_lbl = Label.new()
-	person_lbl.text = "Current Person: " + str(caller)
-	person_lbl.add_theme_font_size_override("font_size", 16)
-	person_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
+	var info_grid = VBoxContainer.new(); info_grid.add_theme_constant_override("separation", 4)
+	var person_lbl = Label.new(); person_lbl.text = "Current Person: " + str(caller); person_lbl.add_theme_font_size_override("font_size", 16); person_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
 	info_grid.add_child(person_lbl)
 
 	if phone != "":
-		var phone_lbl = Label.new()
-		phone_lbl.text = "Contact: " + str(phone)
-		phone_lbl.add_theme_font_size_override("font_size", 14)
-		phone_lbl.add_theme_color_override("font_color", Color(0.35, 0.42, 0.52, 1.0))
+		var phone_lbl = Label.new(); phone_lbl.text = "Contact: " + str(phone); phone_lbl.add_theme_font_size_override("font_size", 14); phone_lbl.add_theme_color_override("font_color", Color(0.35, 0.42, 0.52, 1.0))
 		info_grid.add_child(phone_lbl)
 
 	if due != "":
-		var due_lbl = Label.new()
-		due_lbl.text = "⏰ Callback Due: " + str(due)
-		due_lbl.add_theme_font_size_override("font_size", 13)
-		due_lbl.add_theme_color_override("font_color", Color(0.85, 0.25, 0.20, 1.0))
+		var due_lbl = Label.new(); due_lbl.text = "⏰ Callback Due: " + str(due); due_lbl.add_theme_font_size_override("font_size", 13); due_lbl.add_theme_color_override("font_color", Color(0.85, 0.25, 0.20, 1.0))
 		info_grid.add_child(due_lbl)
 
 	vbox.add_child(info_grid)
 
 	if text != "":
-		var txt_lbl = Label.new()
-		txt_lbl.text = "Message: \"" + str(text) + "\""
-		txt_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD
-		txt_lbl.add_theme_font_size_override("font_size", 14)
-		txt_lbl.add_theme_color_override("font_color", Color(0.20, 0.25, 0.32, 1.0))
+		var txt_lbl = Label.new(); txt_lbl.text = "Message: \"" + str(text) + "\""; txt_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD; txt_lbl.add_theme_font_size_override("font_size", 14); txt_lbl.add_theme_color_override("font_color", Color(0.20, 0.25, 0.32, 1.0))
 		vbox.add_child(txt_lbl)
 
-	var btn_hbox = HBoxContainer.new()
-	btn_hbox.add_theme_constant_override("separation", 12)
+	var btn_hbox = HBoxContainer.new(); btn_hbox.add_theme_constant_override("separation", 12)
 	vbox.add_child(btn_hbox)
 
-	var comp_btn = Button.new()
-	comp_btn.text = "✅ Mark Completed & Next"
-	comp_btn.custom_minimum_size = Vector2(200, 38)
-	var btn_st = StyleBoxFlat.new()
-	btn_st.bg_color = Color(0.12, 0.53, 0.90, 1.0)
-	btn_st.corner_radius_top_left = 6; btn_st.corner_radius_top_right = 6; btn_st.corner_radius_bottom_left = 6; btn_st.corner_radius_bottom_right = 6
-	comp_btn.add_theme_stylebox_override("normal", btn_st)
-	comp_btn.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
+	var comp_btn = Button.new(); comp_btn.text = "✅ Mark Completed & Next"; comp_btn.custom_minimum_size = Vector2(200, 38)
+	var btn_st = StyleBoxFlat.new(); btn_st.bg_color = Color(0.12, 0.53, 0.90, 1.0); btn_st.corner_radius_top_left = 6; btn_st.corner_radius_top_right = 6; btn_st.corner_radius_bottom_left = 6; btn_st.corner_radius_bottom_right = 6
+	comp_btn.add_theme_stylebox_override("normal", btn_st); comp_btn.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
 	comp_btn.pressed.connect(func(): _on_complete_queue_item(item_id))
 	btn_hbox.add_child(comp_btn)
 
@@ -269,6 +444,8 @@ func _init_database() -> void:
 		mig.run_migrations()
 	if not com_service:
 		com_service = CommunicationsServiceScript.new(db)
+	if not twilio_gateway and com_service:
+		twilio_gateway = com_service.twilio_service
 
 func _style_card() -> void:
 	var style = StyleBoxFlat.new()
@@ -341,6 +518,216 @@ func _get_active_theme_color() -> Color:
 		return Color(0.42, 0.11, 0.60, 1.0) # Royal Purple #6A1B9A
 	return Color(0.596, 0.192, 0.255, 1.0)
 
+var filter_inst_id: int = 0
+var filter_rel: String = "All"
+var filter_ay: String = "All"
+var filter_mj: String = ""
+var filter_res: String = "All"
+var filter_gt: String = "All"
+var filter_gy: int = 0
+
+func filter_recipients(params: Dictionary) -> void:
+	if params.has("institution_id"): filter_inst_id = int(params["institution_id"])
+	if params.has("relationship"): filter_rel = str(params["relationship"])
+	if params.has("academic_year"): filter_ay = str(params["academic_year"])
+	if params.has("major"): filter_mj = str(params["major"])
+	if params.has("residence"): filter_res = str(params["residence"])
+	if params.has("expected_grad_term"): filter_gt = str(params["expected_grad_term"])
+	if params.has("expected_grad_year"): filter_gy = int(params["expected_grad_year"])
+	_apply_audience_filters()
+
+var audience_filter_panel: Control = null
+var aud_count_label: Label = null
+
+func _build_audience_filter_panel() -> Control:
+	if audience_filter_panel and is_instance_valid(audience_filter_panel):
+		return audience_filter_panel
+
+	var p_panel = PanelContainer.new()
+	var p_st = StyleBoxFlat.new()
+	p_st.bg_color = Color(0.96, 0.97, 0.99, 1.0)
+	p_st.border_width_left = 1; p_st.border_width_top = 1; p_st.border_width_right = 1; p_st.border_width_bottom = 1
+	p_st.border_color = Color(0.80, 0.85, 0.92, 1.0)
+	p_st.corner_radius_top_left = 8; p_st.corner_radius_top_right = 8; p_st.corner_radius_bottom_left = 8; p_st.corner_radius_bottom_right = 8
+	p_st.content_margin_left = 12; p_st.content_margin_top = 10; p_st.content_margin_right = 12; p_st.content_margin_bottom = 10
+	p_panel.add_theme_stylebox_override("panel", p_st)
+
+	var main_vbox = VBoxContainer.new()
+	main_vbox.add_theme_constant_override("separation", 8)
+
+	var title_hbox = HBoxContainer.new()
+	var title_lbl = Label.new()
+	title_lbl.text = "🎯 Audience Segmentation & Filters"
+	title_lbl.add_theme_font_size_override("font_size", 14)
+	title_lbl.add_theme_color_override("font_color", Color(0.12, 0.16, 0.24, 1.0))
+	title_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title_hbox.add_child(title_lbl)
+
+	aud_count_label = Label.new()
+	aud_count_label.text = "0 Eligible Recipients"
+	aud_count_label.add_theme_font_size_override("font_size", 13)
+	aud_count_label.add_theme_color_override("font_color", Color(0.18, 0.45, 0.85, 1.0))
+	title_hbox.add_child(aud_count_label)
+	main_vbox.add_child(title_hbox)
+
+	var grid = GridContainer.new()
+	grid.columns = 4
+	grid.add_theme_constant_override("h_separation", 10)
+	grid.add_theme_constant_override("v_separation", 8)
+
+	# Fetch Master Institutions
+	var inst_list = []
+	if db:
+		var q_i = db.execute("SELECT id, name, short_name FROM institutions WHERE is_active = 1 ORDER BY display_order ASC;")
+		if q_i["success"]: inst_list = q_i["data"]
+
+	# 1. Institution
+	var dd_inst = OptionButton.new()
+	dd_inst.add_item("All Institutions", 0)
+	for i in range(inst_list.size()):
+		dd_inst.add_item(str(inst_list[i].get("name", "")), i + 1)
+	dd_inst.custom_minimum_size = Vector2(160, 36)
+	dd_inst.item_selected.connect(func(idx):
+		filter_inst_id = int(inst_list[idx - 1].get("id", 0)) if idx > 0 else 0
+		_apply_audience_filters()
+	)
+	grid.add_child(dd_inst)
+
+	# 2. Relationship
+	var dd_rel = OptionButton.new()
+	var rel_opts = ["All Relationships", "Student", "Alumni", "Faculty", "Staff", "Community Member", "Other"]
+	for r in rel_opts: dd_rel.add_item(r)
+	dd_rel.custom_minimum_size = Vector2(160, 36)
+	dd_rel.item_selected.connect(func(idx):
+		filter_rel = rel_opts[idx] if idx > 0 else "All"
+		_apply_audience_filters()
+	)
+	grid.add_child(dd_rel)
+
+	# 3. Academic Year
+	var dd_ay = OptionButton.new()
+	var ay_opts = ["All Academic Years", "Freshman", "Sophomore", "Junior", "Senior", "Graduate Student", "Not Applicable"]
+	for a in ay_opts: dd_ay.add_item(a)
+	dd_ay.custom_minimum_size = Vector2(160, 36)
+	dd_ay.item_selected.connect(func(idx):
+		filter_ay = ay_opts[idx] if idx > 0 else "All"
+		_apply_audience_filters()
+	)
+	grid.add_child(dd_ay)
+
+	# 4. Residence
+	var dd_res = OptionButton.new()
+	var res_opts = ["All Residence Types", "On Campus", "Off Campus", "Commuter", "Online Student"]
+	for rs in res_opts: dd_res.add_item(rs)
+	dd_res.custom_minimum_size = Vector2(160, 36)
+	dd_res.item_selected.connect(func(idx):
+		filter_res = res_opts[idx] if idx > 0 else "All"
+		_apply_audience_filters()
+	)
+	grid.add_child(dd_res)
+
+	# 5. Major Search LineEdit
+	var txt_mj = LineEdit.new()
+	txt_mj.placeholder_text = "Filter by Major..."
+	txt_mj.custom_minimum_size = Vector2(160, 36)
+	txt_mj.text_changed.connect(func(t):
+		filter_mj = t.strip_edges()
+		_apply_audience_filters()
+	)
+	grid.add_child(txt_mj)
+
+	# 6. Expected Grad Term
+	var dd_gt = OptionButton.new()
+	var gt_opts = ["All Grad Terms", "Spring", "Summer", "Fall"]
+	for g in gt_opts: dd_gt.add_item(g)
+	dd_gt.custom_minimum_size = Vector2(160, 36)
+	dd_gt.item_selected.connect(func(idx):
+		filter_gt = gt_opts[idx] if idx > 0 else "All"
+		_apply_audience_filters()
+	)
+	grid.add_child(dd_gt)
+
+	# 7. Expected Grad Year LineEdit
+	var txt_gy = LineEdit.new()
+	txt_gy.placeholder_text = "Grad Year (e.g. 2026)..."
+	txt_gy.custom_minimum_size = Vector2(160, 36)
+	txt_gy.text_changed.connect(func(t):
+		filter_gy = int(t.strip_edges()) if t.strip_edges().is_valid_int() else 0
+		_apply_audience_filters()
+	)
+	grid.add_child(txt_gy)
+
+	# 8. Reset Filters Button
+	var btn_reset_f = Button.new()
+	btn_reset_f.text = "🔄 Reset Filters"
+	btn_reset_f.custom_minimum_size = Vector2(140, 36)
+	btn_reset_f.pressed.connect(func():
+		filter_inst_id = 0; filter_rel = "All"; filter_ay = "All"; filter_mj = ""; filter_res = "All"; filter_gt = "All"; filter_gy = 0
+		dd_inst.select(0); dd_rel.select(0); dd_ay.select(0); dd_res.select(0); dd_gt.select(0)
+		txt_mj.text = ""; txt_gy.text = ""
+		_apply_audience_filters()
+	)
+	grid.add_child(btn_reset_f)
+
+	main_vbox.add_child(grid)
+	p_panel.add_child(main_vbox)
+	audience_filter_panel = p_panel
+	return audience_filter_panel
+
+func _apply_audience_filters() -> void:
+	if not db or not recipient_dropdown: return
+
+	var sql = "SELECT DISTINCT p.id, p.person_uuid, p.human_id, p.first_name, p.last_name, p.phone, p.email, p.sms_consent, i.short_name AS inst_short FROM people p LEFT JOIN institutions i ON p.institution_id = i.id WHERE (p.status IS NULL OR p.status = '' OR LOWER(p.status) IN ('active', 'pending', 'to be confirmed'))"
+	var args = []
+
+	if filter_inst_id > 0:
+		sql += " AND p.institution_id = ?"
+		args.append(filter_inst_id)
+
+	if filter_rel != "" and filter_rel != "All":
+		sql += " AND p.relationship = ?"
+		args.append(filter_rel)
+
+	if filter_ay != "" and filter_ay != "All":
+		sql += " AND p.academic_year = ?"
+		args.append(filter_ay)
+
+	if filter_mj != "":
+		sql += " AND LOWER(p.major) LIKE LOWER(?)"
+		args.append("%" + filter_mj + "%")
+
+	if filter_res != "" and filter_res != "All":
+		sql += " AND p.residence = ?"
+		args.append(filter_res)
+
+	if filter_gt != "" and filter_gt != "All":
+		sql += " AND p.expected_grad_term = ?"
+		args.append(filter_gt)
+
+	if filter_gy > 0:
+		sql += " AND p.expected_grad_year = ?"
+		args.append(filter_gy)
+
+	sql += " ORDER BY p.last_name ASC, p.first_name ASC;"
+
+	var res = db.execute(sql, args)
+	recipient_dropdown.clear()
+	person_list.clear()
+
+	if res["success"] and res["data"].size() > 0:
+		person_list = res["data"]
+		for i in range(person_list.size()):
+			var p = person_list[i]
+			var fn = str(p.get("first_name", ""))
+			var ln = str(p.get("last_name", ""))
+			var inst = str(p.get("inst_short", ""))
+			var badge = (" [" + inst + "]") if inst != "" else ""
+			var name = (fn + " " + ln).strip_edges() + badge + " (" + str(p.get("human_id", "")) + ")"
+			recipient_dropdown.add_item(name, i)
+
+	if aud_count_label:
+		aud_count_label.text = str(person_list.size()) + " Eligible Recipients"
+
 func _populate_dropdowns() -> void:
 	if not db: return
 	if not com_service: com_service = CommunicationsServiceScript.new(db)
@@ -351,17 +738,7 @@ func _populate_dropdowns() -> void:
 	channel_dropdown.add_item("Email", 2)
 	channel_dropdown.add_item("Push Alert", 3)
 
-	recipient_dropdown.clear()
-	person_list.clear()
-	var p_res = db.execute("SELECT id, person_uuid, human_id, first_name, last_name, phone FROM people ORDER BY last_name ASC, first_name ASC;")
-	if p_res["success"] and p_res["data"].size() > 0:
-		person_list = p_res["data"]
-		for i in range(person_list.size()):
-			var p = person_list[i]
-			var fn = str(p.get("first_name")) if p.get("first_name") != null else ""
-			var ln = str(p.get("last_name")) if p.get("last_name") != null else ""
-			var name = (fn + " " + ln).strip_edges() + " (" + str(p.get("human_id")) + ")"
-			recipient_dropdown.add_item(name, i)
+	_apply_audience_filters()
 
 	template_dropdown.clear()
 	template_dropdown.add_item("-- Select Template --", 0)
@@ -492,7 +869,27 @@ func _initiate_call_dialog(recipient: Dictionary, notes: String) -> void:
 	btn_twilio.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
 	btn_twilio.pressed.connect(func():
 		backdrop.queue_free()
-		OS.alert("Bridging call to " + name + " (" + _target_phone + ") via Twilio cloud relay.", "Phone Callback")
+		if _target_phone != "" and _target_phone != "No phone on file":
+			var gateway_url = "https://app.reallife-studycenter.org"
+			var api_key = "SCH_SYNC_KEY_PLACEHOLDER_8f3d"
+			var http = HTTPRequest.new()
+			add_child(http)
+			var url = gateway_url + "/api/v1/calls/outbound"
+			var headers = ["Content-Type: application/json", "x-sync-api-key: " + api_key]
+			var body = JSON.stringify({"to_phone": _target_phone})
+			http.request_completed.connect(func(res: int, code: int, _h: PackedStringArray, body_bytes: PackedByteArray):
+				http.queue_free()
+				var resp_text = body_bytes.get_string_from_utf8()
+				var json = JSON.parse_string(resp_text)
+				if code == 200 and json and json.get("success", false) == true:
+					OS.alert("Outbound call successfully dispatched via Twilio to " + _target_phone + "!", "Twilio Call Dispatched")
+				else:
+					var err_msg = json.get("error", "Twilio relay error (HTTP " + str(code) + ")") if json else ("HTTP " + str(code))
+					print("[Outbound Call Error] ", err_msg)
+					OS.alert("Twilio Outbound Call Error: " + err_msg + "\n\nOpening Mac Phone/FaceTime dialer instead...", "Switching to System Phone")
+					OS.shell_open("tel:" + _target_phone)
+			, CONNECT_ONE_SHOT)
+			http.request(url, headers, HTTPClient.METHOD_POST, body)
 		com_service.send_message_atomic(recipient, "Phone Call (Twilio)", notes if notes != "" else "Bridged outbound call via Twilio Relay", "John Smith")
 		_refresh_all_feeds()
 	)
@@ -784,12 +1181,24 @@ func _refresh_voicemail_inbox() -> void:
 		title_hbox.add_child(caller_lbl); title_hbox.add_child(time_lbl)
 		card_vbox.add_child(title_hbox)
 		
-		# Row 2: Phone number
+		# Row 2: Phone number & Received Date/Time
+		var phone_hbox = HBoxContainer.new()
+		phone_hbox.mouse_filter = Control.MOUSE_FILTER_PASS
 		var phone_lbl = Label.new()
 		phone_lbl.text = "📱 " + (_format_phone_display(caller_num) if caller_num != "" else "No number")
 		phone_lbl.add_theme_font_size_override("font_size", 11)
 		phone_lbl.add_theme_color_override("font_color", Color(0.35, 0.42, 0.55, 1.0))
-		card_vbox.add_child(phone_lbl)
+		phone_lbl.size_flags_horizontal = SIZE_EXPAND_FILL
+		
+		var raw_created = str(vm.get("created_at", ""))
+		var formatted_received = _format_card_datetime(raw_created)
+		var rcv_lbl = Label.new()
+		rcv_lbl.text = formatted_received
+		rcv_lbl.add_theme_font_size_override("font_size", 10)
+		rcv_lbl.add_theme_color_override("font_color", Color(0.45, 0.50, 0.60, 1.0))
+		
+		phone_hbox.add_child(phone_lbl); phone_hbox.add_child(rcv_lbl)
+		card_vbox.add_child(phone_hbox)
 		
 		# Row 3: Transcription / message body (Hidden if protected and not signed in as recipient)
 		var desc_lbl = Label.new()
@@ -864,7 +1273,17 @@ func _refresh_voicemail_inbox() -> void:
 		var btn_sms = Button.new(); btn_sms.text = "💬 Text"; btn_sms.custom_minimum_size = Vector2(45, 24); btn_sms.add_theme_font_size_override("font_size", 10)
 		var btn_fwd = Button.new(); btn_fwd.text = "🔄 Forward"; btn_fwd.custom_minimum_size = Vector2(60, 24); btn_fwd.add_theme_font_size_override("font_size", 10)
 		
-		actions_hbox.add_child(btn_open); actions_hbox.add_child(btn_call); actions_hbox.add_child(btn_sms); actions_hbox.add_child(btn_fwd)
+		var btn_del = Button.new(); btn_del.text = "🗑️ Delete"; btn_del.custom_minimum_size = Vector2(55, 24); btn_del.add_theme_font_size_override("font_size", 10)
+		var del_st = StyleBoxFlat.new()
+		del_st.bg_color = Color(0.85, 0.25, 0.25, 1.0)
+		del_st.corner_radius_top_left = 4; del_st.corner_radius_top_right = 4; del_st.corner_radius_bottom_left = 4; del_st.corner_radius_bottom_right = 4
+		del_st.content_margin_left = 6; del_st.content_margin_right = 6; del_st.content_margin_top = 2; del_st.content_margin_bottom = 2
+		btn_del.add_theme_stylebox_override("normal", del_st)
+		btn_del.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
+		var _del_uuid = vm_uuid
+		btn_del.pressed.connect(func(): _confirm_delete_voicemail(_del_uuid))
+
+		actions_hbox.add_child(btn_open); actions_hbox.add_child(btn_call); actions_hbox.add_child(btn_sms); actions_hbox.add_child(btn_fwd); actions_hbox.add_child(btn_del)
 		
 		# Add Link Contact button if caller is not matched to a person
 		if not has_matched_person and caller_num != "":
@@ -890,7 +1309,10 @@ func _refresh_voicemail_inbox() -> void:
 			btn_open.pressed.connect(func(): _prompt_pin_auth_dialog(vm))
 			
 		btn_call.pressed.connect(func():
-			OS.alert("Initiating phone callback to: " + caller_num, "Phone Callback")
+			if caller_num != "" and caller_num != "Unknown Caller" and caller_num != "No phone on file":
+				_initiate_call_dialog({"first_name": caller_name, "last_name": "", "phone": caller_num}, "Voicemail callback to " + caller_num)
+			else:
+				OS.alert("No valid caller phone number available for callback.", "Callback Error")
 		)
 		btn_sms.pressed.connect(func(): select_recipient_by_phone(caller_num, "SMS"))
 		btn_fwd.pressed.connect(func(): _open_forward_dialog(vm_uuid, item_type))
@@ -1248,7 +1670,8 @@ func _open_detail_dialog(vm: Dictionary) -> void:
 	grid.add_child(left_vbox)
 	
 	var info_lbl = Label.new()
-	info_lbl.text = "Source: " + ("☎️ Call / Voicemail" if item_type == "voicemail" else "💬 SMS Text") + "\nPhone: " + caller_num + "\nReceived: " + str(vm.get("created_at", ""))
+	var raw_created_val = str(vm.get("created_at", ""))
+	info_lbl.text = "Source: " + ("☎️ Call / Voicemail" if item_type == "voicemail" else "💬 SMS Text") + "\nPhone: " + caller_num + "\nReceived: " + _format_card_datetime(raw_created_val)
 	info_lbl.add_theme_font_size_override("font_size", 12)
 	info_lbl.add_theme_color_override("font_color", Color(0.35, 0.42, 0.52, 1.0))
 	left_vbox.add_child(info_lbl)
@@ -1787,11 +2210,12 @@ func _style_input_control(control: Control, font_size: int = 12) -> void:
 		control.caret_blink_interval = 0.5
 		control.add_theme_color_override("caret_color", Color(0.12, 0.16, 0.22, 1.0))
 
-func _open_calendar_picker_dialog(on_date_selected: Callable, current_ui_date: String = "") -> void:
+func _open_calendar_picker_dialog(on_date_selected: Callable, current_ui_date: String = "", caller_node: Node = null) -> void:
+	var parent_win: Window = caller_node.get_window() if (caller_node and caller_node.get_window()) else get_tree().root
 	var init_year = 2026
 	var init_month = 7
 	var init_day = 23
-	
+
 	var parts = current_ui_date.strip_edges().split("/")
 	if parts.size() == 3:
 		init_month = int(parts[0])
@@ -1803,10 +2227,18 @@ func _open_calendar_picker_dialog(on_date_selected: Callable, current_ui_date: S
 		init_month = int(sys_dt.get("month", 7))
 		init_day = int(sys_dt.get("day", 23))
 
+	var canvas_layer = CanvasLayer.new()
+	canvas_layer.layer = 128
+
 	var backdrop = ColorRect.new()
 	backdrop.color = Color(0.08, 0.12, 0.18, 0.65)
 	backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
-	add_child(backdrop)
+	canvas_layer.add_child(backdrop)
+
+	var backdrop_button = TextureButton.new()
+	backdrop_button.set_anchors_preset(Control.PRESET_FULL_RECT)
+	backdrop_button.pressed.connect(func(): canvas_layer.queue_free())
+	backdrop.add_child(backdrop_button)
 
 	var center = CenterContainer.new()
 	center.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -1818,13 +2250,13 @@ func _open_calendar_picker_dialog(on_date_selected: Callable, current_ui_date: S
 	card_st.border_width_left = 1; card_st.border_width_top = 1; card_st.border_width_right = 1; card_st.border_width_bottom = 1
 	card_st.border_color = Color(0.78, 0.82, 0.88, 1.0)
 	card_st.corner_radius_top_left = 12; card_st.corner_radius_top_right = 12; card_st.corner_radius_bottom_left = 12; card_st.corner_radius_bottom_right = 12
-	card_st.content_margin_left = 18; card_st.content_margin_top = 16; card_st.content_margin_right = 18; card_st.content_margin_bottom = 16
+	card_st.content_margin_left = 16; card_st.content_margin_top = 12; card_st.content_margin_right = 16; card_st.content_margin_bottom = 14
 	card.add_theme_stylebox_override("panel", card_st)
 	center.add_child(card)
 
 	var vbox = VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 10)
-	vbox.custom_minimum_size = Vector2(320, 340)
+	vbox.add_theme_constant_override("separation", 6)
+	vbox.custom_minimum_size = Vector2(320, 0)
 	card.add_child(vbox)
 
 	var state = {
@@ -1833,96 +2265,140 @@ func _open_calendar_picker_dialog(on_date_selected: Callable, current_ui_date: S
 		"day": init_day
 	}
 
-	# Header (Month Year + Nav Arrows)
+	# Header (Month Year + Nav Arrows & Steppers)
 	var month_names = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
 	var nav_hbox = HBoxContainer.new()
 	nav_hbox.size_flags_horizontal = SIZE_EXPAND_FILL
-	
+	nav_hbox.alignment = HBoxContainer.ALIGNMENT_CENTER
+	nav_hbox.add_theme_constant_override("separation", 4)
+
+	var prev_year_btn = Button.new(); prev_year_btn.text = "◄◄"
+	prev_year_btn.tooltip_text = "Previous Year"
 	var prev_btn = Button.new(); prev_btn.text = "◀"
+	prev_btn.tooltip_text = "Previous Month"
+
 	var month_lbl = Label.new()
-	month_lbl.size_flags_horizontal = SIZE_EXPAND_FILL
-	month_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	month_lbl.add_theme_font_size_override("font_size", 14)
 	month_lbl.add_theme_color_override("font_color", Color(0.12, 0.16, 0.22, 1.0))
+	month_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	month_lbl.custom_minimum_size = Vector2(90, 0)
+
+	var year_edit = LineEdit.new()
+	year_edit.custom_minimum_size = Vector2(60, 32)
+	year_edit.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	year_edit.add_theme_font_size_override("font_size", 13)
+	year_edit.max_length = 4
+
 	var next_btn = Button.new(); next_btn.text = "▶"
-	
+	next_btn.tooltip_text = "Next Month"
+	var next_year_btn = Button.new(); next_year_btn.text = "►►"
+	next_year_btn.tooltip_text = "Next Year"
+
+	nav_hbox.add_child(prev_year_btn)
 	nav_hbox.add_child(prev_btn)
 	nav_hbox.add_child(month_lbl)
+	nav_hbox.add_child(year_edit)
 	nav_hbox.add_child(next_btn)
+	nav_hbox.add_child(next_year_btn)
 	vbox.add_child(nav_hbox)
 
-	# Weekday Labels
-	var week_grid = GridContainer.new()
-	week_grid.columns = 7
-	var day_names = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
-	for dn in day_names:
-		var d_lbl = Label.new()
-		d_lbl.text = dn
-		d_lbl.custom_minimum_size = Vector2(38, 24)
-		d_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		d_lbl.add_theme_font_size_override("font_size", 11)
-		d_lbl.add_theme_color_override("font_color", Color(0.45, 0.50, 0.60, 1.0))
-		week_grid.add_child(d_lbl)
-	vbox.add_child(week_grid)
+	# Weekday Labels Header
+	var weekdays_grid = GridContainer.new()
+	weekdays_grid.columns = 7
+	weekdays_grid.size_flags_horizontal = SIZE_EXPAND_FILL
+	vbox.add_child(weekdays_grid)
 
-	# Calendar Days Grid
+	var day_names = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
+	for dname in day_names:
+		var d_lbl = Label.new()
+		d_lbl.text = dname
+		d_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		d_lbl.size_flags_horizontal = SIZE_EXPAND_FILL
+		d_lbl.add_theme_font_size_override("font_size", 11)
+		d_lbl.add_theme_color_override("font_color", Color(0.45, 0.5, 0.6, 1.0))
+		weekdays_grid.add_child(d_lbl)
+
+	# Calendar Days Grid (Natural shrink size, no forced expansion)
 	var days_grid = GridContainer.new()
 	days_grid.columns = 7
+	days_grid.size_flags_horizontal = SIZE_EXPAND_FILL
+	days_grid.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	days_grid.add_theme_constant_override("v_separation", 4)
+	days_grid.add_theme_constant_override("h_separation", 4)
 	vbox.add_child(days_grid)
 
 	var _render_calendar = [null]
 	_render_calendar[0] = func():
-		var m_idx = clamp(state["month"] - 1, 0, 11)
-		month_lbl.text = month_names[m_idx] + " " + str(state["year"])
-		for child in days_grid.get_children():
-			child.queue_free()
-			
-		# First day of month offset
-		var temp_dict = {"year": state["year"], "month": state["month"], "day": 1, "hour": 12, "minute": 0, "second": 0}
-		var temp_unix = Time.get_unix_time_from_datetime_dict(temp_dict)
-		var day_of_week = Time.get_datetime_dict_from_unix_time(temp_unix).get("weekday", 0)
-		
-		var days_in_m = 31
-		if state["month"] in [4, 6, 9, 11]: days_in_m = 30
+		month_lbl.text = month_names[state["month"] - 1]
+		year_edit.text = str(state["year"])
+
+		for c in days_grid.get_children():
+			c.queue_free()
+
+		var dt_dict = {"year": state["year"], "month": state["month"], "day": 1, "hour": 12, "minute": 0, "second": 0}
+		var start_unix = Time.get_unix_time_from_datetime_dict(dt_dict)
+		var full_dt = Time.get_datetime_dict_from_unix_time(start_unix)
+		var start_weekday = full_dt.get("weekday", 0)
+
+		var days_in_month = 31
+		if state["month"] in [4, 6, 9, 11]:
+			days_in_month = 30
 		elif state["month"] == 2:
-			var y = state["year"]
-			days_in_m = 29 if (y % 4 == 0 and (y % 100 != 0 or y % 400 == 0)) else 28
-			
-		for i in range(day_of_week):
+			var is_leap = (state["year"] % 4 == 0 and state["year"] % 100 != 0) or (state["year"] % 400 == 0)
+			days_in_month = 29 if is_leap else 28
+
+		for i in range(start_weekday):
 			var blank = Control.new()
-			blank.custom_minimum_size = Vector2(38, 34)
+			blank.custom_minimum_size = Vector2(36, 28)
 			days_grid.add_child(blank)
-			
-		for d in range(1, days_in_m + 1):
-			var d_btn = Button.new()
-			d_btn.text = str(d)
-			d_btn.custom_minimum_size = Vector2(38, 34)
-			d_btn.add_theme_font_size_override("font_size", 12)
-			
-			var is_selected = (d == state["day"])
-			var b_st = StyleBoxFlat.new()
-			b_st.corner_radius_top_left = 6; b_st.corner_radius_top_right = 6; b_st.corner_radius_bottom_left = 6; b_st.corner_radius_bottom_right = 6
-			
+
+		for d in range(1, days_in_month + 1):
+			var day_btn = Button.new()
+			day_btn.text = str(d)
+			day_btn.custom_minimum_size = Vector2(36, 28)
+			day_btn.size_flags_horizontal = SIZE_EXPAND_FILL
+			day_btn.add_theme_font_size_override("font_size", 12)
+
+			var d_val = d
+			var is_selected = (d_val == state["day"])
+
 			if is_selected:
-				b_st.bg_color = _get_active_theme_color()
-				d_btn.add_theme_color_override("font_color", Color(1, 1, 1, 1))
+				var sel_st = StyleBoxFlat.new()
+				sel_st.bg_color = Color(0.18, 0.48, 0.88, 1.0)
+				sel_st.corner_radius_top_left = 6; sel_st.corner_radius_top_right = 6
+				sel_st.corner_radius_bottom_left = 6; sel_st.corner_radius_bottom_right = 6
+				day_btn.add_theme_stylebox_override("normal", sel_st)
+				day_btn.add_theme_stylebox_override("hover", sel_st)
+				day_btn.add_theme_stylebox_override("pressed", sel_st)
+				day_btn.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
 			else:
-				b_st.bg_color = Color(0.96, 0.97, 0.99, 1.0)
-				d_btn.add_theme_color_override("font_color", Color(0.15, 0.20, 0.28, 1.0))
-				
-			d_btn.add_theme_stylebox_override("normal", b_st)
-			
-			var target_d = d
-			d_btn.pressed.connect(func():
-				var mm_str = str(state["month"]).pad_zeros(2)
-				var dd_str = str(target_d).pad_zeros(2)
-				var yyyy_str = str(state["year"])
-				on_date_selected.call(mm_str + "/" + dd_str + "/" + yyyy_str)
-				backdrop.queue_free()
+				day_btn.add_theme_color_override("font_color", Color(0.15, 0.20, 0.28, 1.0))
+
+			day_btn.pressed.connect(func():
+				state["day"] = d_val
+				_render_calendar[0].call()
 			)
-			days_grid.add_child(d_btn)
+			days_grid.add_child(day_btn)
 
 	_render_calendar[0].call()
+
+	year_edit.text_submitted.connect(func(new_txt: String):
+		if new_txt.is_valid_int():
+			var val = int(new_txt)
+			if val >= 1900 and val <= 2100:
+				state["year"] = val
+				_render_calendar[0].call()
+	)
+
+	prev_year_btn.pressed.connect(func():
+		state["year"] -= 1
+		_render_calendar[0].call()
+	)
+
+	next_year_btn.pressed.connect(func():
+		state["year"] += 1
+		_render_calendar[0].call()
+	)
 
 	prev_btn.pressed.connect(func():
 		state["month"] -= 1
@@ -1940,11 +2416,37 @@ func _open_calendar_picker_dialog(on_date_selected: Callable, current_ui_date: S
 		_render_calendar[0].call()
 	)
 
-	# Quick Presets Row at bottom
+	# Dedicated Bottom Spacer guaranteeing 14px gap between calendar grid and footer buttons
+	var grid_bottom_spacer = Control.new()
+	grid_bottom_spacer.custom_minimum_size = Vector2(0, 14)
+	vbox.add_child(grid_bottom_spacer)
+
+	# Quick Presets & Confirmation Row at bottom
 	var presets_hbox = HBoxContainer.new()
 	presets_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	presets_hbox.add_theme_constant_override("separation", 6)
 	vbox.add_child(presets_hbox)
+
+	var select_btn = Button.new()
+	select_btn.text = "✓ Select Date"
+	var sel_b_st = StyleBoxFlat.new()
+	sel_b_st.bg_color = Color(0.18, 0.48, 0.88, 1.0)
+	sel_b_st.corner_radius_top_left = 6; sel_b_st.corner_radius_top_right = 6
+	sel_b_st.corner_radius_bottom_left = 6; sel_b_st.corner_radius_bottom_right = 6
+	sel_b_st.content_margin_left = 10; sel_b_st.content_margin_right = 10
+	sel_b_st.content_margin_top = 4; sel_b_st.content_margin_bottom = 4
+	select_btn.add_theme_stylebox_override("normal", sel_b_st)
+	select_btn.add_theme_stylebox_override("hover", sel_b_st)
+	select_btn.add_theme_stylebox_override("pressed", sel_b_st)
+	select_btn.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
+	select_btn.pressed.connect(func():
+		var mm_str = str(state["month"]).pad_zeros(2)
+		var dd_str = str(state["day"]).pad_zeros(2)
+		var yyyy_str = str(state["year"])
+		on_date_selected.call(mm_str + "/" + dd_str + "/" + yyyy_str)
+		canvas_layer.queue_free()
+	)
+	presets_hbox.add_child(select_btn)
 
 	var make_preset = func(lbl_text: String, day_offset: int):
 		var p_btn = Button.new()
@@ -1958,27 +2460,26 @@ func _open_calendar_picker_dialog(on_date_selected: Callable, current_ui_date: S
 			var dd_str = str(t_dt.day).pad_zeros(2)
 			var yyyy_str = str(t_dt.year)
 			on_date_selected.call(mm_str + "/" + dd_str + "/" + yyyy_str)
-			backdrop.queue_free()
+			canvas_layer.queue_free()
 		)
 		presets_hbox.add_child(p_btn)
 
 	make_preset.call("Today", 0)
-	make_preset.call("Tomorrow", 1)
-	make_preset.call("+3 Days", 3)
-	make_preset.call("+7 Days", 7)
 
 	var clear_btn = Button.new(); clear_btn.text = "Clear"
 	clear_btn.add_theme_font_size_override("font_size", 10)
 	clear_btn.pressed.connect(func():
 		on_date_selected.call("")
-		backdrop.queue_free()
+		canvas_layer.queue_free()
 	)
 	presets_hbox.add_child(clear_btn)
 
 	var cancel_btn = Button.new(); cancel_btn.text = "Close"
 	cancel_btn.add_theme_font_size_override("font_size", 10)
-	cancel_btn.pressed.connect(func(): backdrop.queue_free())
+	cancel_btn.pressed.connect(func(): canvas_layer.queue_free())
 	presets_hbox.add_child(cancel_btn)
+
+	parent_win.add_child(canvas_layer)
 
 func _open_link_contact_dialog(caller_phone: String) -> void:
 	var backdrop = ColorRect.new()
@@ -2352,7 +2853,8 @@ func _open_audio_player_dialog(vm: Dictionary) -> void:
 	header_hbox.add_child(btn_link_contact)
 
 	var phone_lbl = Label.new()
-	phone_lbl.text = "📱 Phone: " + _format_phone_display(caller_num) + " • Received: " + str(vm.get("created_at", ""))
+	var raw_vm_created = str(vm.get("created_at", ""))
+	phone_lbl.text = "📱 Phone: " + _format_phone_display(caller_num) + " • Received: " + _format_card_datetime(raw_vm_created)
 	phone_lbl.add_theme_font_size_override("font_size", 12)
 	phone_lbl.add_theme_color_override("font_color", Color(0.40, 0.45, 0.55, 1.0))
 	vbox.add_child(phone_lbl)
@@ -2416,16 +2918,6 @@ func _open_audio_player_dialog(vm: Dictionary) -> void:
 	status_lbl.add_theme_color_override("font_color", Color(0.35, 0.40, 0.50, 1.0))
 	status_hbox.add_child(status_lbl)
 
-	var btn_change_key = Button.new()
-	btn_change_key.text = "🔑 Change API Key"
-	btn_change_key.add_theme_font_size_override("font_size", 10)
-	btn_change_key.pressed.connect(func():
-		_prompt_gemini_api_key_dialog(func(new_k: String):
-			status_lbl.text = "API Key updated. Re-Transcribe ready."
-		)
-	)
-	status_hbox.add_child(btn_change_key)
-
 	# Transcription Box
 	var trans_title = Label.new()
 	trans_title.text = "💬 Transcription:"
@@ -2439,7 +2931,7 @@ func _open_audio_player_dialog(vm: Dictionary) -> void:
 	vbox.add_child(trans_scroll)
 
 	var trans_lbl = Label.new()
-	trans_lbl.text = "\"" + (transcription if transcription != "" else "(No transcription available. Click ✨ Re-Transcribe below to generate)") + "\""
+	trans_lbl.text = "\"" + (transcription if transcription != "" else "(Transcription processing or unavailable)") + "\""
 	trans_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	trans_lbl.size_flags_horizontal = SIZE_EXPAND_FILL
 	trans_lbl.add_theme_font_size_override("font_size", 12)
@@ -2533,48 +3025,30 @@ func _open_audio_player_dialog(vm: Dictionary) -> void:
 		var secs = s % 60
 		return "%d:%02d" % [mins, secs]
 
-	# Redirect-aware Twilio audio downloader
+	# Relay-proxied audio downloader (secure server-side authentication)
 	var _fetch_twilio_audio = func(url_str: String, done_cb: Callable):
-		var account_sid = "REPLACE_WITH_TWILIO_ACCOUNT_SID"
-		var auth_token = "REPLACE_WITH_TWILIO_AUTH_TOKEN"
-		var b64_auth = Marshalls.utf8_to_base64(account_sid + ":" + auth_token)
+		var gateway_url = "https://app.reallife-studycenter.org"
+		if db:
+			var g_res = db.execute("SELECT setting_value FROM app_settings WHERE setting_key = 'GATEWAY_SERVER_URL' LIMIT 1;")
+			if g_res["success"] and g_res["data"].size() > 0:
+				var g_val = str(g_res["data"][0]["setting_value"]).strip_edges()
+				if g_val != "": gateway_url = g_val
 
-		var target_url = url_str.strip_edges()
-		if not target_url.contains(".mp3") and not target_url.contains(".wav"):
-			target_url += ".mp3"
+		var target_url = gateway_url + "/api/v1/voicemails/audio?recording_url=" + url_str.strip_edges().uri_encode()
 
 		var h1 = HTTPRequest.new()
 		add_child(h1)
-		h1.max_redirects = 0 # Intercept 302 redirect location!
+		h1.max_redirects = 5
 
-		h1.request_completed.connect(func(_res, code, hdrs, body):
+		h1.request_completed.connect(func(_res, code, _hdrs, body):
 			h1.queue_free()
-			print("[Audio] Initial fetch code: ", code, " body_sz: ", body.size())
-			var redirect_loc = ""
-			for h in hdrs:
-				if h.to_lower().begins_with("location:"):
-					redirect_loc = h.substr(9).strip_edges()
-					break
-			
-			if redirect_loc != "":
-				print("[Audio] Following redirect to S3: ", redirect_loc)
-				var h2 = HTTPRequest.new()
-				add_child(h2)
-				h2.max_redirects = 5
-				h2.request_completed.connect(func(_r2, code2, _h2, body2):
-					h2.queue_free()
-					print("[Audio] S3 fetch code: ", code2, " bytes: ", body2.size())
-					done_cb.call(code2, body2)
-				)
-				h2.request(redirect_loc) # Clean S3 request without Basic Auth header
-				return
-
+			print("[Audio] Relay proxy fetch code: ", code, " body_sz: ", body.size())
 			if code == 200 and body.size() > 0:
 				done_cb.call(200, body)
 			else:
 				done_cb.call(code, body)
 		)
-		h1.request(target_url, ["Authorization: Basic " + b64_auth])
+		h1.request(target_url)
 
 	# Fetch Audio
 	var _load_audio = func(auto_play: bool = true):
@@ -2623,9 +3097,9 @@ func _open_audio_player_dialog(vm: Dictionary) -> void:
 				btn_play_pause.text = "🔇 Empty Audio"
 				status_lbl.text = "⚠️ Empty voicemail (0 bytes recorded by carrier)."
 			else:
-				btn_play_pause.disabled = false
-				btn_play_pause.text = "🌐 Open External"
-				status_lbl.text = "Audio stream HTTP " + str(code) + ". Click Open External."
+				btn_play_pause.disabled = true
+				btn_play_pause.text = "⚠️ Load Error"
+				status_lbl.text = "Failed to load audio stream (HTTP " + str(code) + ")."
 		)
 
 	_load_audio.call(true)
@@ -2881,5 +3355,53 @@ func _prompt_gemini_api_key_dialog(on_saved_callback: Callable) -> void:
 	btn_hbox.add_child(btn_cancel)
 	btn_hbox.add_child(btn_save)
 	vbox.add_child(btn_hbox)
+
+func _format_card_datetime(raw_datetime: String) -> String:
+	if raw_datetime == "": return ""
+	var s = raw_datetime.strip_edges()
+	
+	var iso_str = s
+	if not "T" in iso_str:
+		iso_str = iso_str.replace(" ", "T")
+	if not iso_str.ends_with("Z"):
+		iso_str += "Z"
+		
+	var unix_time = Time.get_unix_time_from_datetime_string(iso_str)
+	if unix_time <= 0:
+		return s
+		
+	var local_dict = Time.get_datetime_dict_from_unix_time(unix_time)
+	var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+	var month_idx = int(local_dict.get("month", 1)) - 1
+	var month_str = months[month_idx] if month_idx >= 0 and month_idx < 12 else str(local_dict.get("month", 1))
+	
+	var day_num = int(local_dict.get("day", 1))
+	var year_num = str(local_dict.get("year", 2026))
+	
+	var hour_num = int(local_dict.get("hour", 0))
+	var min_num = int(local_dict.get("minute", 0))
+	var ampm = "AM"
+	if hour_num >= 12:
+		ampm = "PM"
+		if hour_num > 12:
+			hour_num -= 12
+	elif hour_num == 0:
+		hour_num = 12
+		
+	return "%s %d, %s • %d:%02d %s" % [month_str, day_num, year_num, hour_num, min_num, ampm]
+
+func _confirm_delete_voicemail(vm_uuid: String, on_deleted_callback: Callable = Callable()) -> void:
+	var confirm_dlg = ConfirmationDialog.new()
+	confirm_dlg.title = "Delete Voicemail"
+	confirm_dlg.dialog_text = "Are you sure you want to delete this voicemail?"
+	add_child(confirm_dlg)
+	confirm_dlg.popup_centered()
+	
+	confirm_dlg.confirmed.connect(func():
+		com_service.delete_voicemail(vm_uuid)
+		if on_deleted_callback.is_valid():
+			on_deleted_callback.call()
+		_refresh_all_feeds()
+	)
 
 

@@ -73,4 +73,9 @@ func run_migrations() -> Dictionary:
 
 		newly_executed += 1
 
+	var StagingSeederScript = load("res://src/domain/directory/staging_seeder_service.gd")
+	if StagingSeederScript:
+		var seeder = StagingSeederScript.new(db)
+		seeder.seed_staging_test_member()
+
 	return {"success": true, "newly_executed": newly_executed, "error": ""}

@@ -81,7 +81,16 @@ func _create_texture_from_base64(base64_str: String) -> ImageTexture:
 	return ImageTexture.create_from_image(img)
 
 func _ready() -> void:
-	selected_date_unix = int(Time.get_unix_time_from_system())
+	add_to_group("sync_listeners")
+	var local_date = Time.get_date_dict_from_system()
+	selected_date_unix = Time.get_unix_time_from_datetime_dict({
+		"year": local_date["year"],
+		"month": local_date["month"],
+		"day": local_date["day"],
+		"hour": 12,
+		"minute": 0,
+		"second": 0
+	})
 	_init_database()
 	_style_components()
 	_populate_dropdowns()
@@ -92,13 +101,26 @@ func _ready() -> void:
 	var top_bar = get_node_or_null("MarginContainer/MainVBox/TopBarHBox")
 	if top_bar:
 		var btn_pub_qr = Button.new()
-		btn_pub_qr.text = "🏛️ PUBLIC CHECK-IN QR SIGN"
+		btn_pub_qr.text = "🏛️ REMOTE CHECK-IN QR SIGN"
 		btn_pub_qr.custom_minimum_size = Vector2(210, 36)
 		btn_pub_qr.pressed.connect(func():
 			var dlg = PublicQrSignDialogScript.new(self)
 			dlg.show_dialog()
 		)
 		top_bar.add_child(btn_pub_qr)
+
+		var btn_add_member = Button.new()
+		btn_add_member.text = "➕ ADD MEMBER"
+		btn_add_member.custom_minimum_size = Vector2(130, 36)
+		btn_add_member.pressed.connect(func():
+			var dir_scene = load("res://app/scenes/directory_view.tscn")
+			if dir_scene:
+				var dir_inst = dir_scene.instantiate()
+				dir_inst.db = db
+				if dir_inst.has_method("_on_add_person_pressed"):
+					dir_inst._on_add_person_pressed()
+		)
+		top_bar.add_child(btn_add_member)
 
 func _init_database() -> void:
 	if not db:
@@ -916,7 +938,7 @@ func _add_metric_card(title: String, count: int, icon_str: String, bg_col: Color
 	metrics_grid.add_child(card)
 
 func _render_checkin_log(date_str: String) -> void:
-	for child in log_card.get_children(): child.free()
+	for child in log_card.get_children(): child.queue_free()
 
 	var vbox = VBoxContainer.new(); vbox.add_theme_constant_override("separation", 14)
 
@@ -935,7 +957,7 @@ func _render_checkin_log(date_str: String) -> void:
 	header_hbox.add_child(btn_refresh)
 	vbox.add_child(header_hbox)
 
-	var res = db.execute("SELECT a.id, a.checkin_uuid, a.human_id, a.check_in_date, a.check_in_time, a.method, a.mode, p.first_name, p.last_name, p.primary_role, p.profile_photo FROM attendance_log a LEFT JOIN people p ON p.id = a.person_id WHERE a.check_in_date = ? ORDER BY a.id DESC;", [date_str])
+	var res = db.execute("SELECT a.id, a.checkin_uuid, a.human_id, a.check_in_date, a.check_in_time, a.method, a.mode, p.first_name, p.last_name, p.primary_role, p.academic_year, i.short_name AS inst_short, p.profile_photo FROM attendance_log a LEFT JOIN people p ON p.id = a.person_id LEFT JOIN institutions i ON p.institution_id = i.id WHERE a.check_in_date = ? ORDER BY a.id DESC;", [date_str])
 
 	if res["success"] and res["data"].size() > 0:
 		var scroll = ScrollContainer.new(); scroll.custom_minimum_size = Vector2(0, 340); scroll.size_flags_vertical = SIZE_EXPAND_FILL
@@ -951,6 +973,13 @@ func _render_checkin_log(date_str: String) -> void:
 			var time_s = str(item.get("check_in_time")) if item.get("check_in_time") != null else ""
 			var mode_s = str(item.get("mode")) if item.get("mode") != null else "Facility"
 			var role_s = str(item.get("primary_role")) if item.get("primary_role") != null else "Member"
+
+			var inst_short = str(item.get("inst_short")) if item.get("inst_short") != null else ""
+			var ay_val = str(item.get("academic_year")) if item.get("academic_year") != null and str(item.get("academic_year")) != "Not Applicable" else ""
+			var badge_parts = []
+			if inst_short != "": badge_parts.append(inst_short)
+			if ay_val != "": badge_parts.append(ay_val)
+			var badge_str = (" • " + " • ".join(badge_parts)) if badge_parts.size() > 0 else ""
 
 			var row_card = PanelContainer.new()
 			var st = StyleBoxFlat.new()
@@ -976,7 +1005,7 @@ func _render_checkin_log(date_str: String) -> void:
 			time_lbl.add_theme_font_size_override("font_size", 16); time_lbl.add_theme_color_override("font_color", Color(0.40, 0.90, 1.0, 1.0))
 			r_hbox.add_child(time_lbl)
 
-			var name_lbl = Label.new(); name_lbl.text = name + " (" + str(item.get("human_id")) + ")"; name_lbl.size_flags_horizontal = SIZE_EXPAND_FILL
+			var name_lbl = Label.new(); name_lbl.text = name + " (" + str(item.get("human_id")) + ")" + badge_str; name_lbl.size_flags_horizontal = SIZE_EXPAND_FILL
 			name_lbl.add_theme_font_size_override("font_size", 17); name_lbl.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
 			r_hbox.add_child(name_lbl)
 
@@ -1028,5 +1057,111 @@ func _render_checkin_log(date_str: String) -> void:
 func _undo_check_in(log_id: int) -> void:
 	_dismiss_toast()
 	if not db: return
-	db.execute("DELETE FROM attendance_log WHERE id = ?;", [log_id])
-	_refresh_dashboard()
+
+	# 1. Fetch details of the check-in to make the confirmation dialog informative
+	var details = db.execute("SELECT a.check_in_time, p.first_name, p.last_name, p.human_id FROM attendance_log a LEFT JOIN people p ON p.id = a.person_id WHERE a.id = ? LIMIT 1;", [log_id])
+	var member_name = "Unknown Member"
+	var checkin_time = ""
+	if details["success"] and details["data"].size() > 0:
+		var row = details["data"][0]
+		var fn = str(row.get("first_name", ""))
+		var ln = str(row.get("last_name", ""))
+		member_name = (fn + " " + ln).strip_edges() + " (" + str(row.get("human_id", "")) + ")"
+		checkin_time = str(row.get("check_in_time", ""))
+
+	# 2. Create Modal Overlay
+	var modal = ColorRect.new()
+	modal.color = Color(0, 0, 0, 0.65) # Dark dimming overlay
+	modal.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	
+	var center = CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	
+	var panel = PanelContainer.new()
+	panel.custom_minimum_size = Vector2(460, 0)
+	
+	# Warm/Clean Styling matching PD-008
+	var st = StyleBoxFlat.new()
+	st.bg_color = Color(0.14, 0.17, 0.24, 1.0)
+	st.border_width_left = 2; st.border_width_top = 2; st.border_width_right = 2; st.border_width_bottom = 2
+	st.border_color = Color(0.85, 0.25, 0.25, 1.0) # Warm Red accent border for destructive action
+	st.corner_radius_top_left = 12; st.corner_radius_top_right = 12; st.corner_radius_bottom_left = 12; st.corner_radius_bottom_right = 12
+	st.content_margin_left = 24; st.content_margin_top = 24; st.content_margin_right = 24; st.content_margin_bottom = 24
+	panel.add_theme_stylebox_override("panel", st)
+	
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 18)
+	
+	var title_lbl = Label.new()
+	title_lbl.text = "⚠️ Undo Attendance Check-In?"
+	title_lbl.add_theme_font_size_override("font_size", 20)
+	title_lbl.add_theme_color_override("font_color", Color(0.95, 0.35, 0.35, 1.0))
+	vbox.add_child(title_lbl)
+	
+	var desc_lbl = Label.new()
+	desc_lbl.text = "Are you sure you want to delete this check-in? This action will remove the record from today's attendance logs."
+	desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	desc_lbl.add_theme_font_size_override("font_size", 15)
+	desc_lbl.add_theme_color_override("font_color", Color(0.90, 0.95, 1.0))
+	vbox.add_child(desc_lbl)
+	
+	# Highlight Card Container
+	var info_card = PanelContainer.new()
+	var info_st = StyleBoxFlat.new()
+	info_st.bg_color = Color(0.09, 0.12, 0.18, 1.0)
+	info_st.corner_radius_top_left = 8; info_st.corner_radius_top_right = 8; info_st.corner_radius_bottom_left = 8; info_st.corner_radius_bottom_right = 8
+	info_st.content_margin_left = 14; info_st.content_margin_top = 12; info_st.content_margin_right = 14; info_st.content_margin_bottom = 12
+	info_card.add_theme_stylebox_override("panel", info_st)
+	
+	var info_vbox = VBoxContainer.new()
+	info_vbox.add_theme_constant_override("separation", 6)
+	
+	var name_lbl = Label.new()
+	name_lbl.text = "Member: " + member_name
+	name_lbl.add_theme_font_size_override("font_size", 15)
+	name_lbl.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
+	info_vbox.add_child(name_lbl)
+	
+	if checkin_time != "":
+		var time_lbl = Label.new()
+		time_lbl.text = "Checked In At: " + checkin_time
+		time_lbl.add_theme_font_size_override("font_size", 14)
+		time_lbl.add_theme_color_override("font_color", Color(0.40, 0.90, 1.0, 1.0))
+		info_vbox.add_child(time_lbl)
+		
+	info_card.add_child(info_vbox)
+	vbox.add_child(info_card)
+	
+	# Action buttons row
+	var btn_hbox = HBoxContainer.new()
+	btn_hbox.add_theme_constant_override("separation", 14)
+	btn_hbox.alignment = BoxContainer.ALIGNMENT_END
+	
+	var btn_cancel = Button.new()
+	btn_cancel.text = "Cancel"
+	btn_cancel.custom_minimum_size = Vector2(90, 36)
+	_style_button_high_contrast(btn_cancel, Color(0.25, 0.30, 0.40, 1.0), Color(0.40, 0.50, 0.65, 1.0), 14)
+	btn_cancel.pressed.connect(func(): modal.queue_free())
+	btn_hbox.add_child(btn_cancel)
+	
+	var btn_confirm = Button.new()
+	btn_confirm.text = "Yes, Undo"
+	btn_confirm.custom_minimum_size = Vector2(110, 36)
+	_style_button_high_contrast(btn_confirm, Color(0.75, 0.20, 0.20, 1.0), Color(0.95, 0.35, 0.35, 1.0), 14)
+	btn_confirm.pressed.connect(func():
+		db.execute("DELETE FROM attendance_log WHERE id = ?;", [log_id])
+		_refresh_dashboard()
+		modal.queue_free()
+	)
+	btn_hbox.add_child(btn_confirm)
+	vbox.add_child(btn_hbox)
+	
+	panel.add_child(vbox)
+	center.add_child(panel)
+	modal.add_child(center)
+	add_child(modal)
+
+func on_inbound_events_processed(count: int) -> void:
+	if count > 0 and is_inside_tree():
+		print("[AttendanceView] Auto-refreshing check-in dashboard for ", count, " processed events.")
+		_refresh_dashboard()

@@ -35,6 +35,7 @@ func run_all_tests() -> void:
 		tree.root.add_child(dir_view)
 
 	dir_view._ready()
+	dir_view.refresh_view()
 
 	# Assertion 1: Unselected state shows NoSelectionWorkspace
 	var no_sel_lbl = dir_view.get_node_or_null("MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/NoSelectionWorkspace") as Label

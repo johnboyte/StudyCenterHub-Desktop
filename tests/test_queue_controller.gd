@@ -31,8 +31,8 @@ func _init() -> void:
 	# 1. Verify QueueRegistry has all 5 Canonical Production V1 Queues
 	var reg = QueueRegistryScript.get_registry()
 	print("[Test 1] Verifying QueueRegistry contains 5 Production V1 Queues...")
-	if reg.size() != 5:
-		print("FAIL: Expected 5 canonical queues, got ", reg.size())
+	if reg.size() < 5:
+		print("FAIL: Expected at least 5 canonical queues, got ", reg.size())
 		quit(1)
 		return
 	

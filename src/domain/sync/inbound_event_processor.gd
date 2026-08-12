@@ -88,6 +88,10 @@ func _process_next_event(events: Array, index: int, processed_count: int, callba
 			print("[Processor] Voicemail event ", event_id, " completion callback received.")
 			_process_next_event(events, index + 1, processed_count + 1, callback)
 		)
+	elif event_type == "twilio.transcription":
+		print("[Processor] Processing Twilio transcription event ", event_id)
+		_process_twilio_transcription(event_id, payload)
+		_process_next_event(events, index + 1, processed_count + 1, callback)
 	else:
 		print("[Processor] Generic event type: ", event_type)
 		db.execute("UPDATE inbound_event_queue SET processed = 1 WHERE id = ?;", [event_id])
@@ -266,9 +270,31 @@ func _process_voicemail(event_id: int, payload: Dictionary, completion_callback:
 	var caller_phone = str(payload.get("From", "")).strip_edges()
 	var call_sid = str(payload.get("CallSid", "")).strip_edges()
 	var recording_url = str(payload.get("RecordingUrl", "")).strip_edges()
+	var recording_sid = str(payload.get("RecordingSid", "")).strip_edges()
 	var duration_sec = int(payload.get("RecordingDuration", 30))
 	var transcription = str(payload.get("TranscriptionText", "")).strip_edges()
 	
+	if recording_sid == "" and recording_url != "":
+		var idx = recording_url.find("/Recordings/")
+		if idx != -1:
+			recording_sid = recording_url.substr(idx + 12).strip_edges()
+
+	if transcription == "" and (recording_sid != "" or call_sid != ""):
+		var cached_res = db.execute("SELECT payload_json FROM inbound_event_queue WHERE event_type = 'twilio.transcription' AND (payload_json LIKE ? OR payload_json LIKE ?) LIMIT 1;", ["%" + recording_sid + "%", "%" + call_sid + "%"])
+		if cached_res["success"] and cached_res["data"].size() > 0:
+			var c_payload = JSON.parse_string(str(cached_res["data"][0]["payload_json"]))
+			if typeof(c_payload) == TYPE_DICTIONARY:
+				transcription = str(c_payload.get("TranscriptionText", "")).strip_edges()
+
+	# Check for existing duplicate record in voicemails table
+	if recording_sid != "":
+		var dup_res = db.execute("SELECT id, voicemail_uuid, transcription FROM voicemails WHERE recording_sid = ? OR recording_url LIKE ? LIMIT 1;", [recording_sid, "%" + recording_sid + "%"])
+		if dup_res["success"] and dup_res["data"].size() > 0:
+			print("[Processor] Duplicate voicemail event for RecordingSid ", recording_sid, ". Marking event ", event_id, " processed.")
+			db.execute("UPDATE inbound_event_queue SET processed = 1 WHERE id = ?;", [event_id])
+			completion_callback.call()
+			return
+
 	var matched_person_id = null
 	var caller_name = "Unknown Caller"
 	if caller_phone != "":
@@ -277,18 +303,39 @@ func _process_voicemail(event_id: int, payload: Dictionary, completion_callback:
 			matched_person_id = p_info["id"]
 			caller_name = p_info["name"]
 
-	if transcription == "" and recording_url != "":
-		var api_key = get_gemini_api_key()
-		if api_key != "":
-			print("[Processor] Voicemail has no transcript. Calling Gemini...")
-			_call_gemini_transcribe(api_key, recording_url, func(gemini_trans: String):
-				_save_voicemail_record(event_id, call_sid, caller_name, caller_phone, duration_sec, recording_url, gemini_trans, matched_person_id)
-				completion_callback.call()
-			)
-			return
-			
-	_save_voicemail_record(event_id, call_sid, caller_name, caller_phone, duration_sec, recording_url, transcription, matched_person_id)
+	# Save record immediately (NON-BLOCKING) so ingestion NEVER gets stuck
+	var vm_uuid = _save_voicemail_record(event_id, call_sid, recording_sid, caller_name, caller_phone, duration_sec, recording_url, transcription, matched_person_id)
+	
+	# Finish event processing callback immediately so queue is non-blocking
 	completion_callback.call()
+
+func _process_twilio_transcription(event_id: int, payload: Dictionary) -> void:
+	var rec_sid = str(payload.get("RecordingSid", "")).strip_edges()
+	var trans_text = str(payload.get("TranscriptionText", "")).strip_edges()
+	var call_sid = str(payload.get("CallSid", "")).strip_edges()
+	var caller_phone = str(payload.get("Caller", payload.get("From", ""))).strip_edges()
+	var recording_url = str(payload.get("RecordingUrl", "")).strip_edges()
+	
+	if rec_sid != "" or call_sid != "":
+		var existing = db.execute("SELECT id, voicemail_uuid, transcription FROM voicemails WHERE (recording_sid = ? AND recording_sid != '') OR (recording_url LIKE ?) OR (call_sid = ? AND call_sid != '') LIMIT 1;", [rec_sid, "%" + rec_sid + "%", call_sid])
+		if existing["success"] and existing["data"].size() > 0:
+			if trans_text != "":
+				db.execute("UPDATE voicemails SET transcription = ? WHERE (recording_sid = ? AND recording_sid != '') OR (recording_url LIKE ?) OR (call_sid = ? AND call_sid != '');", [trans_text, rec_sid, "%" + rec_sid + "%", call_sid])
+				print("[Processor] Twilio transcript updated for existing RecordingSid ", rec_sid)
+		else:
+			print("[Processor] Creating voicemail record directly from transcription payload for RecordingSid ", rec_sid)
+			var matched_person_id = null
+			var caller_name = "Unknown Caller"
+			if caller_phone != "":
+				var p_info = _find_person_by_phone(caller_phone)
+				if not p_info.is_empty():
+					matched_person_id = p_info["id"]
+					caller_name = p_info["name"]
+			_save_voicemail_record(event_id, call_sid, rec_sid, caller_name, caller_phone, 30, recording_url, trans_text, matched_person_id)
+
+	db.execute("UPDATE inbound_event_queue SET processed = 1 WHERE id = ?;", [event_id])
+	if parent_node and parent_node.is_inside_tree():
+		parent_node.get_tree().call_group("sync_listeners", "on_inbound_events_processed", 1)
 
 func _normalize_phone_digits(phone_str: String) -> String:
 	var digits = ""
@@ -316,13 +363,13 @@ func _find_person_by_phone(phone_str: String) -> Dictionary:
 				return {"id": int(p["id"]), "name": full_name}
 	return {}
 
-func _save_voicemail_record(event_id: int, call_sid: String, caller_name: String, caller_phone: String, duration_sec: int, recording_url: String, transcription: String, matched_person_id: Variant) -> void:
+func _save_voicemail_record(event_id: int, call_sid: String, recording_sid: String, caller_name: String, caller_phone: String, duration_sec: int, recording_url: String, transcription: String, matched_person_id: Variant) -> String:
 	var vm_uuid = _generate_uuid()
 	var insert_vm = """
 		INSERT INTO voicemails (
 			voicemail_uuid, caller_name, caller_phone, duration_sec, recording_url,
-			transcription, status, created_at, assigned_person_id, priority
-		) VALUES (?, ?, ?, ?, ?, ?, 'new', datetime('now'), ?, 'Medium');
+			transcription, status, created_at, assigned_person_id, priority, call_sid, recording_sid
+		) VALUES (?, ?, ?, ?, ?, ?, 'new', datetime('now'), ?, 'Medium', ?, ?);
 	"""
 	var db_res = db.execute(insert_vm, [
 		vm_uuid,
@@ -331,7 +378,9 @@ func _save_voicemail_record(event_id: int, call_sid: String, caller_name: String
 		duration_sec,
 		recording_url,
 		transcription,
-		matched_person_id
+		matched_person_id,
+		call_sid,
+		recording_sid
 	])
 	if not db_res["success"]:
 		print("[Processor] Failed to insert voicemail: ", db_res["error"])
@@ -350,11 +399,11 @@ func _save_voicemail_record(event_id: int, call_sid: String, caller_name: String
 	db.execute("INSERT OR IGNORE INTO event_outbox (event_uuid, event_type, aggregate_type, aggregate_id, payload_json, device_uuid, status) VALUES (?, 'VoicemailReceived', 'Voicemail', ?, ?, ?, 'pending');", [outbox_uuid, vm_uuid, JSON.stringify(outbox_payload), get_device_uuid()])
 
 	db.execute("UPDATE inbound_event_queue SET processed = 1 WHERE id = ?;", [event_id])
+	return vm_uuid
 
 func _call_gemini_transcribe(api_key: String, recording_url: String, callback: Callable) -> void:
 	var gateway_url = "https://app.reallife-studycenter.org"
-	var sync_key = "SCH_7wY9Pq4LmX8Nz2RbV5Kd1Hs6Mf3Jc9QaTp8Ux"
-	var proxy_url = gateway_url + "/api/v1/proxy/recording?sync_api_key=" + sync_key + "&url=" + recording_url.uri_encode()
+	var proxy_url = gateway_url + "/api/v1/voicemails/audio?recording_url=" + recording_url.uri_encode()
 	
 	var url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + api_key
 	var headers = ["Content-Type: application/json"]

@@ -12,7 +12,7 @@ func _init(database: RefCounted) -> void:
 func get_person(person_uuid: String) -> Dictionary:
 	if person_uuid == "":
 		return {"success": false, "error": "person_uuid cannot be empty.", "person": {}}
-	var res = db.execute("SELECT * FROM people WHERE person_uuid = ?;", [person_uuid])
+	var res = db.execute("SELECT p.*, i.name AS institution_name, i.short_name AS institution_short_name FROM people p LEFT JOIN institutions i ON p.institution_id = i.id WHERE p.person_uuid = ?;", [person_uuid])
 	if res["success"] and res["data"].size() > 0:
 		return {"success": true, "error": "", "person": res["data"][0]}
 	return {"success": false, "error": "Person not found.", "person": {}}
@@ -20,21 +20,21 @@ func get_person(person_uuid: String) -> Dictionary:
 func get_person_by_human_id(human_id: String) -> Dictionary:
 	if human_id == "":
 		return {"success": false, "error": "human_id cannot be empty.", "person": {}}
-	var res = db.execute("SELECT * FROM people WHERE human_id = ?;", [human_id])
+	var res = db.execute("SELECT p.*, i.name AS institution_name, i.short_name AS institution_short_name FROM people p LEFT JOIN institutions i ON p.institution_id = i.id WHERE p.human_id = ?;", [human_id])
 	if res["success"] and res["data"].size() > 0:
 		return {"success": true, "error": "", "person": res["data"][0]}
 	return {"success": false, "error": "Person not found.", "person": {}}
 
 func list_people(options: Dictionary = {}) -> Dictionary:
-	var sql = "SELECT * FROM people"
+	var sql = "SELECT p.*, i.name AS institution_name, i.short_name AS institution_short_name FROM people p LEFT JOIN institutions i ON p.institution_id = i.id"
 	var args = []
 
 	var status_filter = String(options.get("status", ""))
 	if status_filter != "":
-		sql += " WHERE status = ?"
+		sql += " WHERE p.status = ?"
 		args.append(status_filter)
 
-	sql += " ORDER BY last_name ASC, first_name ASC, id ASC;"
+	sql += " ORDER BY p.last_name ASC, p.first_name ASC, p.id ASC;"
 	var res = db.execute(sql, args)
 	if not res["success"]:
 		return {"success": false, "error": res["error"], "people": []}
@@ -44,7 +44,7 @@ func list_active_people() -> Dictionary:
 	return list_people({"status": "active"})
 
 func list_pending_people() -> Dictionary:
-	var sql = "SELECT * FROM people WHERE status IN ('pending', 'To Be Confirmed') ORDER BY last_name ASC, first_name ASC, id ASC;"
+	var sql = "SELECT p.*, i.name AS institution_name, i.short_name AS institution_short_name FROM people p LEFT JOIN institutions i ON p.institution_id = i.id WHERE p.status IN ('pending', 'To Be Confirmed') ORDER BY p.last_name ASC, p.first_name ASC, p.id ASC;"
 	var res = db.execute(sql)
 	if not res["success"]:
 		return {"success": false, "error": res["error"], "people": []}
@@ -109,23 +109,23 @@ func search_people(query_raw: String, options: Dictionary = {}) -> Dictionary:
 	var phone_pattern = "%" + phone_digits + "%" if phone_digits.length() >= 3 else ""
 
 	var sql = """
-	SELECT * FROM people
+	SELECT p.*, i.name AS institution_name, i.short_name AS institution_short_name FROM people p LEFT JOIN institutions i ON p.institution_id = i.id
 	WHERE (
-		LOWER(first_name) LIKE LOWER(?) ESCAPE '\\'
-		OR LOWER(last_name) LIKE LOWER(?) ESCAPE '\\'
-		OR LOWER(first_name || ' ' || last_name) LIKE LOWER(?) ESCAPE '\\'
-		OR LOWER(last_name || ' ' || first_name) LIKE LOWER(?) ESCAPE '\\'
-		OR LOWER(human_id) LIKE LOWER(?) ESCAPE '\\'
-		OR LOWER(phone) LIKE LOWER(?) ESCAPE '\\'
-		OR LOWER(emergency_contact_name) LIKE LOWER(?) ESCAPE '\\'
-		OR LOWER(emergency_contact_phone) LIKE LOWER(?) ESCAPE '\\'
+		LOWER(p.first_name) LIKE LOWER(?) ESCAPE '\\'
+		OR LOWER(p.last_name) LIKE LOWER(?) ESCAPE '\\'
+		OR LOWER(p.first_name || ' ' || p.last_name) LIKE LOWER(?) ESCAPE '\\'
+		OR LOWER(p.last_name || ' ' || p.first_name) LIKE LOWER(?) ESCAPE '\\'
+		OR LOWER(p.human_id) LIKE LOWER(?) ESCAPE '\\'
+		OR LOWER(p.phone) LIKE LOWER(?) ESCAPE '\\'
+		OR LOWER(p.emergency_contact_name) LIKE LOWER(?) ESCAPE '\\'
+		OR LOWER(p.emergency_contact_phone) LIKE LOWER(?) ESCAPE '\\'
 	"""
 	var args = [pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern]
 
 	if phone_pattern != "":
 		sql += """
-		OR REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone, '-', ''), '(', ''), ')', ''), ' ', ''), '+', '') LIKE ? ESCAPE '\\'
-		OR REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(emergency_contact_phone, '-', ''), '(', ''), ')', ''), ' ', ''), '+', '') LIKE ? ESCAPE '\\'
+		OR REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(p.phone, '-', ''), '(', ''), ')', ''), ' ', ''), '+', '') LIKE ? ESCAPE '\\'
+		OR REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(p.emergency_contact_phone, '-', ''), '(', ''), ')', ''), ' ', ''), '+', '') LIKE ? ESCAPE '\\'
 		"""
 		args.append(phone_pattern)
 		args.append(phone_pattern)

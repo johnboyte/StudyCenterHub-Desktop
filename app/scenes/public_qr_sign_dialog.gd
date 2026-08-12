@@ -1,13 +1,11 @@
 extends CanvasLayer
 
-## Public Check-In QR Sign Dialog for StudyCenterHub
-## Generates and previews printable organization public signs (Letter & Half-Page).
+## Remote Check-In QR Sign Dialog for StudyCenterHub
+## Renders and previews official canonical Remote Check-In Poster artwork.
 
 const MembershipCardEngine = preload("res://src/domain/sync/membership_card_engine.gd")
 
 var parent_node: Node
-var current_size_mode: String = "letter" # "letter" or "half_page"
-
 var root_panel: PanelContainer
 var preview_rect: TextureRect
 var status_lbl: Label
@@ -55,7 +53,7 @@ func show_dialog() -> void:
 	# Header HBox
 	var header_hbox = HBoxContainer.new()
 	var title_lbl = Label.new()
-	title_lbl.text = "🏛️ PUBLIC CHECK-IN QR SIGN"
+	title_lbl.text = "🏛️ REMOTE CHECK-IN QR SIGN"
 	title_lbl.add_theme_font_size_override("font_size", 22)
 	title_lbl.add_theme_color_override("font_color", Color(0.95, 0.6, 0.2, 1.0))
 	title_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -74,31 +72,7 @@ func show_dialog() -> void:
 	status_lbl.add_theme_font_size_override("font_size", 14)
 	main_vbox.add_child(status_lbl)
 
-	# Mode Selection Buttons (Letter vs Half Page)
-	var mode_hbox = HBoxContainer.new()
-	mode_hbox.add_theme_constant_override("separation", 12)
-
-	var btn_letter = Button.new()
-	btn_letter.text = "📄 Letter Size (8.5\" x 11\" Poster)"
-	btn_letter.custom_minimum_size = Vector2(220, 36)
-	btn_letter.pressed.connect(func():
-		current_size_mode = "letter"
-		_update_preview()
-	)
-	mode_hbox.add_child(btn_letter)
-
-	var btn_half = Button.new()
-	btn_half.text = "📋 Half Page (5.5\" x 8.5\" Stand)"
-	btn_half.custom_minimum_size = Vector2(220, 36)
-	btn_half.pressed.connect(func():
-		current_size_mode = "half_page"
-		_update_preview()
-	)
-	mode_hbox.add_child(btn_half)
-
-	main_vbox.add_child(mode_hbox)
-
-	# Preview Box
+	# Preview Panel Container
 	var preview_panel = PanelContainer.new()
 	preview_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	var prev_st = StyleBoxFlat.new()
@@ -120,7 +94,7 @@ func show_dialog() -> void:
 
 	# Wording Details Label
 	var wording_lbl = Label.new()
-	wording_lbl.text = "SIGN WORDING: SCAN TO -> Check In  |  Register  |  Sign Up For A Session"
+	wording_lbl.text = "OFFICIAL PRODUCTION SIGN: Real Life House Remote Check-In (2550x3300 US Letter Poster)"
 	wording_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	wording_lbl.add_theme_font_size_override("font_size", 14)
 	wording_lbl.add_theme_color_override("font_color", Color(0.4, 0.8, 0.5, 1.0))
@@ -135,8 +109,8 @@ func show_dialog() -> void:
 	btn_png.custom_minimum_size = Vector2(140, 42)
 	btn_png.pressed.connect(func():
 		var user_dir = OS.get_system_dir(OS.SYSTEM_DIR_DESKTOP)
-		var file_path = user_dir + "/PublicCheckIn_Sign_" + current_size_mode + ".png"
-		var sign_img = MembershipCardEngine.render_public_qr_sign(current_size_mode)
+		var file_path = user_dir + "/RemoteCheckIn_Sign_Poster.png"
+		var sign_img = MembershipCardEngine.render_remote_qr_sign()
 		MembershipCardEngine.export_image_to_png(sign_img, file_path)
 		status_lbl.text = "✅ Exported PNG to Desktop: " + file_path.get_file()
 	)
@@ -147,8 +121,8 @@ func show_dialog() -> void:
 	btn_pdf.custom_minimum_size = Vector2(140, 42)
 	btn_pdf.pressed.connect(func():
 		var user_dir = OS.get_system_dir(OS.SYSTEM_DIR_DESKTOP)
-		var file_path = user_dir + "/PublicCheckIn_Sign_" + current_size_mode + ".png"
-		var sign_img = MembershipCardEngine.render_public_qr_sign(current_size_mode)
+		var file_path = user_dir + "/RemoteCheckIn_Sign_Poster.png"
+		var sign_img = MembershipCardEngine.render_remote_qr_sign()
 		MembershipCardEngine.export_image_to_png(sign_img, file_path)
 		status_lbl.text = "✅ Exported Sign PDF/PNG to Desktop: " + file_path.get_file()
 	)
@@ -180,6 +154,6 @@ func show_dialog() -> void:
 	_update_preview()
 
 func _update_preview() -> void:
-	var sign_img = MembershipCardEngine.render_public_qr_sign(current_size_mode)
+	var sign_img = MembershipCardEngine.render_remote_qr_sign()
 	var tex = ImageTexture.create_from_image(sign_img)
 	preview_rect.texture = tex

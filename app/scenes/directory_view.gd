@@ -18,16 +18,19 @@ const GoogleWalletServiceScript = preload("res://src/domain/security/google_wall
 const WorkQueueHeaderBarScene = preload("res://app/scenes/components/work_queue_header_bar.tscn")
 const QueueControllerScript = preload("res://src/domain/work_queue/queue_controller.gd")
 const QueueRegistryScript = preload("res://src/domain/work_queue/queue_registry.gd")
+const UnifiedPathwaysServiceScript = preload("res://src/domain/pathways/unified_pathways_service.gd")
 
 var db: RefCounted:
 	set(value):
 		db = value
 		if db:
 			read_service = DirectoryReadServiceScript.new(db)
+			unified_pathways_service = UnifiedPathwaysServiceScript.new(db)
 			if is_node_ready():
 				call_deferred("refresh_view")
 
 var read_service: RefCounted
+var unified_pathways_service: RefCounted
 var app_shell: Node = null
 
 var current_filter: String = "all" # "all", "active", "pending", "inactive"
@@ -58,6 +61,9 @@ var queue_card_container: PanelContainer = null
 @onready var results_count_label: Label = $MarginContainer/VBoxContainer/SubHeaderBar/ResultsCountLabel
 
 var is_roster_collapsed: bool = false
+var pathway_notes_expanded_map: Dictionary = {}
+var pathway_requirements_expanded_map: Dictionary = {}
+var pathway_attendance_expanded_map: Dictionary = {}
 
 @onready var roster_panel: PanelContainer = $MarginContainer/VBoxContainer/MainSplit/RosterPanel
 @onready var roster_container: VBoxContainer = $MarginContainer/VBoxContainer/MainSplit/RosterPanel/RosterScroll/RosterContainer
@@ -98,7 +104,81 @@ func _ready() -> void:
 	_connect_signals()
 	call_deferred("refresh_view")
 
+func _find_app_shell() -> Node:
+	var curr: Node = self
+	while curr:
+		if curr.has_method("switch_view"):
+			return curr
+		curr = curr.get_parent()
+	return null
+
+var return_to_pathways_bar: PanelContainer = null
+
+func _show_return_to_pathways_bar() -> void:
+	var main_vbox = _get_main_vbox()
+	if not main_vbox: return
+
+	if return_to_pathways_bar and is_instance_valid(return_to_pathways_bar):
+		return_to_pathways_bar.visible = true
+		return
+
+	return_to_pathways_bar = PanelContainer.new()
+	var p_st = StyleBoxFlat.new()
+	p_st.bg_color = Color(0.12, 0.16, 0.24, 1.0)
+	p_st.content_margin_left = 16; p_st.content_margin_right = 16
+	p_st.content_margin_top = 8; p_st.content_margin_bottom = 8
+	p_st.border_width_bottom = 1
+	p_st.border_color = Color(0.24, 0.32, 0.44, 1.0)
+	return_to_pathways_bar.add_theme_stylebox_override("panel", p_st)
+
+	var hbox = HBoxContainer.new()
+	hbox.add_theme_constant_override("separation", 12)
+
+	var btn_ret = Button.new()
+	btn_ret.text = "◄ Return to Pathways"
+	btn_ret.add_theme_font_size_override("font_size", 13)
+	var btn_st = StyleBoxFlat.new()
+	btn_st.bg_color = Color(0.92, 0.38, 0.18, 1.0)
+	btn_st.corner_radius_top_left = 6; btn_st.corner_radius_top_right = 6
+	btn_st.corner_radius_bottom_left = 6; btn_st.corner_radius_bottom_right = 6
+	btn_st.content_margin_left = 14; btn_st.content_margin_right = 14
+	btn_st.content_margin_top = 6; btn_st.content_margin_bottom = 6
+	btn_ret.add_theme_stylebox_override("normal", btn_st)
+	btn_ret.add_theme_stylebox_override("hover", btn_st)
+	btn_ret.add_theme_stylebox_override("pressed", btn_st)
+	btn_ret.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
+
+	btn_ret.pressed.connect(func():
+		var shell = _find_app_shell()
+		if shell and shell.has_method("switch_view"):
+			shell.switch_view("pathways")
+	)
+	hbox.add_child(btn_ret)
+
+	var lbl_info = Label.new()
+	lbl_info.text = "Viewing participant profile from Pathways"
+	lbl_info.add_theme_font_size_override("font_size", 13)
+	lbl_info.add_theme_color_override("font_color", Color(0.85, 0.90, 0.98, 1.0))
+	hbox.add_child(lbl_info)
+
+	return_to_pathways_bar.add_child(hbox)
+	main_vbox.add_child(return_to_pathways_bar)
+	main_vbox.move_child(return_to_pathways_bar, 0)
+
+func _hide_return_to_pathways_bar() -> void:
+	if return_to_pathways_bar and is_instance_valid(return_to_pathways_bar):
+		return_to_pathways_bar.visible = false
+
 func receive_navigation_context(params: Dictionary) -> void:
+	if params.get("from_view", "") == "pathways":
+		_show_return_to_pathways_bar()
+	else:
+		_hide_return_to_pathways_bar()
+
+	if params.has("person_id"):
+		var pid = int(params["person_id"])
+		call_deferred("select_person_by_id", pid)
+
 	if params.get("queue_mode", false) == true:
 		var qid = params.get("queue_id", "")
 		if qid == "registrations_awaiting_review":
@@ -723,6 +803,24 @@ func _create_roster_row_button(p: Dictionary, index: int) -> Button:
 	id_label.add_theme_color_override("font_color", Color(0.75, 0.82, 0.92))
 	vbox_text.add_child(id_label)
 
+	var inst_str = _clean_str(p.get("institution_short_name", p.get("institution_name", p.get("institution_other_name", ""))))
+	var ay_str = _clean_str(p.get("academic_year", ""))
+	if ay_str == "Not Applicable": ay_str = ""
+	var mj_str = _clean_str(p.get("major", ""))
+
+	var c_parts = []
+	if inst_str != "": c_parts.append(inst_str)
+	if ay_str != "": c_parts.append(ay_str)
+	if mj_str != "": c_parts.append(mj_str)
+
+	if c_parts.size() > 0:
+		var campus_info_lbl = Label.new()
+		campus_info_lbl.text = " • ".join(c_parts)
+		campus_info_lbl.add_theme_font_size_override("font_size", 12)
+		campus_info_lbl.add_theme_color_override("font_color", Color(0.40, 0.75, 0.95, 1.0))
+		campus_info_lbl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		vbox_text.add_child(campus_info_lbl)
+
 	hbox.add_child(vbox_text)
 
 	var trailing_spacer = Control.new()
@@ -733,6 +831,15 @@ func _create_roster_row_button(p: Dictionary, index: int) -> Button:
 	btn.add_child(margin)
 	btn.pressed.connect(func(): select_person_by_index(index))
 	return btn
+
+func select_person_by_id(person_id: int) -> void:
+	if visible_people.size() == 0:
+		_fetch_roster_data()
+	for i in range(visible_people.size()):
+		var p = visible_people[i]
+		if int(p.get("id", 0)) == person_id:
+			select_person_by_index(i)
+			return
 
 func select_person_by_index(index: int) -> void:
 	if index < 0 or index >= visible_people.size():
@@ -834,9 +941,21 @@ func _populate_overview_section(p: Dictionary, att_history: Array) -> void:
 
 	var flag_val = str(p.get("flag_status", "To Be Confirmed"))
 	var sms_val = "Granted" if (int(p.get("sms_consent", 1)) == 1 or bool(p.get("sms_consent_given", true))) else "Not Granted"
-	var qr_val = str(p.get("qr_status", "Not Issued"))
-	var pin_val = str(p.get("pin_status", "Not Set"))
 	var human_id = str(p.get("human_id", "PRT-1028"))
+
+	var person_id = int(p.get("id", 0))
+	var qr_val = "Not Issued"
+	if db and person_id > 0:
+		var qr_res = db.execute("SELECT token_hint FROM participant_qr_credentials WHERE person_id = ? AND status = 'active' LIMIT 1;", [person_id])
+		if qr_res["success"] and qr_res["data"].size() > 0:
+			var qr_hint = str(qr_res["data"][0].get("token_hint", ""))
+			qr_val = "Active (" + qr_hint + ")" if qr_hint != "" else "Issued/Active"
+
+	var pin_val = "Not Set"
+	if db and person_id > 0:
+		var pin_res = db.execute("SELECT credential_id FROM participant_pin_credentials WHERE person_id = ? AND status = 'active' LIMIT 1;", [person_id])
+		if pin_res["success"] and pin_res["data"].size() > 0:
+			pin_val = "Active"
 
 	grid.add_child(_create_kpi_card("REGISTRATION FLAG", flag_val, Color(1.0, 0.75, 0.35, 1.0) if flag_val != "Clear" else Color(0.40, 0.85, 0.60, 1.0)))
 	grid.add_child(_create_kpi_card("SMS CONSENT", sms_val, Color(0.40, 0.85, 0.60, 1.0) if sms_val == "Granted" else Color(0.80, 0.85, 0.90, 1.0)))
@@ -926,6 +1045,8 @@ func _create_kpi_card(title: String, val_text: String, accent_color: Color) -> P
 func _clean_str(val) -> String:
 	if val == null: return ""
 	var s = str(val).strip_edges()
+	if s.ends_with(".0"):
+		s = s.left(s.length() - 2)
 	if s.to_lower() == "<null>" or s.to_lower() == "null" or s.to_lower() == "nil":
 		return ""
 	return s
@@ -1052,12 +1173,6 @@ func _populate_profile_section(p: Dictionary) -> void:
 	var em_edit = LineEdit.new(); em_edit.text = _clean_str(p.get("email", "")); em_edit.placeholder_text = "name@example.com"; em_edit.custom_minimum_size = Vector2(0, 44); em_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL; em_edit.add_theme_font_size_override("font_size", 16)
 	em_vbox.add_child(em_lbl); em_vbox.add_child(em_edit); form_grid.add_child(em_vbox)
 
-	# School Email
-	var se_vbox = VBoxContainer.new(); se_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var se_lbl = Label.new(); se_lbl.text = "SCHOOL EMAIL"; se_lbl.add_theme_font_size_override("font_size", 14); se_lbl.add_theme_color_override("font_color", Color(0.70, 0.78, 0.88, 1.0))
-	var se_edit = LineEdit.new(); se_edit.text = _clean_str(p.get("school_email", "")); se_edit.placeholder_text = "student@school.edu"; se_edit.custom_minimum_size = Vector2(0, 44); se_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL; se_edit.add_theme_font_size_override("font_size", 16)
-	se_vbox.add_child(se_lbl); se_vbox.add_child(se_edit); form_grid.add_child(se_vbox)
-
 	# Preferred Email Option
 	var pe_vbox = VBoxContainer.new(); pe_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var pe_lbl = Label.new(); pe_lbl.text = "PREFERRED EMAIL"; pe_lbl.add_theme_font_size_override("font_size", 14); pe_lbl.add_theme_color_override("font_color", Color(0.70, 0.78, 0.88, 1.0))
@@ -1077,7 +1192,7 @@ func _populate_profile_section(p: Dictionary) -> void:
 	bd_hbox.add_child(bd_edit); bd_hbox.add_child(bd_cal_btn)
 	bd_vbox.add_child(bd_lbl); bd_vbox.add_child(bd_hbox); form_grid.add_child(bd_vbox)
 
-	# Primary Role / Staff Classification
+	# Staff Classification / Role
 	var role_vbox = VBoxContainer.new(); role_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var role_lbl = Label.new(); role_lbl.text = "STAFF CLASSIFICATION"; role_lbl.add_theme_font_size_override("font_size", 14); role_lbl.add_theme_color_override("font_color", Color(0.70, 0.78, 0.88, 1.0))
 	var role_dropdown = OptionButton.new()
@@ -1121,38 +1236,6 @@ func _populate_profile_section(p: Dictionary) -> void:
 	flag_dropdown.custom_minimum_size = Vector2(0, 44); flag_dropdown.size_flags_horizontal = Control.SIZE_EXPAND_FILL; flag_dropdown.add_theme_font_size_override("font_size", 16)
 	flag_vbox.add_child(flag_lbl); flag_vbox.add_child(flag_dropdown); form_grid.add_child(flag_vbox)
 
-	# Grade/Year Level
-	var gr_vocab_lbl = _get_vocab_grade_label().to_upper()
-	var gr_vbox = VBoxContainer.new(); gr_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var gr_lbl = Label.new(); gr_lbl.text = gr_vocab_lbl; gr_lbl.add_theme_font_size_override("font_size", 14); gr_lbl.add_theme_color_override("font_color", Color(0.70, 0.78, 0.88, 1.0))
-	var gr_dropdown = OptionButton.new()
-	gr_dropdown.add_item("None", 0)
-	gr_dropdown.add_item("Freshman", 1)
-	gr_dropdown.add_item("Sophomore", 2)
-	gr_dropdown.add_item("Junior", 3)
-	gr_dropdown.add_item("Senior", 4)
-	gr_dropdown.add_item("Grad Student", 5)
-	gr_dropdown.add_item("Other", 6)
-	
-	var g_val = _clean_str(p.get("grade", ""))
-	if g_val == "Freshman":
-		gr_dropdown.selected = 1
-	elif g_val == "Sophomore":
-		gr_dropdown.selected = 2
-	elif g_val == "Junior":
-		gr_dropdown.selected = 3
-	elif g_val == "Senior":
-		gr_dropdown.selected = 4
-	elif g_val == "Grad Student":
-		gr_dropdown.selected = 5
-	elif g_val == "Other":
-		gr_dropdown.selected = 6
-	else:
-		gr_dropdown.selected = 0
-		
-	gr_dropdown.custom_minimum_size = Vector2(0, 44); gr_dropdown.size_flags_horizontal = Control.SIZE_EXPAND_FILL; gr_dropdown.add_theme_font_size_override("font_size", 16)
-	gr_vbox.add_child(gr_lbl); gr_vbox.add_child(gr_dropdown); form_grid.add_child(gr_vbox)
-
 	var contact_card_vbox = VBoxContainer.new(); contact_card_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	contact_card_vbox.add_theme_constant_override("separation", 16)
 	contact_card_vbox.add_child(form_grid)
@@ -1168,9 +1251,6 @@ func _populate_profile_section(p: Dictionary) -> void:
 			var role_db_val = role_sel_txt
 
 			var flag_db_val = flag_dropdown.get_item_text(flag_dropdown.selected)
-			var grade_sel_txt = gr_dropdown.get_item_text(gr_dropdown.selected)
-			if grade_sel_txt == "None":
-				grade_sel_txt = ""
 
 			var old_cls = _clean_str(p.get("staff_classification", p.get("primary_role", "Participant")))
 			if old_cls.contains("Supervisor") or old_cls == "Shift Supervisor": old_cls = "Team Leader"
@@ -1179,8 +1259,8 @@ func _populate_profile_section(p: Dictionary) -> void:
 			var pid = int(p.get("id", 0))
 
 			var execute_save = func():
-				db.execute("UPDATE people SET first_name = ?, last_name = ?, suffix = ?, phone = ?, email = ?, school_email = ?, preferred_email = ?, birthday = ?, primary_role = ?, staff_classification = ?, flag_status = ?, grade = ? WHERE person_uuid = ?;",
-					[fn_edit.text.strip_edges(), ln_edit.text.strip_edges(), suf_edit.text.strip_edges(), ph_edit.text.strip_edges(), em_edit.text.strip_edges(), se_edit.text.strip_edges(), pref_email, _ui_to_db_date(bd_edit.text.strip_edges()), role_db_val, role_db_val, flag_db_val, grade_sel_txt, p_uuid])
+				db.execute("UPDATE people SET first_name = ?, last_name = ?, suffix = ?, phone = ?, email = ?, preferred_email = ?, birthday = ?, primary_role = ?, staff_classification = ?, flag_status = ? WHERE person_uuid = ?;",
+					[fn_edit.text.strip_edges(), ln_edit.text.strip_edges(), suf_edit.text.strip_edges(), ph_edit.text.strip_edges(), em_edit.text.strip_edges(), pref_email, _ui_to_db_date(bd_edit.text.strip_edges()), role_db_val, role_db_val, flag_db_val, p_uuid])
 				refresh_view()
 
 			if old_cls != role_sel_txt and role_sel_txt != "Participant":
@@ -1196,6 +1276,7 @@ func _populate_profile_section(p: Dictionary) -> void:
 
 	profile_section.add_child(_create_credentials_card(p, p_uuid))
 	profile_section.add_child(_create_card("Identity & Contact Information", contact_card_vbox))
+	profile_section.add_child(_create_campus_community_card(p, p_uuid))
 
 	# 3. Home & School Addresses Card
 	var addr_box = VBoxContainer.new()
@@ -1477,46 +1558,21 @@ func _populate_participation_section(p: Dictionary, att_history: Array) -> void:
 
 	var person_uuid = String(p.get("person_uuid", ""))
 
-	# 1. Pathways Card
-	var path_res = read_service.get_person_pathways(person_uuid) if read_service and read_service.has_method("get_person_pathways") else {"pathways": []}
-	var pathways_list = path_res.get("pathways", [])
-	if pathways_list.size() > 0:
-		var p_box = VBoxContainer.new()
-		p_box.add_theme_constant_override("separation", 12)
-		for pw in pathways_list:
-			var pw_vbox = VBoxContainer.new()
-			pw_vbox.add_theme_constant_override("separation", 4)
+	var person_id = int(p.get("id", 0))
 
-			var header_hbox = HBoxContainer.new()
-			var name_lbl = Label.new()
-			name_lbl.text = str(pw.get("pathway_name", "Pathway"))
-			name_lbl.add_theme_font_size_override("font_size", 18)
-			name_lbl.size_flags_horizontal = SIZE_EXPAND_FILL
-			header_hbox.add_child(name_lbl)
+	# Load Unified Pathways Summary for this constituent
+	var pw_summary = {}
+	if unified_pathways_service:
+		pw_summary = unified_pathways_service.get_profile_pathway_summary(person_id)
 
-			var stage_lbl = Label.new()
-			stage_lbl.text = "Stage: " + str(pw.get("current_stage", "In Progress")) + " (" + str(pw.get("progress_percent", 0)) + "%)"
-			stage_lbl.add_theme_font_size_override("font_size", 15)
-			stage_lbl.add_theme_color_override("font_color", Color(0.88, 0.35, 0.21, 1.0))
-			header_hbox.add_child(stage_lbl)
-			pw_vbox.add_child(header_hbox)
+	var fellows_data = pw_summary.get("fellows", {"enrolled": false})
+	var lead_data = pw_summary.get("lead", {"enrolled": false})
 
-			var milestones = pw.get("milestones", [])
-			if milestones.size() > 0:
-				var m_vbox = VBoxContainer.new()
-				m_vbox.add_theme_constant_override("separation", 4)
-				for m in milestones:
-					var m_lbl = Label.new()
-					var chk = "☑ " if int(m.get("is_completed", 0)) == 1 else "☐ "
-					m_lbl.text = "   " + chk + str(m.get("milestone_name", ""))
-					m_lbl.add_theme_font_size_override("font_size", 16)
-					m_lbl.add_theme_color_override("font_color", Color(0.78, 0.85, 0.95, 1.0))
-					m_vbox.add_child(m_lbl)
-				pw_vbox.add_child(m_vbox)
-			p_box.add_child(pw_vbox)
-		participation_section.add_child(_create_card("Pathways (" + str(pathways_list.size()) + ")", p_box))
-	else:
-		participation_section.add_child(_create_card("Pathways", _create_empty_label("No active pathways assigned.")))
+	# 1. FELLOWS CARD
+	participation_section.add_child(_build_profile_pathway_card(p, "fellows", "🎓 Fellows Program", fellows_data))
+
+	# 2. LEAD CARD
+	participation_section.add_child(_build_profile_pathway_card(p, "lead", "⚡ LEAD Track", lead_data))
 
 	# 2. Sessions Card
 	var sess_res = read_service.get_person_sessions(person_uuid) if read_service and read_service.has_method("get_person_sessions") else {"sessions": []}
@@ -1578,14 +1634,34 @@ func _populate_communications_section(p: Dictionary) -> void:
 	btn_send_wallet_email.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	btn_send_wallet_email.add_theme_font_size_override("font_size", 16)
 	btn_send_wallet_email.pressed.connect(func():
+		if btn_send_wallet_email.disabled:
+			return
+		btn_send_wallet_email.disabled = true
+		btn_send_wallet_email.text = "⏳ Sending Email..."
+
 		var comms = CommunicationsServiceScript.new(db)
 		var p_id = int(p.get("id", p.get("person_id", 0)))
-		var res = comms.email_digital_member_pass(p_id, "Staff Administrator")
-		var target_email = str(p.get("email", p.get("email_address", "")))
-		if res.get("success", false):
-			btn_send_wallet_email.text = "✓ Member Pass Emailed to " + target_email
+		var res = await comms.email_digital_member_pass(p_id, "Staff Administrator")
+
+		btn_send_wallet_email.disabled = false
+		btn_send_wallet_email.text = "📱 Send Digital Member Pass Email"
+
+		var reason = res.get("reason", "")
+		if reason == "invalid_email":
+			_show_info_modal(
+				"Email Address Required",
+				"This member does not have a valid email address. Add or correct the email address before sending the Digital Member Pass."
+			)
+		elif res.get("success", false) == true:
+			_show_info_modal(
+				"Digital Member Pass",
+				"Digital Member Pass has been Emailed"
+			)
 		else:
-			btn_send_wallet_email.text = "⚠️ Email Failed: " + str(res.get("error", "Check settings"))
+			_show_info_modal(
+				"Email Not Sent",
+				"The Digital Member Pass could not be emailed. Please verify the member’s email address and the email service configuration, then try again."
+			)
 	)
 	wallet_hbox.add_child(btn_send_wallet_email)
 
@@ -1807,6 +1883,99 @@ func _populate_history_section(p: Dictionary, att_history: Array) -> void:
 	# 3. Profile Changes
 	history_section.add_child(_create_card("Profile Changes", _create_empty_label("No profile changes recorded.")))
 
+	# 4. Academic History & Advancement Timeline
+	var person_id = int(p.get("id", 0))
+	var acad_vbox = VBoxContainer.new()
+	acad_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	acad_vbox.add_theme_constant_override("separation", 8)
+
+	var ah_list = []
+	if db and person_id > 0:
+		var q_ah = db.execute("SELECT h.*, i.name AS inst_name, i.short_name AS inst_short FROM person_academic_history h LEFT JOIN institutions i ON h.institution_id = i.id WHERE h.person_id = ? ORDER BY h.created_at DESC;", [person_id])
+		if q_ah["success"]:
+			ah_list = q_ah["data"]
+
+	if ah_list.size() == 0:
+		acad_vbox.add_child(_create_empty_label("No academic history or advancement events recorded."))
+	else:
+		for ev in ah_list:
+			var item_panel = PanelContainer.new()
+			var p_st = StyleBoxFlat.new()
+			p_st.bg_color = Color(0.96, 0.97, 0.99, 1.0)
+			p_st.border_width_left = 4
+			p_st.border_color = Color(0.18, 0.45, 0.85, 1.0)
+			p_st.content_margin_left = 14; p_st.content_margin_right = 14
+			p_st.content_margin_top = 10; p_st.content_margin_bottom = 10
+			p_st.corner_radius_top_right = 6; p_st.corner_radius_bottom_right = 6
+			item_panel.add_theme_stylebox_override("panel", p_st)
+
+			var h_vbox = VBoxContainer.new()
+			var top_hbox = HBoxContainer.new()
+			top_hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+			var inst_name = _clean_str(ev.get("inst_name", ev.get("institution_other_name", "Unspecified Institution")))
+			if inst_name == "": inst_name = "Unspecified Institution"
+			var ay_val = _clean_str(ev.get("academic_year", ""))
+			var rel_val = _clean_str(ev.get("relationship", ""))
+			var mj_val = _clean_str(ev.get("major", ""))
+
+			var title_lbl = Label.new()
+			var title_parts = []
+			if inst_name != "": title_parts.append(inst_name)
+			if ay_val != "" and ay_val != "Not Applicable": title_parts.append(ay_val)
+			if rel_val != "": title_parts.append(rel_val)
+			if mj_val != "": title_parts.append(mj_val)
+			title_lbl.text = " • ".join(title_parts) if title_parts.size() > 0 else "Academic Profile Event"
+			title_lbl.add_theme_font_size_override("font_size", 14)
+			title_lbl.add_theme_color_override("font_color", Color(0.12, 0.16, 0.24, 1.0))
+			title_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			top_hbox.add_child(title_lbl)
+
+			var dt_lbl = Label.new()
+			dt_lbl.text = _clean_str(ev.get("created_at", "")).left(16)
+			dt_lbl.add_theme_font_size_override("font_size", 12)
+			dt_lbl.add_theme_color_override("font_color", Color(0.45, 0.52, 0.62, 1.0))
+			top_hbox.add_child(dt_lbl)
+
+			h_vbox.add_child(top_hbox)
+
+			var src_lbl = Label.new()
+			var src_txt = _clean_str(ev.get("change_source", "Profile Update"))
+			var by_txt = _clean_str(ev.get("changed_by", "Staff User"))
+			src_lbl.text = "Source: " + src_txt + " • By: " + by_txt
+			src_lbl.add_theme_font_size_override("font_size", 12)
+			src_lbl.add_theme_color_override("font_color", Color(0.35, 0.42, 0.52, 1.0))
+			h_vbox.add_child(src_lbl)
+
+			item_panel.add_child(h_vbox)
+			acad_vbox.add_child(item_panel)
+
+	history_section.add_child(_create_card("Academic History & Advancement Timeline (" + str(ah_list.size()) + ")", acad_vbox))
+
+func _style_checkbox_on_light(chk: CheckBox, text_color: Color = Color(0.12, 0.16, 0.24, 1.0)) -> void:
+	if not chk: return
+	chk.add_theme_color_override("font_color", text_color)
+	chk.add_theme_color_override("font_hover_color", Color(0.08, 0.35, 0.70, 1.0))
+	chk.add_theme_color_override("font_pressed_color", text_color)
+	chk.add_theme_color_override("font_hover_pressed_color", Color(0.08, 0.35, 0.70, 1.0))
+	chk.add_theme_color_override("font_focus_color", text_color)
+	chk.add_theme_color_override("font_disabled_color", Color(0.50, 0.55, 0.65, 1.0))
+
+func _style_dark_card_button(btn: Button) -> void:
+	if not btn: return
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(0.24, 0.30, 0.40, 1.0)
+	style.corner_radius_top_left = 6; style.corner_radius_top_right = 6
+	style.corner_radius_bottom_left = 6; style.corner_radius_bottom_right = 6
+	style.content_margin_left = 10; style.content_margin_right = 10
+	style.content_margin_top = 6; style.content_margin_bottom = 6
+	btn.add_theme_stylebox_override("normal", style)
+	btn.add_theme_stylebox_override("hover", style)
+	btn.add_theme_stylebox_override("pressed", style)
+	btn.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
+	btn.add_theme_color_override("font_hover_color", Color(0.40, 0.85, 1.0, 1.0))
+	btn.add_theme_color_override("font_pressed_color", Color(1.0, 1.0, 1.0, 1.0))
+
 func _create_card(title: String, body_control: Control) -> PanelContainer:
 	var panel = PanelContainer.new()
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1855,7 +2024,7 @@ func _create_empty_label(text: String) -> Label:
 func _clear_container(c: Container) -> void:
 	if not c: return
 	for child in c.get_children():
-		child.free()
+		child.queue_free()
 
 func _clear_workspace() -> void:
 	_ensure_onready_nodes()
@@ -2156,27 +2325,50 @@ func _create_credentials_card(p: Dictionary, p_uuid: String) -> PanelContainer:
 	btn_email_pass.custom_minimum_size = Vector2(210, 36)
 	btn_email_pass.disabled = not qr_active
 	btn_email_pass.pressed.connect(func():
+		if btn_email_pass.disabled:
+			return
+		btn_email_pass.disabled = true
+		btn_email_pass.text = "⏳ Sending Email..."
+
 		var com_svc = CommunicationsServiceScript.new(db)
-		var email_res_val = com_svc.email_digital_member_pass(int(p.get("id")))
-		if email_res_val.get("success", false):
-			_show_info_modal("Digital Member Pass Dispatched", "✅ Digital Member Pass email dispatched successfully to " + str(p.get("first_name", "")) + "!")
+		var email_res_val = await com_svc.email_digital_member_pass(int(p.get("id")))
+
+		btn_email_pass.disabled = false
+		btn_email_pass.text = "✉️ Email Digital Member Pass"
+
+		var reason = email_res_val.get("reason", "")
+		if reason == "invalid_email":
+			_show_info_modal(
+				"Email Address Required",
+				"This member does not have a valid email address. Add or correct the email address before sending the Digital Member Pass."
+			)
+		elif email_res_val.get("success", false) == true:
+			_show_info_modal(
+				"Digital Member Pass",
+				"Digital Member Pass has been Emailed"
+			)
 		else:
-			_show_info_modal("Email Dispatch Notice", "ℹ️ Digital Member Pass link generated for " + str(p.get("first_name", "")) + ".")
+			_show_info_modal(
+				"Email Not Sent",
+				"The Digital Member Pass could not be emailed. Please verify the member’s email address and the email service configuration, then try again."
+			)
 	)
 	btn_grid.add_child(btn_email_pass)
 
-	# 9. SMS Digital Member Pass
+	# 9. Text Digital Member Pass
 	var btn_sms_pass = Button.new()
-	btn_sms_pass.text = "💬 SMS Digital Member Pass"
+	btn_sms_pass.text = "💬 Text Digital Member Pass"
 	btn_sms_pass.custom_minimum_size = Vector2(210, 36)
 	btn_sms_pass.disabled = not qr_active
 	btn_sms_pass.pressed.connect(func():
+		btn_sms_pass.disabled = true
 		var com_svc = CommunicationsServiceScript.new(db)
-		var sms_res_val = com_svc.sms_digital_member_pass(int(p.get("id")))
+		var sms_res_val = await com_svc.sms_digital_member_pass(self, int(p.get("id")))
+		btn_sms_pass.disabled = false
 		if sms_res_val.get("success", false):
-			_show_info_modal("Digital Member Pass SMS Dispatched", "✅ Digital Member Pass text message dispatched successfully to " + str(p.get("first_name", "")) + "!")
+			_show_info_modal("Digital Member Pass Texted", "Digital Member Pass has been texted.")
 		else:
-			_show_info_modal("SMS Dispatch Notice", "ℹ️ Digital Member Pass text queued for " + str(p.get("first_name", "")) + ".")
+			_show_info_modal("SMS Dispatch Failed", "❌ Failed to send: " + sms_res_val.get("error", "Unknown error"))
 	)
 	btn_grid.add_child(btn_sms_pass)
 
@@ -2550,9 +2742,33 @@ func _open_wallet_card_preview_for_person(p: Dictionary) -> void:
 	btn_email.text = "✉️ Email Pass"
 	btn_email.custom_minimum_size = Vector2(110, 34)
 	btn_email.pressed.connect(func():
+		if btn_email.disabled:
+			return
+		btn_email.disabled = true
+		btn_email.text = "⏳ Sending..."
+
 		var com_svc = CommunicationsServiceScript.new(db)
-		com_svc.email_digital_member_pass(person_id)
-		_show_info_modal("Dispatched", "✅ Digital Wallet pass emailed to " + display_name + "!")
+		var email_res_val = await com_svc.email_digital_member_pass(person_id)
+
+		btn_email.disabled = false
+		btn_email.text = "✉️ Email Pass"
+
+		var reason = email_res_val.get("reason", "")
+		if reason == "invalid_email":
+			_show_info_modal(
+				"Email Address Required",
+				"This member does not have a valid email address. Add or correct the email address before sending the Digital Member Pass."
+			)
+		elif email_res_val.get("success", false) == true:
+			_show_info_modal(
+				"Digital Member Pass",
+				"Digital Member Pass has been Emailed"
+			)
+		else:
+			_show_info_modal(
+				"Email Not Sent",
+				"The Digital Member Pass could not be emailed. Please verify the member’s email address and the email service configuration, then try again."
+			)
 	)
 	btn_hbox.add_child(btn_email)
 
@@ -3197,6 +3413,7 @@ func _on_add_person_pressed() -> void:
 	gr_input.add_item("Grad Student")
 	gr_input.add_item("Other")
 	gr_input.custom_minimum_size = Vector2(250, 36)
+	gr_input.selected = -1
 	grid_roles.add_child(gr_lbl); grid_roles.add_child(gr_input)
 
 	var sep3 = HSeparator.new(); vbox.add_child(sep3)
@@ -3377,7 +3594,24 @@ func _on_add_person_pressed() -> void:
 			err_lbl.visible = true
 			return
 
+		var pref_email = "School" if pe_dropdown.selected == 1 else "Main"
+		if pref_email == "Main" and email_val == "":
+			err_lbl.text = "⚠️ Primary Email is required since it is selected as the Preferred Email."
+			err_lbl.visible = true
+			return
+		if pref_email == "School" and school_email_val == "":
+			err_lbl.text = "⚠️ School Email is required since it is selected as the Preferred Email."
+			err_lbl.visible = true
+			return
 
+		if gr_input.selected == -1:
+			err_lbl.text = "⚠️ Year Level is required."
+			err_lbl.visible = true
+			return
+
+		var grade_val = gr_input.get_item_text(gr_input.selected)
+		if grade_val == "None":
+			grade_val = ""
 
 		if em_name == "" or em_phone == "":
 			err_lbl.text = "⚠️ Emergency Contact Name and Phone are required."
@@ -3386,10 +3620,6 @@ func _on_add_person_pressed() -> void:
 
 		var PersonServiceScript = load("res://src/domain/directory/person_service.gd")
 		var person_service = PersonServiceScript.new(db)
-
-		var grade_val = gr_input.get_item_text(gr_input.selected)
-		if grade_val == "None":
-			grade_val = ""
 
 		var role_sel_txt = role_input.get_item_text(role_input.selected)
 		var role_db_val = "Participant"
@@ -3418,7 +3648,13 @@ func _on_add_person_pressed() -> void:
 			return
 
 		var p_uuid = create_res.get("person_uuid", "")
-		var pref_email = "School" if pe_dropdown.selected == 1 else "Main"
+		if p_uuid == "":
+			p_uuid = create_res.get("person", {}).get("person_uuid", "")
+
+		if p_uuid == "":
+			err_lbl.text = "⚠️ Database error: Person UUID could not be resolved."
+			err_lbl.visible = true
+			return
 
 		var update_stmt = {
 			"sql": "UPDATE people SET suffix = ?, email = ?, school_email = ?, preferred_email = ?, birthday = ?, home_address_street = ?, home_address_line2 = ?, home_address_city = ?, home_address_state = ?, home_address_zip = ?, school_address_street = ?, school_address_line2 = ?, school_address_city = ?, school_address_state = ?, school_address_zip = ?, primary_role = ?, flag_status = ?, emergency_contact_name = ?, emergency_contact_phone = ?, medical_notes = ?, profile_photo = ? WHERE person_uuid = ?;",
@@ -3447,7 +3683,12 @@ func _on_add_person_pressed() -> void:
 				p_uuid
 			]
 		}
-		db.execute_transaction([update_stmt])
+		
+		var update_res = db.execute_transaction([update_stmt])
+		if not update_res["success"]:
+			err_lbl.text = "⚠️ Database error: Failed to save additional member details."
+			err_lbl.visible = true
+			return
 
 		var ev_uuid = create_res.get("event_uuid", "")
 		if ev_uuid != "":
@@ -3538,142 +3779,318 @@ func _on_phone_text_changed(new_text: String, line_edit: LineEdit) -> void:
 		line_edit.caret_column = formatted.length()
 
 func _open_calendar_picker(target_line_edit: LineEdit) -> void:
-	var cal_dialog = Window.new()
-	cal_dialog.title = "📅 Select Date"
-	cal_dialog.size = Vector2i(320, 360)
-	cal_dialog.transient = true
-	cal_dialog.exclusive = true
-	cal_dialog.close_requested.connect(func(): cal_dialog.queue_free())
+	if not target_line_edit: return
 
-	var panel = Panel.new()
-	panel.set_anchors_preset(Control.PRESET_FULL_RECT)
-	cal_dialog.add_child(panel)
-	
-	var p_st = StyleBoxFlat.new()
-	p_st.bg_color = Color(0.97, 0.98, 0.99, 1.0)
-	panel.add_theme_stylebox_override("panel", p_st)
+	var parent_win: Window = target_line_edit.get_window() if (target_line_edit and target_line_edit.get_window()) else get_tree().root
+
+	# Top-level CanvasLayer (layer 128) attached to target_line_edit's parent window guarantees rendering ON TOP of that window/dialog
+	var canvas_layer = CanvasLayer.new()
+	canvas_layer.layer = 128
+
+	var backdrop = ColorRect.new()
+	backdrop.color = Color(0.06, 0.09, 0.14, 0.65)
+	backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
+	canvas_layer.add_child(backdrop)
+
+	var backdrop_button = TextureButton.new()
+	backdrop_button.set_anchors_preset(Control.PRESET_FULL_RECT)
+	backdrop_button.pressed.connect(func(): canvas_layer.queue_free())
+	backdrop.add_child(backdrop_button)
+
+	var center = CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	backdrop.add_child(center)
+
+	var card = PanelContainer.new()
+	var card_st = StyleBoxFlat.new()
+	card_st.bg_color = Color(0.98, 0.99, 1.0, 1.0)
+	card_st.border_width_left = 1; card_st.border_width_top = 1; card_st.border_width_right = 1; card_st.border_width_bottom = 1
+	card_st.border_color = Color(0.75, 0.80, 0.88, 1.0)
+	card_st.corner_radius_top_left = 12; card_st.corner_radius_top_right = 12
+	card_st.corner_radius_bottom_left = 12; card_st.corner_radius_bottom_right = 12
+	card_st.content_margin_left = 16; card_st.content_margin_top = 12; card_st.content_margin_right = 16; card_st.content_margin_bottom = 14
+	card.add_theme_stylebox_override("panel", card_st)
+	center.add_child(card)
 
 	var main_vbox = VBoxContainer.new()
-	main_vbox.set_anchors_preset(Control.PRESET_FULL_RECT)
-	main_vbox.add_theme_constant_override("separation", 10)
+	main_vbox.add_theme_constant_override("separation", 6)
+	main_vbox.custom_minimum_size = Vector2(320, 0)
+	card.add_child(main_vbox)
 
-	var margin = MarginContainer.new()
-	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
-	margin.add_theme_constant_override("margin_left", 12)
-	margin.add_theme_constant_override("margin_top", 12)
-	margin.add_theme_constant_override("margin_right", 12)
-	margin.add_theme_constant_override("margin_bottom", 12)
-	panel.add_child(margin)
-	margin.add_child(main_vbox)
+	# Header Title Bar
+	var title_hbox = HBoxContainer.new()
+	title_hbox.alignment = HBoxContainer.ALIGNMENT_CENTER
+	var title_lbl = Label.new()
+	title_lbl.text = "📅 Select Date"
+	title_lbl.add_theme_font_size_override("font_size", 15)
+	title_lbl.add_theme_color_override("font_color", Color(0.1, 0.15, 0.25, 1.0))
+	title_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title_hbox.add_child(title_lbl)
 
-	var header_hbox = HBoxContainer.new()
-	header_hbox.alignment = HBoxContainer.ALIGNMENT_CENTER
-	main_vbox.add_child(header_hbox)
+	var btn_close = Button.new()
+	btn_close.text = " ✕ "
+	btn_close.flat = true
+	btn_close.add_theme_font_size_override("font_size", 13)
+	btn_close.add_theme_color_override("font_color", Color(0.4, 0.45, 0.55, 1.0))
+	btn_close.pressed.connect(func(): canvas_layer.queue_free())
+	title_hbox.add_child(btn_close)
+	main_vbox.add_child(title_hbox)
 
-	var btn_prev = Button.new(); btn_prev.text = " < "; header_hbox.add_child(btn_prev)
-	var month_lbl = Label.new(); month_lbl.add_theme_font_size_override("font_size", 16); month_lbl.add_theme_color_override("font_color", Color(0.1, 0.15, 0.25, 1.0)); header_hbox.add_child(month_lbl)
-	var btn_next = Button.new(); btn_next.text = " > "; header_hbox.add_child(btn_next)
+	# Determine initial month/year/day cleanly
+	var sys_dt = Time.get_datetime_dict_from_system()
+	var sys_year = int(sys_dt.get("year", 2026))
+	var sys_month = int(sys_dt.get("month", 7))
+	var sys_day = int(sys_dt.get("day", 15))
 
+	var is_birthday_field = false
+	var le_name = target_line_edit.name.to_lower()
+	var le_ph = target_line_edit.placeholder_text.to_lower()
+	if le_name.contains("birth") or le_name.contains("bd") or le_ph.contains("birth"):
+		is_birthday_field = true
+
+	var current_year = (sys_year - 18) if is_birthday_field else sys_year
+	var current_month = sys_month
+	var current_day = sys_day
+
+	var existing_txt = target_line_edit.text.strip_edges()
+	var ep = existing_txt.split("/")
+	if ep.size() == 3 and ep[0].is_valid_int() and ep[1].is_valid_int() and ep[2].is_valid_int():
+		current_month = clampi(int(ep[0]), 1, 12)
+		current_day = clampi(int(ep[1]), 1, 31)
+		current_year = int(ep[2])
+	else:
+		var ep_dash = existing_txt.split("-")
+		if ep_dash.size() == 3 and ep_dash[0].length() == 4:
+			current_year = int(ep_dash[0])
+			current_month = clampi(int(ep_dash[1]), 1, 12)
+			current_day = clampi(int(ep_dash[2]), 1, 31)
+
+	var state = {
+		"year": current_year,
+		"month": current_month,
+		"selected_day": current_day
+	}
+
+	# Header Navigation Controls (◄◄ Prev Year, ◄ Prev Month, Month Name, Editable Year LineEdit, ► Next Month, ►► Next Year)
+	var nav_hbox = HBoxContainer.new()
+	nav_hbox.alignment = HBoxContainer.ALIGNMENT_CENTER
+	nav_hbox.add_theme_constant_override("separation", 3)
+
+	var btn_prev_year = Button.new(); btn_prev_year.text = "◄◄"
+	btn_prev_year.tooltip_text = "Previous Year"
+	btn_prev_year.add_theme_font_size_override("font_size", 11)
+	var btn_prev_month = Button.new(); btn_prev_month.text = "◄"
+	btn_prev_month.tooltip_text = "Previous Month"
+	btn_prev_month.add_theme_font_size_override("font_size", 11)
+
+	var month_lbl = Label.new()
+	month_lbl.add_theme_font_size_override("font_size", 13)
+	month_lbl.add_theme_color_override("font_color", Color(0.1, 0.15, 0.25, 1.0))
+	month_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	month_lbl.custom_minimum_size = Vector2(85, 0)
+
+	var year_edit = LineEdit.new()
+	year_edit.custom_minimum_size = Vector2(55, 28)
+	year_edit.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	year_edit.add_theme_font_size_override("font_size", 12)
+	year_edit.max_length = 4
+
+	var btn_next_month = Button.new(); btn_next_month.text = "►"
+	btn_next_month.tooltip_text = "Next Month"
+	btn_next_month.add_theme_font_size_override("font_size", 11)
+	var btn_next_year = Button.new(); btn_next_year.text = "►►"
+	btn_next_year.tooltip_text = "Next Year"
+	btn_next_year.add_theme_font_size_override("font_size", 11)
+
+	nav_hbox.add_child(btn_prev_year)
+	nav_hbox.add_child(btn_prev_month)
+	nav_hbox.add_child(month_lbl)
+	nav_hbox.add_child(year_edit)
+	nav_hbox.add_child(btn_next_month)
+	nav_hbox.add_child(btn_next_year)
+	main_vbox.add_child(nav_hbox)
+
+	# Weekdays Header
 	var grid_weekdays = GridContainer.new()
 	grid_weekdays.columns = 7
 	grid_weekdays.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	main_vbox.add_child(grid_weekdays)
-	
-	var weekdays = ["S", "M", "T", "W", "T", "F", "S"]
+
+	var weekdays = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
 	for day in weekdays:
 		var lbl = Label.new()
 		lbl.text = day
 		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		lbl.add_theme_font_size_override("font_size", 12)
+		lbl.add_theme_font_size_override("font_size", 11)
 		lbl.add_theme_color_override("font_color", Color(0.4, 0.45, 0.55, 1.0))
 		grid_weekdays.add_child(lbl)
 
+	# Days Grid (Natural shrink size, no forced expansion)
 	var grid_days = GridContainer.new()
 	grid_days.columns = 7
 	grid_days.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	grid_days.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	grid_days.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	grid_days.add_theme_constant_override("v_separation", 3)
+	grid_days.add_theme_constant_override("h_separation", 3)
 	main_vbox.add_child(grid_days)
 
-	var current_year = 2002
-	var current_month = 1
-	
-	var existing_txt = target_line_edit.text.strip_edges()
-	var ep = existing_txt.split("/")
-	if ep.size() == 3 and ep[0].is_valid_int() and ep[1].is_valid_int() and ep[2].is_valid_int():
-		current_month = clampi(int(ep[0]), 1, 12)
-		current_year = int(ep[2])
-	else:
-		var datetime = Time.get_datetime_dict_from_system()
-		current_year = datetime.get("year", 2002) - 18
-		current_month = datetime.get("month", 1)
-
 	var month_names = [
-		"", "January", "February", "March", "April", "May", "June", 
+		"", "January", "February", "March", "April", "May", "June",
 		"July", "August", "September", "October", "November", "December"
 	]
 
-	var render_calendar = Callable()
-	render_calendar = func():
+	var _render = [null]
+	_render[0] = func():
+		month_lbl.text = month_names[state["month"]]
+		year_edit.text = str(state["year"])
+
 		for child in grid_days.get_children():
 			child.queue_free()
-		
-		month_lbl.text = " " + month_names[current_month] + " " + str(current_year) + " "
-		
-		var start_time_dict = {"year": current_year, "month": current_month, "day": 1, "hour": 12, "minute": 0, "second": 0}
+
+		var start_time_dict = {"year": state["year"], "month": state["month"], "day": 1, "hour": 12, "minute": 0, "second": 0}
 		var start_unix = Time.get_unix_time_from_datetime_dict(start_time_dict)
 		var start_time_full = Time.get_datetime_dict_from_unix_time(start_unix)
 		var start_weekday = start_time_full.get("weekday", 0)
-		
+
 		var days_in_month = 31
-		if current_month in [4, 6, 9, 11]:
+		if state["month"] in [4, 6, 9, 11]:
 			days_in_month = 30
-		elif current_month == 2:
-			var is_leap = (current_year % 4 == 0 and current_year % 100 != 0) or (current_year % 400 == 0)
+		elif state["month"] == 2:
+			var is_leap = (state["year"] % 4 == 0 and state["year"] % 100 != 0) or (state["year"] % 400 == 0)
 			days_in_month = 29 if is_leap else 28
-			
+
 		for i in range(start_weekday):
 			var blank = Control.new()
+			blank.custom_minimum_size = Vector2(34, 25)
 			grid_days.add_child(blank)
-			
+
 		for day in range(1, days_in_month + 1):
 			var btn = Button.new()
 			btn.text = str(day)
+			btn.custom_minimum_size = Vector2(34, 25)
 			btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			btn.size_flags_vertical = Control.SIZE_EXPAND_FILL
-			btn.add_theme_font_size_override("font_size", 12)
-			
+			btn.add_theme_font_size_override("font_size", 11)
+
 			var day_val = day
-			var m_val = current_month
-			var y_val = current_year
-			
+			var is_selected = (day_val == state["selected_day"])
+
+			if is_selected:
+				var sel_st = StyleBoxFlat.new()
+				sel_st.bg_color = Color(0.18, 0.48, 0.88, 1.0)
+				sel_st.corner_radius_top_left = 5; sel_st.corner_radius_top_right = 5
+				sel_st.corner_radius_bottom_left = 5; sel_st.corner_radius_bottom_right = 5
+				btn.add_theme_stylebox_override("normal", sel_st)
+				btn.add_theme_stylebox_override("hover", sel_st)
+				btn.add_theme_stylebox_override("pressed", sel_st)
+				btn.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
+			else:
+				btn.add_theme_color_override("font_color", Color(0.15, 0.20, 0.28, 1.0))
+
 			btn.pressed.connect(func():
-				var formatted_m = str(m_val).lpad(2, "0")
+				state["selected_day"] = day_val
+				var formatted_m = str(state["month"]).lpad(2, "0")
 				var formatted_d = str(day_val).lpad(2, "0")
-				target_line_edit.text = formatted_m + "/" + formatted_d + "/" + str(y_val)
-				cal_dialog.queue_free()
+				target_line_edit.text = formatted_m + "/" + formatted_d + "/" + str(state["year"])
+				if target_line_edit.has_signal("text_changed"):
+					target_line_edit.text_changed.emit(target_line_edit.text)
+				_render[0].call()
 			)
 			grid_days.add_child(btn)
 
-	btn_prev.pressed.connect(func():
-		current_month -= 1
-		if current_month < 1:
-			current_month = 12
-			current_year -= 1
-		render_calendar.call()
+	year_edit.text_submitted.connect(func(new_txt: String):
+		if new_txt.is_valid_int():
+			var val = int(new_txt)
+			if val >= 1900 and val <= 2100:
+				state["year"] = val
+				_render[0].call()
 	)
 
-	btn_next.pressed.connect(func():
-		current_month += 1
-		if current_month > 12:
-			current_month = 1
-			current_year += 1
-		render_calendar.call()
+	btn_prev_year.pressed.connect(func():
+		state["year"] -= 1
+		_render[0].call()
 	)
 
-	render_calendar.call()
-	add_child(cal_dialog)
-	cal_dialog.popup_centered()
+	btn_next_year.pressed.connect(func():
+		state["year"] += 1
+		_render[0].call()
+	)
+
+	btn_prev_month.pressed.connect(func():
+		state["month"] -= 1
+		if state["month"] < 1:
+			state["month"] = 12
+			state["year"] -= 1
+		_render[0].call()
+	)
+
+	btn_next_month.pressed.connect(func():
+		state["month"] += 1
+		if state["month"] > 12:
+			state["month"] = 1
+			state["year"] += 1
+		_render[0].call()
+	)
+
+	# Dedicated Bottom Spacer guaranteeing 8px gap between calendar grid and footer buttons
+	var grid_bottom_spacer = Control.new()
+	grid_bottom_spacer.custom_minimum_size = Vector2(0, 8)
+	main_vbox.add_child(grid_bottom_spacer)
+
+	# Footer Presets & Confirmation Row (✓ Select Date, Today, Clear)
+	var footer_hbox = HBoxContainer.new()
+	footer_hbox.alignment = HBoxContainer.ALIGNMENT_CENTER
+	footer_hbox.add_theme_constant_override("separation", 6)
+
+	var btn_confirm = Button.new()
+	btn_confirm.text = "✓ Select Date"
+	btn_confirm.add_theme_font_size_override("font_size", 11)
+	var btn_c_st = StyleBoxFlat.new()
+	btn_c_st.bg_color = Color(0.18, 0.48, 0.88, 1.0)
+	btn_c_st.corner_radius_top_left = 5; btn_c_st.corner_radius_top_right = 5
+	btn_c_st.corner_radius_bottom_left = 5; btn_c_st.corner_radius_bottom_right = 5
+	btn_c_st.content_margin_left = 10; btn_c_st.content_margin_right = 10
+	btn_c_st.content_margin_top = 4; btn_c_st.content_margin_bottom = 4
+	btn_confirm.add_theme_stylebox_override("normal", btn_c_st)
+	btn_confirm.add_theme_stylebox_override("hover", btn_c_st)
+	btn_confirm.add_theme_stylebox_override("pressed", btn_c_st)
+	btn_confirm.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
+	btn_confirm.pressed.connect(func():
+		var formatted_m = str(state["month"]).lpad(2, "0")
+		var formatted_d = str(state["selected_day"]).lpad(2, "0")
+		target_line_edit.text = formatted_m + "/" + formatted_d + "/" + str(state["year"])
+		if target_line_edit.has_signal("text_changed"):
+			target_line_edit.text_changed.emit(target_line_edit.text)
+		canvas_layer.queue_free()
+	)
+
+	var btn_today = Button.new(); btn_today.text = "Today"
+	btn_today.add_theme_font_size_override("font_size", 11)
+	btn_today.pressed.connect(func():
+		var formatted_m = str(sys_month).lpad(2, "0")
+		var formatted_d = str(sys_dt.get("day", 1)).lpad(2, "0")
+		target_line_edit.text = formatted_m + "/" + formatted_d + "/" + str(sys_year)
+		if target_line_edit.has_signal("text_changed"):
+			target_line_edit.text_changed.emit(target_line_edit.text)
+		canvas_layer.queue_free()
+	)
+
+	var btn_clear = Button.new(); btn_clear.text = "Clear"
+	btn_clear.add_theme_font_size_override("font_size", 11)
+	btn_clear.pressed.connect(func():
+		target_line_edit.text = ""
+		if target_line_edit.has_signal("text_changed"):
+			target_line_edit.text_changed.emit("")
+		canvas_layer.queue_free()
+	)
+
+	footer_hbox.add_child(btn_confirm)
+	footer_hbox.add_child(btn_today)
+	footer_hbox.add_child(btn_clear)
+	main_vbox.add_child(footer_hbox)
+
+	_render[0].call()
+	parent_win.add_child(canvas_layer)
 
 func _open_image_editor(source_img: Image, on_save_callback: Callable) -> void:
 	var edit_dialog = Window.new()
@@ -4143,3 +4560,1001 @@ func _show_future_shifts_warning_dialog(person_name: String, shift_count: int, o
 	add_child(dlg)
 	dlg.popup_centered()
 
+# --- STAGE 3 UNIFIED PATHWAYS PROFILE WORKSPACE HELPERS ---
+
+func _build_profile_pathway_card(p: Dictionary, pathway_key: String, title: String, data: Dictionary) -> PanelContainer:
+	var card_vbox = VBoxContainer.new()
+	card_vbox.add_theme_constant_override("separation", 12)
+
+	var person_id = int(p.get("id", 0))
+
+	if not data.get("enrolled", false):
+		var empty_lbl = _create_empty_label("This participant is not currently enrolled in " + title + ".")
+		card_vbox.add_child(empty_lbl)
+
+		var btn_enroll = Button.new()
+		btn_enroll.text = "+ Enroll in " + title
+		btn_enroll.custom_minimum_size = Vector2(180, 36)
+		btn_enroll.pressed.connect(func(): _open_profile_enrollment_dialog(person_id, pathway_key))
+		card_vbox.add_child(btn_enroll)
+
+		return _create_card(title, card_vbox)
+
+	var ppid = int(data.get("person_pathway_id", 0))
+	var ppy_id = int(data.get("person_pathway_program_year_id", 0))
+
+	# 1. Header Bar
+	var header_hbox = HBoxContainer.new()
+	header_hbox.add_theme_constant_override("separation", 10)
+
+	var sub_lbl = Label.new()
+	sub_lbl.text = "Academic Year: " + str(data.get("academic_year", ""))
+	sub_lbl.add_theme_font_size_override("font_size", 14)
+	sub_lbl.add_theme_color_override("font_color", Color(0.85, 0.90, 0.96, 1.0))
+	sub_lbl.size_flags_horizontal = SIZE_EXPAND_FILL
+	header_hbox.add_child(sub_lbl)
+
+	var st_val = str(data.get("enrollment_status", "active")).to_lower()
+	var status_badge = Label.new()
+	status_badge.text = st_val.replace("_", " ").to_upper()
+	status_badge.add_theme_font_size_override("font_size", 14)
+	if st_val == "active":
+		status_badge.add_theme_color_override("font_color", Color(0.30, 0.92, 0.55, 1.0))
+	elif st_val == "on_hold":
+		status_badge.add_theme_color_override("font_color", Color(1.0, 0.78, 0.30, 1.0))
+	else:
+		status_badge.add_theme_color_override("font_color", Color(0.95, 0.55, 0.55, 1.0))
+	header_hbox.add_child(status_badge)
+
+	var btn_ch_status = Button.new()
+	btn_ch_status.text = "Change Status..."
+	_style_dark_card_button(btn_ch_status)
+	btn_ch_status.pressed.connect(func(): _open_change_status_dialog(ppy_id, st_val))
+	header_hbox.add_child(btn_ch_status)
+
+	card_vbox.add_child(header_hbox)
+
+	# 2. Metadata Grid (Track, Standing, Mentor, Attendance)
+	var meta_vbox = VBoxContainer.new()
+	meta_vbox.add_theme_constant_override("separation", 8)
+
+	var row1 = HBoxContainer.new(); row1.add_theme_constant_override("separation", 12)
+	var tr_lbl = Label.new(); tr_lbl.text = "Track: " + str(data.get("current_track", "standard")).to_upper()
+	tr_lbl.add_theme_font_size_override("font_size", 14)
+	tr_lbl.add_theme_color_override("font_color", Color(0.40, 0.78, 1.0, 1.0))
+	row1.add_child(tr_lbl)
+	var btn_ch_tr = Button.new(); btn_ch_tr.text = "Change Track"
+	_style_dark_card_button(btn_ch_tr)
+	btn_ch_tr.pressed.connect(func(): _open_change_track_dialog(ppid, str(data.get("current_track", "standard"))))
+	row1.add_child(btn_ch_tr)
+
+	var st_lbl = Label.new(); st_lbl.text = "Standing: " + str(data.get("current_standing", "year_1")).replace("_", " ").to_upper()
+	st_lbl.add_theme_font_size_override("font_size", 14)
+	st_lbl.add_theme_color_override("font_color", Color(0.40, 0.90, 0.60, 1.0))
+	row1.add_child(st_lbl)
+	var btn_ch_st = Button.new(); btn_ch_st.text = "Change Standing"
+	_style_dark_card_button(btn_ch_st)
+	btn_ch_st.pressed.connect(func(): _open_change_standing_dialog(ppid, str(data.get("current_standing", "year_1"))))
+	row1.add_child(btn_ch_st)
+	meta_vbox.add_child(row1)
+
+	var row2 = HBoxContainer.new(); row2.add_theme_constant_override("separation", 12)
+	var m_name = str(data.get("mentor_name", ""))
+	var m_lbl = Label.new(); m_lbl.text = "Mentor: " + (m_name if m_name != "" else "[None Assigned]")
+	m_lbl.add_theme_font_size_override("font_size", 14)
+	m_lbl.add_theme_color_override("font_color", Color(0.90, 0.94, 1.0, 1.0))
+	row2.add_child(m_lbl)
+	var btn_m = Button.new(); btn_m.text = "Assign / Change Mentor"
+	_style_dark_card_button(btn_m)
+	btn_m.pressed.connect(func(): _open_assign_mentor_dialog(ppid))
+	row2.add_child(btn_m)
+	meta_vbox.add_child(row2)
+
+	# Attendance Summary & Toggle
+	var is_att_open = pathway_attendance_expanded_map.get(ppid, false)
+	var btn_toggle_att = Button.new()
+	btn_toggle_att.text = "Hide Session Attendance" if is_att_open else "Show Session Attendance"
+	_style_dark_card_button(btn_toggle_att)
+	btn_toggle_att.add_theme_font_size_override("font_size", 13)
+
+	var att_content_vbox = VBoxContainer.new()
+	att_content_vbox.visible = is_att_open
+	att_content_vbox.add_theme_constant_override("separation", 6)
+
+	btn_toggle_att.pressed.connect(func():
+		var new_state = not att_content_vbox.visible
+		att_content_vbox.visible = new_state
+		pathway_attendance_expanded_map[ppid] = new_state
+		btn_toggle_att.text = "Hide Session Attendance" if new_state else "Show Session Attendance"
+	)
+
+	var sess_sum = data.get("session_summary", {})
+	var att_lbl = Label.new()
+	att_lbl.text = "Session Attendance: " + str(sess_sum.get("wording", "No linked sessions."))
+	att_lbl.add_theme_font_size_override("font_size", 14)
+	att_lbl.add_theme_color_override("font_color", Color(0.82, 0.88, 0.94, 1.0))
+	att_content_vbox.add_child(att_lbl)
+
+	meta_vbox.add_child(btn_toggle_att)
+	meta_vbox.add_child(att_content_vbox)
+	card_vbox.add_child(meta_vbox)
+
+	# 3. Requirements Checklist with Toggle
+	var comp_cnt = int(data.get("completed_requirements", 0))
+	var tot_cnt = int(data.get("total_requirements", 0))
+
+	var is_req_open = pathway_requirements_expanded_map.get(ppid, true)
+	var btn_toggle_req = Button.new()
+	btn_toggle_req.text = "Hide Checklist Requirements" if is_req_open else "Show Checklist Requirements (%d/%d Completed)" % [comp_cnt, tot_cnt]
+	_style_dark_card_button(btn_toggle_req)
+	btn_toggle_req.add_theme_font_size_override("font_size", 13)
+
+	var req_section = VBoxContainer.new()
+	req_section.add_theme_constant_override("separation", 6)
+
+	var req_content_vbox = VBoxContainer.new()
+	req_content_vbox.visible = is_req_open
+	req_content_vbox.add_theme_constant_override("separation", 6)
+
+	btn_toggle_req.pressed.connect(func():
+		var new_state = not req_content_vbox.visible
+		req_content_vbox.visible = new_state
+		pathway_requirements_expanded_map[ppid] = new_state
+		btn_toggle_req.text = "Hide Checklist Requirements" if new_state else "Show Checklist Requirements (%d/%d Completed)" % [comp_cnt, tot_cnt]
+	)
+	req_section.add_child(btn_toggle_req)
+
+	var req_hdr = HBoxContainer.new()
+	var req_lbl = Label.new()
+	req_lbl.text = "Checklist Requirements (%d/%d Completed):" % [comp_cnt, tot_cnt]
+	req_lbl.add_theme_font_size_override("font_size", 15)
+	req_lbl.add_theme_color_override("font_color", Color(0.95, 0.97, 1.0, 1.0))
+	req_lbl.size_flags_horizontal = SIZE_EXPAND_FILL
+	req_hdr.add_child(req_lbl)
+
+	var btn_add_cu = Button.new()
+	btn_add_cu.text = "+ Add Requirement"
+	_style_dark_card_button(btn_add_cu)
+	btn_add_cu.pressed.connect(func(): _open_add_catch_up_dialog(ppy_id))
+	req_hdr.add_child(btn_add_cu)
+	req_content_vbox.add_child(req_hdr)
+
+	var reqs_list = data.get("requirements", [])
+	if reqs_list.size() == 0:
+		var empty_lbl = _create_empty_label("No checklist requirements assigned.")
+		empty_lbl.add_theme_color_override("font_color", Color(0.80, 0.85, 0.92, 1.0))
+		req_content_vbox.add_child(empty_lbl)
+	else:
+		for req in reqs_list:
+			var req_id = int(req.get("id"))
+			var is_comp = (str(req.get("status")) == "completed")
+			var title_str = str(req.get("title", ""))
+			var cat_str = str(req.get("category", "requirement")).to_upper()
+			var due_str = str(req.get("due_date", "N/A"))
+			if due_str == "" or due_str == "null": due_str = "N/A"
+
+			var req_card = PanelContainer.new()
+			var rc_st = StyleBoxFlat.new()
+			rc_st.bg_color = Color(0.96, 0.97, 0.99, 1.0) if not is_comp else Color(0.94, 0.97, 0.94, 1.0)
+			rc_st.border_width_left = 1; rc_st.border_width_top = 1; rc_st.border_width_right = 1; rc_st.border_width_bottom = 1
+			rc_st.border_color = Color(0.80, 0.84, 0.90, 1.0) if not is_comp else Color(0.70, 0.88, 0.75, 1.0)
+			rc_st.corner_radius_top_left = 8; rc_st.corner_radius_top_right = 8
+			rc_st.corner_radius_bottom_left = 8; rc_st.corner_radius_bottom_right = 8
+			rc_st.content_margin_left = 12; rc_st.content_margin_top = 8; rc_st.content_margin_right = 12; rc_st.content_margin_bottom = 8
+			req_card.add_theme_stylebox_override("panel", rc_st)
+
+			var req_hbox = HBoxContainer.new()
+			req_hbox.add_theme_constant_override("separation", 10)
+
+			var chk = CheckBox.new()
+			chk.set_pressed_no_signal(is_comp)
+			chk.add_theme_font_size_override("font_size", 14)
+			_style_checkbox_on_light(chk, Color(0.12, 0.16, 0.24, 1.0))
+			chk.text = title_str
+			chk.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+			var is_toggling = [false]
+			chk.toggled.connect(func(toggled_on: bool):
+				if is_toggling[0]: return
+				is_toggling[0] = true
+				if toggled_on:
+					unified_pathways_service.mark_requirement_complete(req_id, "Completed from Profile")
+				else:
+					unified_pathways_service.mark_requirement_incomplete(req_id)
+				call_deferred("refresh_view")
+			)
+			req_hbox.add_child(chk)
+
+			if "CERTIFICATE" in cat_str:
+				var cat_badge = Label.new()
+				cat_badge.text = "[CERTIFICATE TRACK]"
+				cat_badge.add_theme_font_size_override("font_size", 12)
+				cat_badge.add_theme_color_override("font_color", Color(0.15, 0.45, 0.90, 1.0))
+				req_hbox.add_child(cat_badge)
+
+			var due_lbl = Label.new()
+			due_lbl.text = "Due: " + due_str
+			due_lbl.add_theme_font_size_override("font_size", 12)
+			due_lbl.add_theme_color_override("font_color", Color(0.35, 0.40, 0.50, 1.0))
+			req_hbox.add_child(due_lbl)
+
+			var status_pill = Label.new()
+			if is_comp:
+				status_pill.text = "✅ COMPLETED"
+				status_pill.add_theme_color_override("font_color", Color(0.08, 0.52, 0.22, 1.0))
+			else:
+				status_pill.text = "⏳ PENDING"
+				status_pill.add_theme_color_override("font_color", Color(0.75, 0.42, 0.08, 1.0))
+			status_pill.add_theme_font_size_override("font_size", 12)
+			req_hbox.add_child(status_pill)
+
+			var btn_edit_req = Button.new()
+			btn_edit_req.text = "✏️ Edit"
+			btn_edit_req.tooltip_text = "Edit requirement details or delete requirement"
+			_style_dark_card_button(btn_edit_req)
+			btn_edit_req.add_theme_font_size_override("font_size", 11)
+			btn_edit_req.pressed.connect(func(): _open_edit_requirement_dialog(req))
+			req_hbox.add_child(btn_edit_req)
+
+			req_card.add_child(req_hbox)
+			req_content_vbox.add_child(req_card)
+
+	req_section.add_child(req_content_vbox)
+	card_vbox.add_child(req_section)
+
+	# 4. Running Pathway Notes & Plan Area
+	var notes_section_vbox = VBoxContainer.new()
+	notes_section_vbox.add_theme_constant_override("separation", 6)
+
+	var is_notes_open = pathway_notes_expanded_map.get(ppid, false)
+	var btn_toggle_notes = Button.new()
+	btn_toggle_notes.text = "Hide Pathway Notes & Plan" if is_notes_open else "Show Pathway Notes & Plan"
+	_style_dark_card_button(btn_toggle_notes)
+	btn_toggle_notes.add_theme_font_size_override("font_size", 13)
+
+	var notes_content_vbox = VBoxContainer.new()
+	notes_content_vbox.visible = is_notes_open
+	notes_content_vbox.add_theme_constant_override("separation", 8)
+
+	btn_toggle_notes.pressed.connect(func():
+		var new_state = not notes_content_vbox.visible
+		notes_content_vbox.visible = new_state
+		pathway_notes_expanded_map[ppid] = new_state
+		btn_toggle_notes.text = "Hide Pathway Notes & Plan" if new_state else "Show Pathway Notes & Plan"
+	)
+	notes_section_vbox.add_child(btn_toggle_notes)
+
+	# Form to Add New Running Note
+	var add_note_card = PanelContainer.new()
+	var anc_st = StyleBoxFlat.new()
+	anc_st.bg_color = Color(0.14, 0.18, 0.26, 1.0)
+	anc_st.corner_radius_top_left = 6; anc_st.corner_radius_top_right = 6
+	anc_st.corner_radius_bottom_left = 6; anc_st.corner_radius_bottom_right = 6
+	anc_st.content_margin_left = 10; anc_st.content_margin_top = 8; anc_st.content_margin_right = 10; anc_st.content_margin_bottom = 8
+	add_note_card.add_theme_stylebox_override("panel", anc_st)
+
+	var add_vbox = VBoxContainer.new()
+	add_vbox.add_theme_constant_override("separation", 6)
+
+	var author_hbox = HBoxContainer.new()
+	author_hbox.add_theme_constant_override("separation", 10)
+
+	var lbl_author = Label.new()
+	lbl_author.text = "Note By (Staff / Intern):"
+	lbl_author.add_theme_font_size_override("font_size", 12)
+	lbl_author.add_theme_color_override("font_color", Color(0.85, 0.90, 0.98, 1.0))
+	author_hbox.add_child(lbl_author)
+
+	var opt_author = OptionButton.new()
+	opt_author.add_item("[ Select Staff / Intern ]", 0)
+	var staff_interns = unified_pathways_service.get_staff_and_interns()
+	for idx in range(staff_interns.size()):
+		var st_p = staff_interns[idx]
+		var st_name = str(st_p.get("first_name", "")) + " " + str(st_p.get("last_name", ""))
+		var st_role = str(st_p.get("system_role", "Staff")).to_upper()
+		opt_author.add_item("%s (%s)" % [st_name, st_role], idx + 1)
+	author_hbox.add_child(opt_author)
+	add_vbox.add_child(author_hbox)
+
+	var txt_new_note = TextEdit.new()
+	txt_new_note.placeholder_text = "Add a new running note or plan entry..."
+	txt_new_note.custom_minimum_size = Vector2(0, 65)
+	txt_new_note.add_theme_font_size_override("font_size", 13)
+	add_vbox.add_child(txt_new_note)
+
+	var btn_add_note = Button.new()
+	btn_add_note.text = "+ Post Running Note"
+	_style_dark_card_button(btn_add_note)
+	btn_add_note.add_theme_font_size_override("font_size", 12)
+	btn_add_note.pressed.connect(func():
+		var text_val = txt_new_note.text.strip_edges()
+		if text_val == "": return
+		var sel_author_idx = opt_author.selected
+		var author_id = null
+		var author_name_str = "Staff User"
+		if sel_author_idx > 0 and sel_author_idx - 1 < staff_interns.size():
+			var p_auth = staff_interns[sel_author_idx - 1]
+			author_id = int(p_auth.get("id", 0))
+			author_name_str = str(p_auth.get("first_name", "")) + " " + str(p_auth.get("last_name", "")) + " (" + str(p_auth.get("system_role", "Staff")).to_upper() + ")"
+		unified_pathways_service.add_pathway_running_note(ppid, text_val, author_id, author_name_str)
+		pathway_notes_expanded_map[ppid] = true
+		refresh_view()
+	)
+	add_vbox.add_child(btn_add_note)
+	add_note_card.add_child(add_vbox)
+	notes_content_vbox.add_child(add_note_card)
+
+	# Render Existing Running Notes Feed
+	var running_notes = unified_pathways_service.get_pathway_running_notes(ppid)
+	if running_notes.size() == 0:
+		var legacy_gen_notes = str(data.get("general_notes", "")).strip_edges()
+		if legacy_gen_notes != "":
+			var legacy_card = PanelContainer.new()
+			var lc_st = StyleBoxFlat.new()
+			lc_st.bg_color = Color(0.96, 0.97, 0.99, 1.0)
+			lc_st.corner_radius_top_left = 6; lc_st.corner_radius_top_right = 6
+			lc_st.corner_radius_bottom_left = 6; lc_st.corner_radius_bottom_right = 6
+			lc_st.content_margin_left = 10; lc_st.content_margin_top = 8; lc_st.content_margin_right = 10; lc_st.content_margin_bottom = 8
+			legacy_card.add_theme_stylebox_override("panel", lc_st)
+
+			var l_vbox = VBoxContainer.new()
+			var l_lbl = Label.new()
+			l_lbl.text = "Initial Notes: " + legacy_gen_notes
+			l_lbl.add_theme_font_size_override("font_size", 13)
+			l_lbl.add_theme_color_override("font_color", Color(0.12, 0.16, 0.24, 1.0))
+			l_vbox.add_child(l_lbl)
+
+			var btn_convert = Button.new()
+			btn_convert.text = "Convert to Running Note"
+			btn_convert.add_theme_font_size_override("font_size", 11)
+			_style_dark_card_button(btn_convert)
+			btn_convert.pressed.connect(func():
+				unified_pathways_service.add_pathway_running_note(ppid, legacy_gen_notes, null, "Staff User")
+				unified_pathways_service.update_pathway_notes(ppid, "")
+				pathway_notes_expanded_map[ppid] = true
+				refresh_view()
+			)
+			l_vbox.add_child(btn_convert)
+			legacy_card.add_child(l_vbox)
+			notes_content_vbox.add_child(legacy_card)
+		else:
+			var empty_n = Label.new()
+			empty_n.text = "No running notes added yet."
+			empty_n.add_theme_font_size_override("font_size", 12)
+			empty_n.add_theme_color_override("font_color", Color(0.80, 0.85, 0.92, 1.0))
+			notes_content_vbox.add_child(empty_n)
+	else:
+		for n_item in running_notes:
+			var n_id = int(n_item.get("id"))
+			var n_text = str(n_item.get("note_text", ""))
+			var n_author = str(n_item.get("author_name", "Staff User"))
+			var n_created = str(n_item.get("created_at", ""))
+			var n_updated = str(n_item.get("updated_at", ""))
+
+			var n_card = PanelContainer.new()
+			var nc_st = StyleBoxFlat.new()
+			nc_st.bg_color = Color(0.96, 0.97, 0.99, 1.0)
+			nc_st.border_width_left = 1; nc_st.border_width_top = 1; nc_st.border_width_right = 1; nc_st.border_width_bottom = 1
+			nc_st.border_color = Color(0.82, 0.86, 0.92, 1.0)
+			nc_st.corner_radius_top_left = 6; nc_st.corner_radius_top_right = 6
+			nc_st.corner_radius_bottom_left = 6; nc_st.corner_radius_bottom_right = 6
+			nc_st.content_margin_left = 10; nc_st.content_margin_top = 8; nc_st.content_margin_right = 10; nc_st.content_margin_bottom = 8
+			n_card.add_theme_stylebox_override("panel", nc_st)
+
+			var nc_vbox = VBoxContainer.new()
+			nc_vbox.add_theme_constant_override("separation", 4)
+
+			var meta_hbox = HBoxContainer.new()
+			var meta_lbl = Label.new()
+			meta_lbl.text = "📅 " + n_created + " | 👤 By: " + n_author
+			if n_updated != "" and n_updated != n_created:
+				meta_lbl.text += " (Edited: " + n_updated + ")"
+			meta_lbl.add_theme_font_size_override("font_size", 11)
+			meta_lbl.add_theme_color_override("font_color", Color(0.35, 0.42, 0.52, 1.0))
+			meta_lbl.size_flags_horizontal = SIZE_EXPAND_FILL
+			meta_hbox.add_child(meta_lbl)
+
+			var btn_edit_n = Button.new()
+			btn_edit_n.text = "✏️ Edit"
+			btn_edit_n.add_theme_font_size_override("font_size", 11)
+			_style_dark_card_button(btn_edit_n)
+			btn_edit_n.pressed.connect(func(): _open_edit_running_note_dialog(n_item, ppid))
+			meta_hbox.add_child(btn_edit_n)
+
+			var btn_del_n = Button.new()
+			btn_del_n.text = "🗑️ Delete"
+			btn_del_n.add_theme_font_size_override("font_size", 11)
+			btn_del_n.add_theme_color_override("font_color", Color(1.0, 0.4, 0.4, 1.0))
+			btn_del_n.pressed.connect(func():
+				unified_pathways_service.delete_pathway_running_note(n_id)
+				pathway_notes_expanded_map[ppid] = true
+				refresh_view()
+			)
+			meta_hbox.add_child(btn_del_n)
+			nc_vbox.add_child(meta_hbox)
+
+			var body_lbl = Label.new()
+			body_lbl.text = n_text
+			body_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			body_lbl.add_theme_font_size_override("font_size", 13)
+			body_lbl.add_theme_color_override("font_color", Color(0.12, 0.16, 0.24, 1.0))
+			nc_vbox.add_child(body_lbl)
+
+			n_card.add_child(nc_vbox)
+			notes_content_vbox.add_child(n_card)
+
+	notes_section_vbox.add_child(notes_content_vbox)
+	card_vbox.add_child(notes_section_vbox)
+
+	# 5. Collapsible Audit History
+	var history_list = data.get("history", [])
+	if history_list.size() > 0:
+		var hist_vbox = VBoxContainer.new()
+		hist_vbox.add_theme_constant_override("separation", 4)
+
+		var hist_content_vbox = VBoxContainer.new()
+		hist_content_vbox.visible = false
+
+		var btn_toggle_hist = Button.new()
+		btn_toggle_hist.text = "📜 View Audit Trail (%d Events)" % history_list.size()
+		btn_toggle_hist.pressed.connect(func():
+			hist_content_vbox.visible = not hist_content_vbox.visible
+			btn_toggle_hist.text = "📜 Hide Audit Trail" if hist_content_vbox.visible else "📜 View Audit Trail (%d Events)" % history_list.size()
+		)
+		hist_vbox.add_child(btn_toggle_hist)
+
+		for h in history_list:
+			var h_lbl = Label.new()
+			h_lbl.text = "   • [%s] %s" % [str(h.get("timestamp")), str(h.get("description"))]
+			h_lbl.add_theme_color_override("font_color", Color(0.5, 0.55, 0.62))
+			hist_content_vbox.add_child(h_lbl)
+
+		hist_vbox.add_child(hist_content_vbox)
+		card_vbox.add_child(hist_vbox)
+
+	return _create_card(title, card_vbox)
+
+func _open_profile_enrollment_dialog(person_id: int, pathway_key: String) -> void:
+	var dlg = ConfirmationDialog.new()
+	dlg.title = "Enroll in " + pathway_key.to_upper()
+	dlg.size = Vector2i(440, 320)
+
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 10)
+
+	var lbl_yr = Label.new(); lbl_yr.text = "Academic Year:"
+	var txt_yr = LineEdit.new(); txt_yr.text = "2026-2027"
+
+	var lbl_tr = Label.new(); lbl_tr.text = "Track:"
+	var opt_tr = OptionButton.new()
+	opt_tr.add_item("Standard", 0); opt_tr.add_item("Certification", 1)
+
+	var lbl_st = Label.new(); lbl_st.text = "Standing:"
+	var opt_st = OptionButton.new()
+	opt_st.add_item("Year 1", 0); opt_st.add_item("Year 2", 1); opt_st.add_item("Year 3", 2); opt_st.add_item("Year 4", 3)
+
+	vbox.add_child(lbl_yr); vbox.add_child(txt_yr)
+	vbox.add_child(lbl_tr); vbox.add_child(opt_tr)
+	vbox.add_child(lbl_st); vbox.add_child(opt_st)
+	dlg.add_child(vbox)
+
+	dlg.confirmed.connect(func():
+		var yr = txt_yr.text.strip_edges()
+		var tr = "certification" if opt_tr.selected == 1 else "standard"
+		var st = "year_" + str(opt_st.selected + 1)
+		unified_pathways_service.enroll_person_pathway(person_id, pathway_key, yr, tr, st)
+		refresh_view()
+	)
+	add_child(dlg); dlg.popup_centered()
+
+func _open_change_track_dialog(person_pathway_id: int, current_track: String) -> void:
+	var dlg = ConfirmationDialog.new()
+	dlg.title = "Change Pathway Track"
+	dlg.size = Vector2i(420, 260)
+
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 10)
+
+	var lbl_tr = Label.new(); lbl_tr.text = "New Track:"
+	var opt_tr = OptionButton.new()
+	opt_tr.add_item("Standard", 0); opt_tr.add_item("Certification", 1)
+	opt_tr.select(1 if current_track == "certification" else 0)
+
+	var lbl_r = Label.new(); lbl_r.text = "Reason for Change:"
+	var txt_r = LineEdit.new(); txt_r.placeholder_text = "e.g. Switched degree program"
+
+	vbox.add_child(lbl_tr); vbox.add_child(opt_tr)
+	vbox.add_child(lbl_r); vbox.add_child(txt_r)
+	dlg.add_child(vbox)
+
+	dlg.confirmed.connect(func():
+		var new_tr = "certification" if opt_tr.selected == 1 else "standard"
+		unified_pathways_service.change_person_track(person_pathway_id, new_tr, txt_r.text.strip_edges(), "", "Staff User")
+		refresh_view()
+	)
+	add_child(dlg); dlg.popup_centered()
+
+func _open_change_standing_dialog(person_pathway_id: int, current_standing: String) -> void:
+	var dlg = ConfirmationDialog.new()
+	dlg.title = "Change Pathway Standing"
+	dlg.size = Vector2i(420, 260)
+
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 10)
+
+	var lbl_st = Label.new(); lbl_st.text = "New Standing:"
+	var opt_st = OptionButton.new()
+	opt_st.add_item("Year 1", 0); opt_st.add_item("Year 2", 1); opt_st.add_item("Year 3", 2); opt_st.add_item("Year 4", 3)
+
+	var lbl_r = Label.new(); lbl_r.text = "Reason for Change:"
+	var txt_r = LineEdit.new(); txt_r.placeholder_text = "e.g. Advanced credit"
+
+	vbox.add_child(lbl_st); vbox.add_child(opt_st)
+	vbox.add_child(lbl_r); vbox.add_child(txt_r)
+	dlg.add_child(vbox)
+
+	dlg.confirmed.connect(func():
+		var new_st = "year_" + str(opt_st.selected + 1)
+		unified_pathways_service.change_person_standing(person_pathway_id, new_st, txt_r.text.strip_edges(), "", "Staff User")
+		refresh_view()
+	)
+	add_child(dlg); dlg.popup_centered()
+
+func _open_assign_mentor_dialog(person_pathway_id: int) -> void:
+	var dlg = ConfirmationDialog.new()
+	dlg.title = "Assign Pathway Mentor"
+	dlg.size = Vector2i(480, 280)
+
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 10)
+
+	var lbl_m = Label.new(); lbl_m.text = "Select Mentor (Staff, Volunteers, or Interns Only):"
+	var opt_m = OptionButton.new()
+
+	var p_res = db.execute("SELECT id, first_name, last_name, system_role FROM people WHERE LOWER(system_role) LIKE '%staff%' OR LOWER(system_role) LIKE '%volunteer%' OR LOWER(system_role) LIKE '%intern%' OR LOWER(system_role) LIKE '%leader%' OR LOWER(system_role) LIKE '%admin%' ORDER BY last_name ASC, first_name ASC;")
+	if not p_res["success"] or p_res["data"].size() == 0:
+		p_res = db.execute("SELECT id, first_name, last_name, system_role FROM people ORDER BY last_name ASC, first_name ASC;")
+
+	var m_ids = []
+	if p_res["success"] and p_res["data"].size() > 0:
+		for p in p_res["data"]:
+			var name_str = str(p.get("first_name", "")) + " " + str(p.get("last_name", ""))
+			var role_str = str(p.get("system_role", "Staff")).to_upper()
+			opt_m.add_item("%s (%s)" % [name_str, role_str])
+			m_ids.append(int(p["id"]))
+
+	vbox.add_child(lbl_m); vbox.add_child(opt_m)
+	dlg.add_child(vbox)
+
+	dlg.confirmed.connect(func():
+		if m_ids.size() == 0: return
+		var sel_mid = m_ids[opt_m.selected]
+		unified_pathways_service.assign_pathway_mentor(person_pathway_id, sel_mid)
+		refresh_view()
+	)
+	add_child(dlg); dlg.popup_centered()
+
+func _open_add_catch_up_dialog(person_pathway_program_year_id: int) -> void:
+	var dlg = ConfirmationDialog.new()
+	dlg.title = "Add Pathway Requirement"
+	dlg.size = Vector2i(480, 440)
+
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 10)
+
+	var lbl_t = Label.new(); lbl_t.text = "Requirement Title:"
+	var txt_t = LineEdit.new(); txt_t.placeholder_text = "e.g. Complete Certificate Capstone Essay"
+
+	var lbl_d = Label.new(); lbl_d.text = "Due Date (Optional):"
+
+	var date_hbox = HBoxContainer.new()
+	date_hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+	var txt_d = LineEdit.new()
+	txt_d.placeholder_text = "MM/DD/YYYY"
+	txt_d.custom_minimum_size = Vector2(0, 40)
+	txt_d.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	txt_d.add_theme_font_size_override("font_size", 14)
+
+	var btn_cal = Button.new()
+	btn_cal.text = "📅"
+	btn_cal.custom_minimum_size = Vector2(40, 40)
+	btn_cal.pressed.connect(func(): _open_calendar_picker(txt_d))
+
+	date_hbox.add_child(txt_d)
+	date_hbox.add_child(btn_cal)
+
+	var chk_cert = CheckBox.new()
+	chk_cert.text = "Add requirement as a part of Certificate Track"
+	chk_cert.add_theme_font_size_override("font_size", 14)
+	chk_cert.add_theme_color_override("font_color", Color(0.90, 0.94, 1.0, 1.0))
+	chk_cert.add_theme_color_override("font_hover_color", Color(0.40, 0.85, 1.0, 1.0))
+	chk_cert.add_theme_color_override("font_pressed_color", Color(0.90, 0.94, 1.0, 1.0))
+	chk_cert.add_theme_color_override("font_hover_pressed_color", Color(0.40, 0.85, 1.0, 1.0))
+
+	vbox.add_child(lbl_t); vbox.add_child(txt_t)
+	vbox.add_child(lbl_d); vbox.add_child(date_hbox)
+	vbox.add_child(chk_cert)
+	dlg.add_child(vbox)
+
+	dlg.confirmed.connect(func():
+		var t = txt_t.text.strip_edges()
+		if t == "": return
+		var db_date = _ui_to_db_date(txt_d.text.strip_edges())
+		var cat_val = "certificate" if chk_cert.button_pressed else "requirement"
+		unified_pathways_service.create_catch_up_requirement(person_pathway_program_year_id, t, cat_val, db_date, "Staff User")
+		refresh_view()
+	)
+	add_child(dlg); dlg.popup_centered()
+
+func _open_change_status_dialog(person_pathway_program_year_id: int, current_status: String) -> void:
+	var dlg = ConfirmationDialog.new()
+	dlg.title = "Change Pathway Enrollment Status"
+	dlg.size = Vector2i(420, 240)
+
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 10)
+
+	var lbl_s = Label.new(); lbl_s.text = "Select New Status:"
+	var opt_s = OptionButton.new()
+	opt_s.add_item("Active", 0)
+	opt_s.add_item("On Hold", 1)
+	opt_s.add_item("Inactive", 2)
+
+	var st_norm = current_status.to_lower().replace(" ", "_")
+	if st_norm == "on_hold":
+		opt_s.select(1)
+	elif st_norm == "inactive":
+		opt_s.select(2)
+	else:
+		opt_s.select(0)
+
+	vbox.add_child(lbl_s); vbox.add_child(opt_s)
+	dlg.add_child(vbox)
+
+	dlg.confirmed.connect(func():
+		var sel_idx = opt_s.selected
+		var new_st = "active"
+		if sel_idx == 1: new_st = "on_hold"
+		elif sel_idx == 2: new_st = "inactive"
+		unified_pathways_service.update_program_year_status(person_pathway_program_year_id, new_st)
+		refresh_view()
+	)
+	add_child(dlg); dlg.popup_centered()
+
+func _open_edit_requirement_dialog(req: Dictionary) -> void:
+	var req_id = int(req.get("id", 0))
+	var current_title = str(req.get("title", ""))
+	var current_cat = str(req.get("category", "requirement")).to_lower()
+	var current_due = str(req.get("due_date", ""))
+	if current_due == "null": current_due = ""
+
+	var dlg = ConfirmationDialog.new()
+	dlg.title = "Edit Pathway Requirement"
+	dlg.size = Vector2i(480, 440)
+
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 10)
+
+	var lbl_t = Label.new(); lbl_t.text = "Requirement Title:"
+	var txt_t = LineEdit.new()
+	txt_t.text = current_title
+
+	var lbl_d = Label.new(); lbl_d.text = "Due Date (Optional):"
+
+	var date_hbox = HBoxContainer.new()
+	date_hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+	var txt_d = LineEdit.new()
+	txt_d.text = _db_to_ui_date(current_due) if current_due != "" else ""
+	txt_d.placeholder_text = "MM/DD/YYYY"
+	txt_d.custom_minimum_size = Vector2(0, 40)
+	txt_d.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	txt_d.add_theme_font_size_override("font_size", 14)
+
+	var btn_cal = Button.new()
+	btn_cal.text = "📅"
+	btn_cal.custom_minimum_size = Vector2(40, 40)
+	btn_cal.pressed.connect(func(): _open_calendar_picker(txt_d))
+
+	date_hbox.add_child(txt_d)
+	date_hbox.add_child(btn_cal)
+
+	var chk_cert = CheckBox.new()
+	chk_cert.text = "Add requirement as a part of Certificate Track"
+	chk_cert.button_pressed = ("certificate" in current_cat)
+	chk_cert.add_theme_font_size_override("font_size", 14)
+	chk_cert.add_theme_color_override("font_color", Color(0.90, 0.94, 1.0, 1.0))
+	chk_cert.add_theme_color_override("font_hover_color", Color(0.40, 0.85, 1.0, 1.0))
+	chk_cert.add_theme_color_override("font_pressed_color", Color(0.90, 0.94, 1.0, 1.0))
+	chk_cert.add_theme_color_override("font_hover_pressed_color", Color(0.40, 0.85, 1.0, 1.0))
+
+	var btn_del = Button.new()
+	btn_del.text = "🗑️ Delete Requirement"
+	btn_del.add_theme_font_size_override("font_size", 12)
+	btn_del.add_theme_color_override("font_color", Color(1.0, 0.45, 0.45, 1.0))
+	btn_del.pressed.connect(func():
+		unified_pathways_service.delete_requirement(req_id, "Staff User")
+		dlg.queue_free()
+		refresh_view()
+	)
+
+	vbox.add_child(lbl_t); vbox.add_child(txt_t)
+	vbox.add_child(lbl_d); vbox.add_child(date_hbox)
+	vbox.add_child(chk_cert)
+	vbox.add_child(btn_del)
+	dlg.add_child(vbox)
+
+	dlg.confirmed.connect(func():
+		var t = txt_t.text.strip_edges()
+		if t == "": return
+		var db_date = _ui_to_db_date(txt_d.text.strip_edges())
+		var cat_val = "certificate" if chk_cert.button_pressed else "requirement"
+		unified_pathways_service.update_requirement(req_id, t, cat_val, db_date, "Staff User")
+		refresh_view()
+	)
+	add_child(dlg); dlg.popup_centered()
+
+func _open_edit_running_note_dialog(n_item: Dictionary, ppid: int) -> void:
+	var note_id = int(n_item.get("id", 0))
+	var current_text = str(n_item.get("note_text", ""))
+	var current_author_id = n_item.get("author_person_id", null)
+
+	var dlg = ConfirmationDialog.new()
+	dlg.title = "Edit Pathway Running Note"
+	dlg.size = Vector2i(480, 320)
+
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 10)
+
+	var lbl_author = Label.new(); lbl_author.text = "Note By (Staff / Intern):"
+	var opt_author = OptionButton.new()
+	opt_author.add_item("[ Select Staff / Intern ]", 0)
+
+	var staff_interns = unified_pathways_service.get_staff_and_interns()
+	var sel_idx = 0
+	for idx in range(staff_interns.size()):
+		var st_p = staff_interns[idx]
+		var st_name = str(st_p.get("first_name", "")) + " " + str(st_p.get("last_name", ""))
+		var st_role = str(st_p.get("system_role", "Staff")).to_upper()
+		opt_author.add_item("%s (%s)" % [st_name, st_role], idx + 1)
+		if current_author_id != null and int(st_p.get("id", 0)) == int(current_author_id):
+			sel_idx = idx + 1
+	opt_author.select(sel_idx)
+	vbox.add_child(lbl_author); vbox.add_child(opt_author)
+
+	var lbl_text = Label.new(); lbl_text.text = "Note Content:"
+	var txt_edit = TextEdit.new()
+	txt_edit.text = current_text
+	txt_edit.custom_minimum_size = Vector2(0, 100)
+	vbox.add_child(lbl_text); vbox.add_child(txt_edit)
+
+	dlg.add_child(vbox)
+	dlg.confirmed.connect(func():
+		var t_val = txt_edit.text.strip_edges()
+		if t_val == "": return
+		var sel_a_idx = opt_author.selected
+		var a_id = null
+		var a_name = "Staff User"
+		if sel_a_idx > 0 and sel_a_idx - 1 < staff_interns.size():
+			var p_a = staff_interns[sel_a_idx - 1]
+			a_id = int(p_a.get("id", 0))
+			a_name = str(p_a.get("first_name", "")) + " " + str(p_a.get("last_name", "")) + " (" + str(p_a.get("system_role", "Staff")).to_upper() + ")"
+		unified_pathways_service.update_pathway_running_note(note_id, t_val, a_id, a_name)
+		pathway_notes_expanded_map[ppid] = true
+		refresh_view()
+	)
+	add_child(dlg); dlg.popup_centered()
+
+func _create_campus_community_card(p: Dictionary, p_uuid: String) -> Control:
+	var cc_card_vbox = VBoxContainer.new()
+	cc_card_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	cc_card_vbox.add_theme_constant_override("separation", 16)
+
+	# Fetch Master Institutions
+	var inst_list = []
+	if db:
+		var q_inst = db.execute("SELECT id, uuid, name, short_name, institution_type, is_active FROM institutions WHERE is_active = 1 ORDER BY display_order ASC, name ASC;")
+		if q_inst["success"]:
+			inst_list = q_inst["data"]
+
+	var raw_applies = p.get("campus_community_applies", null)
+	var cc_applies = false
+	if raw_applies != null and str(raw_applies) != "<null>" and str(raw_applies) != "null":
+		cc_applies = (int(raw_applies) == 1)
+	else:
+		# Fallback: check if they have any non-empty/non-default campus info
+		var raw_inst_check = p.get("institution_id", 0)
+		var inst_id_val = 0 if (raw_inst_check == null or str(raw_inst_check) == "<null>" or str(raw_inst_check) == "null") else int(raw_inst_check)
+		var rel_val_check = _clean_str(p.get("relationship", ""))
+		var se_val_check = _clean_str(p.get("school_email", ""))
+		var ay_val_check = _clean_str(p.get("academic_year", ""))
+		var mj_val_check = _clean_str(p.get("major", ""))
+		var res_val_check = _clean_str(p.get("residence", ""))
+		var gt_val_check = _clean_str(p.get("expected_grad_term", ""))
+		var gy_val_check = _clean_str(p.get("expected_grad_year", ""))
+		
+		if (inst_id_val != 0 or rel_val_check != "" or se_val_check != "" 
+			or (ay_val_check != "" and ay_val_check != "Not Applicable" and ay_val_check != "None")
+			or mj_val_check != "" or (res_val_check != "" and res_val_check != "Not Applicable")
+			or (gt_val_check != "" and gt_val_check != "Not Applicable") or gy_val_check != ""):
+			cc_applies = true
+
+	# 1. Toggle button at the top
+	var toggle = CheckButton.new()
+	toggle.text = "Campus & Community Applies"
+	toggle.button_pressed = cc_applies
+	cc_card_vbox.add_child(toggle)
+
+	var form_grid = GridContainer.new()
+	form_grid.columns = 3
+	form_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	form_grid.add_theme_constant_override("h_separation", 18)
+	form_grid.add_theme_constant_override("v_separation", 14)
+
+	# 1. Institution Dropdown
+	var inst_vbox = VBoxContainer.new(); inst_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var inst_lbl = Label.new(); inst_lbl.text = "INSTITUTION"; inst_lbl.add_theme_font_size_override("font_size", 14); inst_lbl.add_theme_color_override("font_color", Color(0.70, 0.78, 0.88, 1.0))
+	var inst_dropdown = OptionButton.new()
+	inst_dropdown.add_item("[ Unspecified / None ]", 0)
+
+	var raw_inst = p.get("institution_id", 0)
+	var current_inst_id = 0 if (raw_inst == null or str(raw_inst) == "<null>" or str(raw_inst) == "null") else int(raw_inst)
+	var sel_inst_idx = 0
+	for idx in range(inst_list.size()):
+		var item = inst_list[idx]
+		var i_name = str(item.get("name", ""))
+		inst_dropdown.add_item(i_name, idx + 1)
+		if current_inst_id != 0 and int(item.get("id", 0)) == current_inst_id:
+			sel_inst_idx = idx + 1
+	inst_dropdown.select(sel_inst_idx)
+	inst_dropdown.custom_minimum_size = Vector2(0, 44); inst_dropdown.size_flags_horizontal = Control.SIZE_EXPAND_FILL; inst_dropdown.add_theme_font_size_override("font_size", 16)
+	inst_vbox.add_child(inst_lbl); inst_vbox.add_child(inst_dropdown); form_grid.add_child(inst_vbox)
+
+	# 2. Institution Name (Other) LineEdit
+	var inst_other_vbox = VBoxContainer.new(); inst_other_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var inst_other_lbl = Label.new(); inst_other_lbl.text = "INSTITUTION NAME (OTHER)"; inst_other_lbl.add_theme_font_size_override("font_size", 14); inst_other_lbl.add_theme_color_override("font_color", Color(0.70, 0.78, 0.88, 1.0))
+	var inst_other_edit = LineEdit.new(); inst_other_edit.text = _clean_str(p.get("institution_other_name", "")); inst_other_edit.placeholder_text = "Specify School Name..."; inst_other_edit.custom_minimum_size = Vector2(0, 44); inst_other_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL; inst_other_edit.add_theme_font_size_override("font_size", 16)
+	inst_other_vbox.add_child(inst_other_lbl); inst_other_vbox.add_child(inst_other_edit); form_grid.add_child(inst_other_vbox)
+
+	# 3. Relationship Dropdown
+	var rel_vbox = VBoxContainer.new(); rel_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var rel_lbl = Label.new(); rel_lbl.text = "RELATIONSHIP"; rel_lbl.add_theme_font_size_override("font_size", 14); rel_lbl.add_theme_color_override("font_color", Color(0.70, 0.78, 0.88, 1.0))
+	var rel_dropdown = OptionButton.new()
+	var rel_options = ["Student", "Alumni", "Faculty", "Staff", "Community Member", "Other"]
+	for idx in range(rel_options.size()):
+		rel_dropdown.add_item(rel_options[idx], idx)
+	var cur_rel = _clean_str(p.get("relationship", "Student"))
+	if cur_rel == "":
+		cur_rel = "Student"
+	var rel_idx = rel_options.find(cur_rel)
+	rel_dropdown.select(rel_idx if rel_idx >= 0 else 0)
+	rel_dropdown.custom_minimum_size = Vector2(0, 44); rel_dropdown.size_flags_horizontal = Control.SIZE_EXPAND_FILL; rel_dropdown.add_theme_font_size_override("font_size", 16)
+	rel_vbox.add_child(rel_lbl); rel_vbox.add_child(rel_dropdown); form_grid.add_child(rel_vbox)
+
+	# 4. School Email
+	var se_vbox = VBoxContainer.new(); se_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var se_lbl = Label.new(); se_lbl.text = "SCHOOL EMAIL"; se_lbl.add_theme_font_size_override("font_size", 14); se_lbl.add_theme_color_override("font_color", Color(0.70, 0.78, 0.88, 1.0))
+	var se_edit = LineEdit.new(); se_edit.text = _clean_str(p.get("school_email", "")); se_edit.placeholder_text = "student@school.edu"; se_edit.custom_minimum_size = Vector2(0, 44); se_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL; se_edit.add_theme_font_size_override("font_size", 16)
+	se_vbox.add_child(se_lbl); se_vbox.add_child(se_edit); form_grid.add_child(se_vbox)
+
+	# 5. Academic Year Dropdown
+	var ay_vbox = VBoxContainer.new(); ay_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var ay_lbl = Label.new(); ay_lbl.text = "ACADEMIC YEAR"; ay_lbl.add_theme_font_size_override("font_size", 14); ay_lbl.add_theme_color_override("font_color", Color(0.70, 0.78, 0.88, 1.0))
+	var ay_dropdown = OptionButton.new()
+	var ay_options = ["Freshman", "Sophomore", "Junior", "Senior", "Graduate Student", "Not Applicable"]
+	for idx in range(ay_options.size()):
+		ay_dropdown.add_item(ay_options[idx], idx)
+	var cur_ay = _clean_str(p.get("academic_year", p.get("grade", "Freshman")))
+	if cur_ay == "" or cur_ay == "None":
+		cur_ay = "Not Applicable"
+	var ay_idx = ay_options.find(cur_ay)
+	ay_dropdown.select(ay_idx if ay_idx >= 0 else ay_options.find("Not Applicable"))
+	ay_dropdown.custom_minimum_size = Vector2(0, 44); ay_dropdown.size_flags_horizontal = Control.SIZE_EXPAND_FILL; ay_dropdown.add_theme_font_size_override("font_size", 16)
+	ay_vbox.add_child(ay_lbl); ay_vbox.add_child(ay_dropdown); form_grid.add_child(ay_vbox)
+
+	# 6. Major
+	var mj_vbox = VBoxContainer.new(); mj_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var mj_lbl = Label.new(); mj_lbl.text = "MAJOR / FIELD OF STUDY"; mj_lbl.add_theme_font_size_override("font_size", 14); mj_lbl.add_theme_color_override("font_color", Color(0.70, 0.78, 0.88, 1.0))
+	var mj_edit = LineEdit.new(); mj_edit.text = _clean_str(p.get("major", "")); mj_edit.placeholder_text = "e.g. Computer Science, Nursing"; mj_edit.custom_minimum_size = Vector2(0, 44); mj_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL; mj_edit.add_theme_font_size_override("font_size", 16)
+	mj_vbox.add_child(mj_lbl); mj_vbox.add_child(mj_edit); form_grid.add_child(mj_vbox)
+
+	# 7. Residence Dropdown
+	var res_vbox = VBoxContainer.new(); res_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var res_lbl = Label.new(); res_lbl.text = "RESIDENCE TYPE"; res_lbl.add_theme_font_size_override("font_size", 14); res_lbl.add_theme_color_override("font_color", Color(0.70, 0.78, 0.88, 1.0))
+	var res_dropdown = OptionButton.new()
+	var res_options = ["On Campus", "Off Campus", "Commuter", "Online Student", "Not Applicable"]
+	for idx in range(res_options.size()):
+		res_dropdown.add_item(res_options[idx], idx)
+	var cur_res = _clean_str(p.get("residence", "On Campus"))
+	if cur_res == "":
+		cur_res = "Not Applicable"
+	var res_idx = res_options.find(cur_res)
+	res_dropdown.select(res_idx if res_idx >= 0 else 0)
+	res_dropdown.custom_minimum_size = Vector2(0, 44); res_dropdown.size_flags_horizontal = Control.SIZE_EXPAND_FILL; res_dropdown.add_theme_font_size_override("font_size", 16)
+	res_vbox.add_child(res_lbl); res_vbox.add_child(res_dropdown); form_grid.add_child(res_vbox)
+
+	# 8. Expected Graduation Term
+	var gt_vbox = VBoxContainer.new(); gt_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var gt_lbl = Label.new(); gt_lbl.text = "EXPECTED GRADUATION TERM"; gt_lbl.add_theme_font_size_override("font_size", 14); gt_lbl.add_theme_color_override("font_color", Color(0.70, 0.78, 0.88, 1.0))
+	var gt_dropdown = OptionButton.new()
+	var gt_options = ["Spring", "Summer", "Fall", "Not Applicable"]
+	for idx in range(gt_options.size()):
+		gt_dropdown.add_item(gt_options[idx], idx)
+	var cur_gt = _clean_str(p.get("expected_grad_term", ""))
+	if cur_gt == "":
+		cur_gt = "Not Applicable"
+	var gt_idx = gt_options.find(cur_gt)
+	gt_dropdown.select(gt_idx if gt_idx >= 0 else gt_options.find("Not Applicable"))
+	gt_dropdown.custom_minimum_size = Vector2(0, 44); gt_dropdown.size_flags_horizontal = Control.SIZE_EXPAND_FILL; gt_dropdown.add_theme_font_size_override("font_size", 16)
+	gt_vbox.add_child(gt_lbl); gt_vbox.add_child(gt_dropdown); form_grid.add_child(gt_vbox)
+
+	# 9. Expected Graduation Year
+	var gy_vbox = VBoxContainer.new(); gy_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var gy_lbl = Label.new(); gy_lbl.text = "EXPECTED GRADUATION YEAR"; gy_lbl.add_theme_font_size_override("font_size", 14); gy_lbl.add_theme_color_override("font_color", Color(0.70, 0.78, 0.88, 1.0))
+	var gy_edit = LineEdit.new(); gy_edit.text = _clean_str(p.get("expected_grad_year", "")); gy_edit.placeholder_text = "e.g. 2027"; gy_edit.custom_minimum_size = Vector2(0, 44); gy_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL; gy_edit.add_theme_font_size_override("font_size", 16)
+	gy_vbox.add_child(gy_lbl); gy_vbox.add_child(gy_edit); form_grid.add_child(gy_vbox)
+
+	# Reactive Visibility & Auto-Default Logic
+	var update_reactive_states = func():
+		var sel_i = inst_dropdown.selected
+		var sel_inst = inst_list[sel_i - 1] if (sel_i > 0 and sel_i - 1 < inst_list.size()) else {}
+		var inst_name = str(sel_inst.get("name", ""))
+		var inst_type = str(sel_inst.get("institution_type", "college_university"))
+
+		inst_other_vbox.visible = (inst_name == "Other")
+		if inst_type == "community":
+			rel_dropdown.select(4) # Community Member
+		var is_higher_ed = (inst_type == "college_university")
+		gt_vbox.visible = is_higher_ed
+		gy_vbox.visible = is_higher_ed
+
+	inst_dropdown.item_selected.connect(func(_idx): update_reactive_states.call())
+	update_reactive_states.call()
+
+	# Connect toggle behavior
+	form_grid.visible = toggle.button_pressed
+	toggle.toggled.connect(func(pressed: bool):
+		form_grid.visible = pressed
+	)
+
+	cc_card_vbox.add_child(form_grid)
+
+	# Save Button
+	var btn_save_cc = Button.new()
+	btn_save_cc.text = "💾 Save Campus & Community Details"
+	btn_save_cc.custom_minimum_size = Vector2(280, 44)
+	btn_save_cc.add_theme_font_size_override("font_size", 16)
+	btn_save_cc.pressed.connect(func():
+		if not db or p_uuid == "": return
+		var sel_i = inst_dropdown.selected
+		var sel_inst = inst_list[sel_i - 1] if (sel_i > 0 and sel_i - 1 < inst_list.size()) else {}
+		var i_id = int(sel_inst.get("id", 0)) if sel_i > 0 else null
+		var i_other = inst_other_edit.text.strip_edges() if inst_other_vbox.visible else ""
+
+		var rel_val = rel_options[rel_dropdown.selected]
+		var se_val = se_edit.text.strip_edges()
+		var ay_val = ay_options[ay_dropdown.selected]
+		var mj_val = mj_edit.text.strip_edges()
+		var res_val = res_options[res_dropdown.selected]
+		var gt_val = gt_options[gt_dropdown.selected]
+		var gy_val = int(gy_edit.text.strip_edges()) if gy_edit.text.strip_edges().is_valid_int() else null
+		var cc_applies_val = 1 if toggle.button_pressed else 0
+
+		var person_id = int(p.get("id", 0))
+
+		# Update People Record including campus_community_applies
+		db.execute("UPDATE people SET institution_id = ?, institution_other_name = ?, relationship = ?, school_email = ?, academic_year = ?, grade = ?, major = ?, residence = ?, expected_grad_term = ?, expected_grad_year = ?, campus_community_applies = ?, updated_at = datetime('now') WHERE person_uuid = ?;",
+			[i_id, i_other, rel_val, se_val, ay_val, ay_val, mj_val, res_val, gt_val, gy_val, cc_applies_val, p_uuid])
+
+		# Write to Academic History
+		if person_id > 0:
+			var hist_uuid = "ahist_" + str(Time.get_ticks_msec()) + "_" + str(randi() % 10000)
+			db.execute("INSERT INTO person_academic_history (uuid, person_id, institution_id, institution_other_name, relationship, academic_year, major, residence, expected_grad_term, expected_grad_year, change_source, changed_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Profile Update', 'Staff User');",
+				[hist_uuid, person_id, i_id, i_other, rel_val, ay_val, mj_val, res_val, gt_val, gy_val])
+
+		refresh_view()
+	)
+	cc_card_vbox.add_child(btn_save_cc)
+
+	return _create_card("Campus & Community", cc_card_vbox)

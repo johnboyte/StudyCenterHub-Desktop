@@ -29,7 +29,7 @@ func _init() -> void:
 func is_configured() -> bool:
 	return pass_type_id != "" and team_id != "" and cert_path != "" and FileAccess.file_exists(cert_path) and key_path != "" and FileAccess.file_exists(key_path)
 
-func generate_pass_json(person_data: Dictionary, raw_token: String) -> String:
+func generate_pass_json(person_data: Dictionary, raw_token: String, credential_id: String = "") -> String:
 	var first_name = str(person_data.get("first_name", "Valued")).strip_edges()
 	var last_name = str(person_data.get("last_name", "Member")).strip_edges()
 	if first_name == "<null>" or first_name == "null": first_name = ""
@@ -38,6 +38,10 @@ func generate_pass_json(person_data: Dictionary, raw_token: String) -> String:
 	if display_name == "": display_name = "Valued Member"
 
 	var person_uuid = str(person_data.get("person_uuid", "PRT-" + str(person_data.get("id", 0))))
+	var pass_serial = person_uuid
+	if credential_id != "":
+		pass_serial += "_" + credential_id
+
 	var qr_url = "https://checkin.reallife-studycenter.org/public-returning"
 	if raw_token != "":
 		qr_url += "?credential=" + raw_token
@@ -47,7 +51,7 @@ func generate_pass_json(person_data: Dictionary, raw_token: String) -> String:
 	var pass_dict = {
 		"formatVersion": 1,
 		"passTypeIdentifier": pass_type_id if pass_type_id != "" else "pass.org.reallife.house.member",
-		"serialNumber": person_uuid,
+		"serialNumber": pass_serial,
 		"teamIdentifier": team_id if team_id != "" else "REAL_LIFE_TEAM_ID",
 		"organizationName": "Real Life House",
 		"description": "Real Life House Member Pass",
@@ -122,7 +126,7 @@ func generate_pass_json(person_data: Dictionary, raw_token: String) -> String:
 	}
 	return JSON.stringify(pass_dict, "  ")
 
-func generate_apple_wallet_pass(person_data: Dictionary, raw_token: String) -> Dictionary:
+func generate_apple_wallet_pass(person_data: Dictionary, raw_token: String, credential_id: String = "") -> Dictionary:
 	if not is_configured():
 		return {
 			"success": false,
@@ -131,8 +135,10 @@ func generate_apple_wallet_pass(person_data: Dictionary, raw_token: String) -> D
 			"error": "Apple Wallet setup required: Pass Type Certificate (.pem), Private Key, and WWDR Certificate missing."
 		}
 
-	var pass_json = generate_pass_json(person_data, raw_token)
+	var pass_json = generate_pass_json(person_data, raw_token, credential_id)
 	var serial = str(person_data.get("person_uuid", "PRT"))
+	if credential_id != "":
+		serial += "_" + credential_id
 	var temp_pass_dir = ProjectSettings.globalize_path("user://wallet/apple_" + serial)
 	DirAccess.make_dir_recursive_absolute(temp_pass_dir)
 
@@ -165,7 +171,7 @@ func generate_apple_wallet_pass(person_data: Dictionary, raw_token: String) -> D
 		var pass_id = serial
 		var upload_url = "https://app.reallife-studycenter.org/upload_pass.php?pass_id=" + pass_id
 		var http = HTTPClient.new()
-		var err = http.connect_to_host("app.reallife-studycenter.org", 80)
+		var err = http.connect_to_host("app.reallife-studycenter.org", 443, TLSOptions.client())
 		if err == OK:
 			var timeout = 40
 			while (http.get_status() == HTTPClient.STATUS_CONNECTING or http.get_status() == HTTPClient.STATUS_RESOLVING) and timeout > 0:

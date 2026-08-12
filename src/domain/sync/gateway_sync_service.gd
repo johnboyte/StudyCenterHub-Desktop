@@ -16,7 +16,8 @@ func _init(database: RefCounted, caller_node: Node) -> void:
 	
 	http_client = HTTPRequest.new()
 	http_client.timeout = 5.0
-	parent_node.add_child(http_client)
+	if parent_node:
+		parent_node.add_child(http_client)
 
 func get_gateway_url() -> String:
 	var res = db.execute("SELECT setting_value FROM app_settings WHERE setting_key = 'GATEWAY_SERVER_URL' LIMIT 1;")
@@ -27,8 +28,10 @@ func get_gateway_url() -> String:
 func get_sync_api_key() -> String:
 	var res = db.execute("SELECT setting_value FROM app_settings WHERE setting_key = 'GATEWAY_SYNC_API_KEY' LIMIT 1;")
 	if res["success"] and res["data"].size() > 0:
-		return str(res["data"][0]["setting_value"]).strip_edges()
-	return "demo_sync_key"
+		var val = str(res["data"][0]["setting_value"]).strip_edges()
+		if val != "" and val != "demo_sync_key":
+			return val
+	return "SCH_SYNC_KEY_PLACEHOLDER_8f3d"
 
 func sync_now(callback: Callable) -> void:
 	# 1. Pull new events from relay buffer
@@ -65,17 +68,33 @@ func sync_now(callback: Callable) -> void:
 		var events = json.get("events", [])
 		var inserted_count = 0
 		
-		# Insert un-processed raw events into Godot's local buffer
 		for evt in events:
-			db.execute(
+			var res = db.execute(
 				"INSERT OR IGNORE INTO inbound_event_queue (id, event_type, payload_json, received_at, processed) VALUES (?, ?, ?, ?, 0);",
 				[int(evt["id"]), str(evt["event_type"]), str(evt["payload_json"]), str(evt["received_at"])]
 			)
-			inserted_count += 1
+			_process_inbound_event(evt)
+			if res["success"] and res.get("rows_affected", 0) > 0:
+				inserted_count += 1
 			
-		# Proceed to push/acknowledgements
-		_push_acknowledgements(callback, inserted_count)
+		callback.call({"success": true, "inserted_count": inserted_count, "total_pulled": events.size()})
 	, CONNECT_ONE_SHOT)
+
+func _process_inbound_event(evt: Dictionary) -> void:
+	var evt_type = str(evt.get("event_type", ""))
+	var raw_p = evt.get("payload_json", {})
+	var payload: Dictionary = {}
+	if typeof(raw_p) == TYPE_DICTIONARY:
+		payload = raw_p
+	elif typeof(raw_p) == TYPE_STRING:
+		var parsed = JSON.parse_string(raw_p)
+		if typeof(parsed) == TYPE_DICTIONARY:
+			payload = parsed
+
+	if evt_type in ["TwilioDeliveryStatus", "MessageStatusUpdated", "message.status_updated"]:
+		const TwilioGatewayScript = preload("res://src/infrastructure/messaging/twilio_gateway_service.gd")
+		var twilio = TwilioGatewayScript.new(db)
+		twilio.process_twilio_webhook_payload(payload)
 
 func _push_acknowledgements(callback: Callable, inserted_count: int) -> void:
 	# Find processed events to acknowledge on relay
@@ -102,26 +121,27 @@ func _push_acknowledgements(callback: Callable, inserted_count: int) -> void:
 		callback.call({"success": true, "inserted_count": inserted_count, "error": "Pull complete, ack failed to start."})
 		return
 		
-	http_client.request_completed.connect(func(result: int, response_code: int, _r_headers: PackedStringArray, body_bytes: PackedByteArray):
+	http_client.request_completed.connect(func(_result: int, response_code: int, _r_headers: PackedStringArray, _body_bytes: PackedByteArray):
 		if response_code == 200:
-			# Acknowledged on relay; safe to clean up local buffer
-			var placeholders = []
-			for id in event_ids: placeholders.append("?")
-			var q = "DELETE FROM inbound_event_queue WHERE id IN (" + ",".join(placeholders) + ");"
-			db.execute(q, event_ids)
 			callback.call({"success": true, "inserted_count": inserted_count, "ack_count": event_ids.size()})
 		else:
 			callback.call({"success": true, "inserted_count": inserted_count, "error": "Pull complete, ack response failed: " + str(response_code)})
 	, CONNECT_ONE_SHOT)
 
+func push_acknowledgements_now(callback: Callable = Callable()) -> void:
+	_push_acknowledgements(func(res: Dictionary):
+		if callback.is_valid():
+			callback.call(res)
+	, 0)
+
 func publish_ivr_config(callback: Callable) -> void:
-	# Compile active settings and options from SQLite
 	var phone_settings = {
 		"on_call_phone": "",
 		"rollover_rings": 4,
 		"tts_greeting_active": true,
 		"greeting_text": "",
-		"menu_options": {}
+		"menu_options": {},
+		"staff_members": {}
 	}
 	
 	# Load settings
@@ -131,7 +151,6 @@ func publish_ivr_config(callback: Callable) -> void:
 			var key = str(row["setting_key"])
 			var val = str(row["setting_value"])
 			if key == "PHONE_ON_CALL_PERSON_ID" and val != "":
-				# Resolve actual phone number from person ID
 				var p_res = db.execute("SELECT phone FROM people WHERE id = ? LIMIT 1;", [int(val)])
 				if p_res["success"] and p_res["data"].size() > 0:
 					phone_settings["on_call_phone"] = str(p_res["data"][0]["phone"])
@@ -148,19 +167,55 @@ func publish_ivr_config(callback: Callable) -> void:
 		phone_settings["voice_name"] = str(ivr_res["data"][0]["voice_name"])
 		phone_settings["language"] = str(ivr_res["data"][0]["language"])
 	else:
-		phone_settings["voice_name"] = "Polly.Joanna"
+		phone_settings["voice_name"] = "Polly.Kimberly-Neural"
 		phone_settings["language"] = "en-US"
 
-	# Load menu options
-	var options_res = db.execute("SELECT digit, menu_option_name, script_text, action_type, action_param FROM ivr_menu_options;")
-	if options_res["success"]:
-		for row in options_res["data"]:
-			var digit = str(row["digit"])
-			phone_settings["menu_options"][digit] = {
-				"action_type": str(row["action_type"]),
-				"script_text": str(row["script_text"]),
-				"action_param": str(row["action_param"]) if row["action_param"] != null else ""
+	# Load active staff members
+	var staff_members_list = []
+	var staff_members_map = {}
+	var staff_res = db.execute("SELECT display_name, transfer_number, ring_timeout, unanswered_destination, menu_digit FROM staff_members WHERE is_active = 1;")
+	if staff_res["success"]:
+		staff_members_list = staff_res["data"]
+		for s in staff_members_list:
+			var s_name = str(s["display_name"])
+			staff_members_map[s_name] = {
+				"name": s_name,
+				"phone": str(s["transfer_number"]),
+				"ring_timeout": int(s["ring_timeout"]),
+				"unanswered_destination": str(s["unanswered_destination"])
 			}
+	phone_settings["staff_members"] = staff_members_map
+
+	# Instantiate CommunicationsService to compute dynamic texts
+	const CommunicationsServiceScript = preload("res://src/domain/communications/communications_service.gd")
+	var com_svc = CommunicationsServiceScript.new(db)
+
+	# Fetch all IVR nodes
+	var nodes_res = db.execute("SELECT id, parent_id, digit, label, action_type, action_param, script_text, dynamic_source, is_active, display_order FROM ivr_menu_nodes;")
+	var all_nodes = []
+	if nodes_res["success"]:
+		all_nodes = nodes_res["data"]
+
+	# Organize roots
+	var roots = []
+	for n in all_nodes:
+		if n.get("parent_id") == null or str(n["parent_id"]) == "" or str(n["parent_id"]) == "null":
+			if int(n.get("is_active", 1)) == 1:
+				roots.append(n)
+
+	# Sort roots
+	roots.sort_custom(func(a, b):
+		if int(a.get("display_order", 0)) != int(b.get("display_order", 0)):
+			return int(a.get("display_order", 0)) < int(b.get("display_order", 0))
+		return str(a["digit"]) < str(b["digit"])
+	)
+
+	# Compile tree recursively
+	var compiled_options = {}
+	for r in roots:
+		_compile_node_recursive(r, all_nodes, "", compiled_options, staff_members_list, com_svc)
+
+	phone_settings["menu_options"] = compiled_options
 
 	# Publish compiled payload to SiteGround relay cache
 	var gateway_url = get_gateway_url()
@@ -168,7 +223,8 @@ func publish_ivr_config(callback: Callable) -> void:
 	var config_url = gateway_url + "/api/v1/sync/ivr-config"
 	var headers = [
 		"Content-Type: application/json",
-		"x-sync-api-key: " + api_key
+		"x-sync-api-key: " + api_key,
+		"User-Agent: StudyCenterHubDesktop/1.0"
 	]
 	
 	var config_body = JSON.stringify({ "ivr_config": phone_settings })
@@ -177,9 +233,100 @@ func publish_ivr_config(callback: Callable) -> void:
 		callback.call({"success": false, "error": "IVR config publish failed to start."})
 		return
 		
-	http_client.request_completed.connect(func(result: int, response_code: int, _r_headers: PackedStringArray, body_bytes: PackedByteArray):
+	http_client.request_completed.connect(func(_result: int, response_code: int, _r_headers: PackedStringArray, _body_bytes: PackedByteArray):
 		if response_code == 200:
 			callback.call({"success": true})
 		else:
 			callback.call({"success": false, "error": "Config publish failed with status: " + str(response_code)})
 	, CONNECT_ONE_SHOT)
+
+func _compile_node_recursive(node: Dictionary, all_nodes: Array, parent_path: String, compiled_options: Dictionary, active_staff: Array, com_svc: RefCounted) -> void:
+	var current_path = parent_path
+	if current_path != "":
+		current_path += "-" + str(node["digit"])
+	else:
+		current_path = str(node["digit"])
+		
+	var act_type = str(node["action_type"])
+	var param = str(node.get("action_param", "")) if node.get("action_param") != null else ""
+	var script = str(node.get("script_text", "")) if node.get("script_text") != null else ""
+	var d_src = str(node.get("dynamic_source", "")) if node.get("dynamic_source") != null else ""
+	
+	# Compute dynamic scripts if flag matches (reusable shared settings)
+	if d_src == "location_directions":
+		var res = db.execute("SELECT setting_value FROM app_settings WHERE setting_key = 'PHONE_LOCATION_DIRECTIONS_TEXT' LIMIT 1;")
+		if res["success"] and res["data"].size() > 0:
+			script = str(res["data"][0]["setting_value"])
+
+	if act_type == "staff_directory":
+		# Compile the listing text dynamically based on the active staff in database
+		var list_texts = []
+		for s in active_staff:
+			list_texts.append("To reach " + str(s["display_name"]) + ", press " + str(s["menu_digit"]) + ".")
+		list_texts.append("For General Staff Voicemail, press 3. To return to the main menu, press 9.")
+		var greeting = " ".join(list_texts)
+		
+		# Define staff directory submenu node itself
+		compiled_options[current_path] = {
+			"action_type": "submenu",
+			"script_text": greeting,
+			"action_param": ""
+		}
+		
+		# Generate children paths underneath dynamically
+		for s in active_staff:
+			var s_path = current_path + "-" + str(s["menu_digit"])
+			compiled_options[s_path] = {
+				"action_type": "transfer_staff",
+				"script_text": "",
+				"action_param": str(s["display_name"])
+			}
+			
+		# Voicemail fallback Option 3
+		compiled_options[current_path + "-3"] = {
+			"action_type": "voicemail",
+			"script_text": "Please leave your name, phone number, and a brief message after the tone, and someone from Real Life House will get back in touch with you.",
+			"action_param": "staff_general"
+		}
+		
+		# Return to Main Option 9
+		compiled_options[current_path + "-9"] = {
+			"action_type": "return_to_main",
+			"script_text": "",
+			"action_param": ""
+		}
+	elif act_type == "return_to_main" or act_type == "Return to Main Menu":
+		compiled_options[current_path] = {
+			"action_type": "return_to_main",
+			"script_text": "",
+			"action_param": ""
+		}
+	elif act_type == "hangup" or act_type == "Hang Up":
+		compiled_options[current_path] = {
+			"action_type": "hangup",
+			"script_text": script,
+			"action_param": ""
+		}
+	else:
+		# Standard options
+		compiled_options[current_path] = {
+			"action_type": act_type,
+			"script_text": script,
+			"action_param": param
+		}
+		
+	# Recurse for all children
+	var children = []
+	for candidate in all_nodes:
+		if candidate.get("parent_id") != null and int(candidate["parent_id"]) == int(node["id"]) and int(candidate.get("is_active", 1)) == 1:
+			children.append(candidate)
+			
+	children.sort_custom(func(a, b):
+		if int(a.get("display_order", 0)) != int(b.get("display_order", 0)):
+			return int(a.get("display_order", 0)) < int(b.get("display_order", 0))
+		return str(a["digit"]) < str(b["digit"])
+	)
+	
+	for child in children:
+		_compile_node_recursive(child, all_nodes, current_path, compiled_options, active_staff, com_svc)
+

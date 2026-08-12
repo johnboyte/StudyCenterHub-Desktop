@@ -61,6 +61,16 @@ var _is_syncing: bool = false
 func _ready() -> void:
 	add_to_group("app_shell")
 	_init_database()
+	
+	# Startup Twilio & Database Log
+	var tw_conf = {"account_sid": "", "auth_token": "", "phone_number": ""}
+	var TwilioGateway = load("res://src/infrastructure/messaging/twilio_gateway_service.gd")
+	if TwilioGateway:
+		var tw_gateway = TwilioGateway.new(db)
+		if tw_gateway:
+			tw_conf = tw_gateway.get_twilio_config()
+	print("[Twilio] Settings status: Account SID: ", "Configured" if tw_conf.get("account_sid", "") != "" else "Not Configured", ", Phone: ", "Configured" if tw_conf.get("phone_number", "") != "" else "Not Configured")
+
 	_apply_pd008_theme_styles()
 	_populate_team_leaders()
 	_connect_nav_signals()
@@ -83,19 +93,18 @@ func _on_sync_timer_tick() -> void:
 	if _is_syncing or not db:
 		return
 	_is_syncing = true
-	print("[AutoSync] Pulling events from relay...")
 	var sync_svc = GatewaySyncScript.new(db, self)
 	sync_svc.sync_now(func(result: Dictionary):
-		var inserted = result.get("inserted_count", 0)
-		if inserted > 0:
-			print("[AutoSync] Pulled ", inserted, " new events. Processing...")
-			var processor = InboundEventProcessorScript.new(db, self)
-			processor.process_pending_events(func(proc_result: Dictionary):
-				print("[AutoSync] Processed ", proc_result.get("processed_count", 0), " events.")
+		var processor = InboundEventProcessorScript.new(db, self)
+		processor.process_pending_events(func(proc_result: Dictionary):
+			var count = int(proc_result.get("processed_count", 0))
+			print("[AutoSync] Processed ", count, " pending events. Pushing ACKs...")
+			sync_svc.push_acknowledgements_now(func(_ack_res):
 				_is_syncing = false
+				if count > 0:
+					get_tree().call_group("sync_listeners", "on_inbound_events_processed", count)
 			)
-		else:
-			_is_syncing = false
+		)
 	)
 
 func _adjust_content_area_offset() -> void:
@@ -142,7 +151,11 @@ func _apply_pd008_theme_styles() -> void:
 	# Dynamic Environment Label
 	var env = OS.get_environment("STUDYCENTERHUB_ENV").to_lower().strip_edges()
 	if env == "":
-		env = "development"
+		var exec_path = OS.get_executable_path().to_lower()
+		if exec_path.contains("rc1") or exec_path.contains("staging"):
+			env = "staging"
+		else:
+			env = "development"
 
 	var env_label = Label.new()
 	env_label.text = env.to_upper()

@@ -29,102 +29,503 @@ layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 4
 
-[node name="TitleLabel" type="Label" parent="MarginContainer/MainVBox/HeaderVBox"]
+[node name="HeaderHBox" type="HBoxContainer" parent="MarginContainer/MainVBox/HeaderVBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="TitleVBox" type="VBoxContainer" parent="MarginContainer/MainVBox/HeaderVBox/HeaderHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="TitleLabel" type="Label" parent="MarginContainer/MainVBox/HeaderVBox/HeaderHBox/TitleVBox"]
+unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_colors/font_color = Color(0.12, 0.16, 0.22, 1)
 theme_override_font_sizes/font_size = 24
-text = "Discipleship Pathways Management (Real Life, Fellows, LEAD)"
+text = "Discipleship Pathways Management"
 autowrap_mode = 2
 
-[node name="SubtitleLabel" type="Label" parent="MarginContainer/MainVBox/HeaderVBox"]
+[node name="SubtitleLabel" type="Label" parent="MarginContainer/MainVBox/HeaderVBox/HeaderHBox/TitleVBox"]
+unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_colors/font_color = Color(0.35, 0.42, 0.52, 1)
-theme_override_font_sizes/font_size = 15
-text = "Manage constituent track enrollments, certificate completions, current academic years, and milestone progress."
+theme_override_font_sizes/font_size = 14
+text = "Manage annual Fellows & LEAD formation programs, rosters, checklist requirements, and linked sessions."
 autowrap_mode = 2
 
-[node name="ControlCard" type="PanelContainer" parent="MarginContainer/MainVBox"]
+[node name="BtnLegacyFallback" type="Button" parent="MarginContainer/MainVBox/HeaderVBox/HeaderHBox"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(220, 38)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "⏳ Open Legacy Pathways Matrix"
+
+[node name="ContextCard" type="PanelContainer" parent="MarginContainer/MainVBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ContextMargin" type="MarginContainer" parent="MarginContainer/MainVBox/ContextCard"]
+layout_mode = 2
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 12
+
+[node name="ContextHBox" type="HBoxContainer" parent="MarginContainer/MainVBox/ContextCard/ContextMargin"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="YearDropdown" type="OptionButton" parent="MarginContainer/MainVBox/ContextCard/ContextMargin/ContextHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(200, 38)
+layout_mode = 2
+
+[node name="PathwaySelectorHBox" type="HBoxContainer" parent="MarginContainer/MainVBox/ContextCard/ContextMargin/ContextHBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="BtnPathwayFellows" type="Button" parent="MarginContainer/MainVBox/ContextCard/ContextMargin/ContextHBox/PathwaySelectorHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(130, 38)
+layout_mode = 2
+text = "🎓 Fellows"
+
+[node name="BtnPathwayLead" type="Button" parent="MarginContainer/MainVBox/ContextCard/ContextMargin/ContextHBox/PathwaySelectorHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(130, 38)
+layout_mode = 2
+text = "⚡ LEAD"
+
+[node name="Spacer" type="Control" parent="MarginContainer/MainVBox/ContextCard/ContextMargin/ContextHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="BtnCreateProgram" type="Button" parent="MarginContainer/MainVBox/ContextCard/ContextMargin/ContextHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(200, 38)
+layout_mode = 2
+text = "+ Create Annual Program"
+
+[node name="OverviewHBox" type="HBoxContainer" parent="MarginContainer/MainVBox"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="StatCardTotal" type="PanelContainer" parent="MarginContainer/MainVBox/OverviewHBox"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="ControlMargin" type="MarginContainer" parent="MarginContainer/MainVBox/ControlCard"]
+[node name="M" type="MarginContainer" parent="MarginContainer/MainVBox/OverviewHBox/StatCardTotal"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10
+
+[node name="V" type="VBoxContainer" parent="MarginContainer/MainVBox/OverviewHBox/StatCardTotal/M"]
+layout_mode = 2
+
+[node name="Lbl" type="Label" parent="MarginContainer/MainVBox/OverviewHBox/StatCardTotal/M/V"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.85, 0.9, 0.98, 1)
+theme_override_font_sizes/font_size = 12
+text = "PARTICIPANTS"
+
+[node name="StatLblTotal" type="Label" parent="MarginContainer/MainVBox/OverviewHBox/StatCardTotal/M/V"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+text = "0 Enrolled"
+
+[node name="StatCardTracks" type="PanelContainer" parent="MarginContainer/MainVBox/OverviewHBox"]
+unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
+
+[node name="M" type="MarginContainer" parent="MarginContainer/MainVBox/OverviewHBox/StatCardTracks"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10
+
+[node name="V" type="VBoxContainer" parent="MarginContainer/MainVBox/OverviewHBox/StatCardTracks/M"]
+layout_mode = 2
+
+[node name="Lbl" type="Label" parent="MarginContainer/MainVBox/OverviewHBox/StatCardTracks/M/V"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.85, 0.9, 0.98, 1)
+theme_override_font_sizes/font_size = 12
+text = "TRACK DISTRIBUTION"
+
+[node name="StatLblTracks" type="Label" parent="MarginContainer/MainVBox/OverviewHBox/StatCardTracks/M/V"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "0 Standard • 0 Cert"
+
+[node name="StatCardStandings" type="PanelContainer" parent="MarginContainer/MainVBox/OverviewHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="M" type="MarginContainer" parent="MarginContainer/MainVBox/OverviewHBox/StatCardStandings"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10
+
+[node name="V" type="VBoxContainer" parent="MarginContainer/MainVBox/OverviewHBox/StatCardStandings/M"]
+layout_mode = 2
+
+[node name="Lbl" type="Label" parent="MarginContainer/MainVBox/OverviewHBox/StatCardStandings/M/V"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.85, 0.9, 0.98, 1)
+theme_override_font_sizes/font_size = 12
+text = "STANDINGS BREAKDOWN"
+
+[node name="StatLblStandings" type="Label" parent="MarginContainer/MainVBox/OverviewHBox/StatCardStandings/M/V"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "Y1:0 | Y2:0 | Y3:0 | Y4:0"
+
+[node name="StatCardReqs" type="PanelContainer" parent="MarginContainer/MainVBox/OverviewHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="M" type="MarginContainer" parent="MarginContainer/MainVBox/OverviewHBox/StatCardReqs"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10
+
+[node name="V" type="VBoxContainer" parent="MarginContainer/MainVBox/OverviewHBox/StatCardReqs/M"]
+layout_mode = 2
+
+[node name="Lbl" type="Label" parent="MarginContainer/MainVBox/OverviewHBox/StatCardReqs/M/V"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.85, 0.9, 0.98, 1)
+theme_override_font_sizes/font_size = 12
+text = "CHECKLIST REQUIREMENTS"
+
+[node name="StatLblReqs" type="Label" parent="MarginContainer/MainVBox/OverviewHBox/StatCardReqs/M/V"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "0 Program Reqs"
+
+[node name="TabHBox" type="HBoxContainer" parent="MarginContainer/MainVBox"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="BtnTabParticipants" type="Button" parent="MarginContainer/MainVBox/TabHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+text = "👥 Participant Roster"
+
+[node name="BtnTabRequirements" type="Button" parent="MarginContainer/MainVBox/TabHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+text = "📋 Program Requirements"
+
+[node name="BtnTabSessions" type="Button" parent="MarginContainer/MainVBox/TabHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+text = "📅 Linked Sessions"
+
+[node name="BtnTabMigration" type="Button" parent="MarginContainer/MainVBox/TabHBox"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+text = "📦 Migration Review"
+
+[node name="WorkingPanel" type="PanelContainer" parent="MarginContainer/MainVBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="WorkingMargin" type="MarginContainer" parent="MarginContainer/MainVBox/WorkingPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 16
+
+[node name="ParticipantsPanel" type="VBoxContainer" parent="MarginContainer/MainVBox/WorkingPanel/WorkingMargin"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="FilterHBox" type="HBoxContainer" parent="MarginContainer/MainVBox/WorkingPanel/WorkingMargin/ParticipantsPanel"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="RosterSearchBox" type="LineEdit" parent="MarginContainer/MainVBox/WorkingPanel/WorkingMargin/ParticipantsPanel/FilterHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(220, 36)
+layout_mode = 2
+placeholder_text = "Search by participant name..."
+
+[node name="RosterTrackFilter" type="OptionButton" parent="MarginContainer/MainVBox/WorkingPanel/WorkingMargin/ParticipantsPanel/FilterHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(140, 36)
+layout_mode = 2
+
+[node name="RosterStandingFilter" type="OptionButton" parent="MarginContainer/MainVBox/WorkingPanel/WorkingMargin/ParticipantsPanel/FilterHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(140, 36)
+layout_mode = 2
+
+[node name="Spacer" type="Control" parent="MarginContainer/MainVBox/WorkingPanel/WorkingMargin/ParticipantsPanel/FilterHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="BtnExportRosterCsv" type="Button" parent="MarginContainer/MainVBox/WorkingPanel/WorkingMargin/ParticipantsPanel/FilterHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(160, 36)
+layout_mode = 2
+text = "📥 Export Roster CSV"
+
+[node name="BtnAddParticipant" type="Button" parent="MarginContainer/MainVBox/WorkingPanel/WorkingMargin/ParticipantsPanel/FilterHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(160, 36)
+layout_mode = 2
+text = "+ Add Participant"
+
+[node name="RosterScroll" type="ScrollContainer" parent="MarginContainer/MainVBox/WorkingPanel/WorkingMargin/ParticipantsPanel"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="RosterListVBox" type="VBoxContainer" parent="MarginContainer/MainVBox/WorkingPanel/WorkingMargin/ParticipantsPanel/RosterScroll"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="RosterEmptyLbl" type="Label" parent="MarginContainer/MainVBox/WorkingPanel/WorkingMargin/ParticipantsPanel/RosterScroll"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.5, 0.5, 0.5, 1)
+text = "No participants enrolled in this annual program yet."
+
+[node name="RequirementsPanel" type="VBoxContainer" parent="MarginContainer/MainVBox/WorkingPanel/WorkingMargin"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="ReqHeaderHBox" type="HBoxContainer" parent="MarginContainer/MainVBox/WorkingPanel/WorkingMargin/RequirementsPanel"]
+layout_mode = 2
+
+[node name="Lbl" type="Label" parent="MarginContainer/MainVBox/WorkingPanel/WorkingMargin/RequirementsPanel/ReqHeaderHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 16
+text = "Annual Program Checklist Requirements"
+
+[node name="BtnCreateRequirement" type="Button" parent="MarginContainer/MainVBox/WorkingPanel/WorkingMargin/RequirementsPanel/ReqHeaderHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(180, 36)
+layout_mode = 2
+text = "+ New Requirement"
+
+[node name="ReqsScroll" type="ScrollContainer" parent="MarginContainer/MainVBox/WorkingPanel/WorkingMargin/RequirementsPanel"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="ReqsListVBox" type="VBoxContainer" parent="MarginContainer/MainVBox/WorkingPanel/WorkingMargin/RequirementsPanel/ReqsScroll"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="ReqsEmptyLbl" type="Label" parent="MarginContainer/MainVBox/WorkingPanel/WorkingMargin/RequirementsPanel/ReqsScroll"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.5, 0.5, 0.5, 1)
+text = "No checklist requirements created for this program."
+
+[node name="SessionsPanel" type="VBoxContainer" parent="MarginContainer/MainVBox/WorkingPanel/WorkingMargin"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="SessHeaderHBox" type="HBoxContainer" parent="MarginContainer/MainVBox/WorkingPanel/WorkingMargin/SessionsPanel"]
+layout_mode = 2
+
+[node name="Lbl" type="Label" parent="MarginContainer/MainVBox/WorkingPanel/WorkingMargin/SessionsPanel/SessHeaderHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 16
+text = "Linked Program Sessions"
+
+[node name="BtnLinkSession" type="Button" parent="MarginContainer/MainVBox/WorkingPanel/WorkingMargin/SessionsPanel/SessHeaderHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(180, 36)
+layout_mode = 2
+text = "+ Link Session"
+
+[node name="SessionsScroll" type="ScrollContainer" parent="MarginContainer/MainVBox/WorkingPanel/WorkingMargin/SessionsPanel"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="SessionsListVBox" type="VBoxContainer" parent="MarginContainer/MainVBox/WorkingPanel/WorkingMargin/SessionsPanel/SessionsScroll"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="SessionsEmptyLbl" type="Label" parent="MarginContainer/MainVBox/WorkingPanel/WorkingMargin/SessionsPanel/SessionsScroll"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.5, 0.5, 0.5, 1)
+text = "No sessions linked to this program."
+
+[node name="MigrationPanel" type="VBoxContainer" parent="MarginContainer/MainVBox/WorkingPanel/WorkingMargin"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="MigrationHeaderHBox" type="HBoxContainer" parent="MarginContainer/MainVBox/WorkingPanel/WorkingMargin/MigrationPanel"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="BtnImportStaging" type="Button" parent="MarginContainer/MainVBox/WorkingPanel/WorkingMargin/MigrationPanel/MigrationHeaderHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(200, 36)
+layout_mode = 2
+text = "📥 Import Legacy to Staging"
+
+[node name="BtnDryRunAudit" type="Button" parent="MarginContainer/MainVBox/WorkingPanel/WorkingMargin/MigrationPanel/MigrationHeaderHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(160, 36)
+layout_mode = 2
+text = "🔍 Run Dry-Run Audit"
+
+[node name="Spacer" type="Control" parent="MarginContainer/MainVBox/WorkingPanel/WorkingMargin/MigrationPanel/MigrationHeaderHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="StagingSummaryLbl" type="Label" parent="MarginContainer/MainVBox/WorkingPanel/WorkingMargin/MigrationPanel/MigrationHeaderHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.4, 0.45, 0.55, 1)
+text = "Staging: 0 Records"
+
+[node name="StagingScroll" type="ScrollContainer" parent="MarginContainer/MainVBox/WorkingPanel/WorkingMargin/MigrationPanel"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="StagingListVBox" type="VBoxContainer" parent="MarginContainer/MainVBox/WorkingPanel/WorkingMargin/MigrationPanel/StagingScroll"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="StagingEmptyLbl" type="Label" parent="MarginContainer/MainVBox/WorkingPanel/WorkingMargin/MigrationPanel/StagingScroll"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.5, 0.5, 0.5, 1)
+text = "No staged legacy records. Click 'Import Legacy to Staging' above to populate staging."
+
+[node name="LegacyContainer" type="VBoxContainer" parent="MarginContainer/MainVBox"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="LegacyTitleLbl" type="Label" parent="MarginContainer/MainVBox/LegacyContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.8, 0.4, 0.1, 1)
+theme_override_font_sizes/font_size = 16
+text = "⏳ Legacy Pathways Matrix"
+
+[node name="LegacySubtitleLbl" type="Label" parent="MarginContainer/MainVBox/LegacyContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.45, 0.5, 0.58, 1)
+theme_override_font_sizes/font_size = 13
+text = "This legacy Pathways workspace remains available temporarily while the Unified Pathways workspace completes migration."
+
+[node name="ControlCard" type="PanelContainer" parent="MarginContainer/MainVBox/LegacyContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ControlMargin" type="MarginContainer" parent="MarginContainer/MainVBox/LegacyContainer/ControlCard"]
+layout_mode = 2
 theme_override_constants/margin_left = 18
 theme_override_constants/margin_top = 16
 theme_override_constants/margin_right = 18
 theme_override_constants/margin_bottom = 16
 
-[node name="ControlVBox" type="VBoxContainer" parent="MarginContainer/MainVBox/ControlCard/ControlMargin"]
+[node name="ControlVBox" type="VBoxContainer" parent="MarginContainer/MainVBox/LegacyContainer/ControlCard/ControlMargin"]
 layout_mode = 2
-size_flags_horizontal = 3
 theme_override_constants/separation = 12
 
-[node name="PersonHBox" type="HBoxContainer" parent="MarginContainer/MainVBox/ControlCard/ControlMargin/ControlVBox"]
+[node name="PersonHBox" type="HBoxContainer" parent="MarginContainer/MainVBox/LegacyContainer/ControlCard/ControlMargin/ControlVBox"]
 layout_mode = 2
-size_flags_horizontal = 3
 theme_override_constants/separation = 12
 
-[node name="PersonDropdown" type="OptionButton" parent="MarginContainer/MainVBox/ControlCard/ControlMargin/ControlVBox/PersonHBox"]
+[node name="PersonDropdown" type="OptionButton" parent="MarginContainer/MainVBox/LegacyContainer/ControlCard/ControlMargin/ControlVBox/PersonHBox"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 40)
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_font_sizes/font_size = 14
 
-[node name="BtnSavePathway" type="Button" parent="MarginContainer/MainVBox/ControlCard/ControlMargin/ControlVBox/PersonHBox"]
+[node name="BtnSavePathway" type="Button" parent="MarginContainer/MainVBox/LegacyContainer/ControlCard/ControlMargin/ControlVBox/PersonHBox"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(180, 40)
 layout_mode = 2
-theme_override_font_sizes/font_size = 14
-text = "💾 Save Enrollment"
+text = "💾 Save Legacy Matrix"
 
-[node name="TracksHFlow" type="HFlowContainer" parent="MarginContainer/MainVBox/ControlCard/ControlMargin/ControlVBox"]
+[node name="TracksHFlow" type="HFlowContainer" parent="MarginContainer/MainVBox/LegacyContainer/ControlCard/ControlMargin/ControlVBox"]
 layout_mode = 2
-size_flags_horizontal = 3
 theme_override_constants/h_separation = 16
 theme_override_constants/v_separation = 8
 
-[node name="ChkRealLife" type="CheckBox" parent="MarginContainer/MainVBox/ControlCard/ControlMargin/ControlVBox/TracksHFlow"]
+[node name="ChkRealLife" type="CheckBox" parent="MarginContainer/MainVBox/LegacyContainer/ControlCard/ControlMargin/ControlVBox/TracksHFlow"]
 unique_name_in_owner = true
 layout_mode = 2
-theme_override_font_sizes/font_size = 14
 text = "🌱 Real Life"
 
-[node name="ChkFellows" type="CheckBox" parent="MarginContainer/MainVBox/ControlCard/ControlMargin/ControlVBox/TracksHFlow"]
+[node name="ChkFellows" type="CheckBox" parent="MarginContainer/MainVBox/LegacyContainer/ControlCard/ControlMargin/ControlVBox/TracksHFlow"]
 unique_name_in_owner = true
 layout_mode = 2
-theme_override_font_sizes/font_size = 14
 text = "🎓 Fellows"
 
-[node name="ChkFellowsCert" type="CheckBox" parent="MarginContainer/MainVBox/ControlCard/ControlMargin/ControlVBox/TracksHFlow"]
+[node name="ChkFellowsCert" type="CheckBox" parent="MarginContainer/MainVBox/LegacyContainer/ControlCard/ControlMargin/ControlVBox/TracksHFlow"]
 unique_name_in_owner = true
 layout_mode = 2
-theme_override_font_sizes/font_size = 14
 text = "📜 Fellows Cert"
 
-[node name="ChkLead" type="CheckBox" parent="MarginContainer/MainVBox/ControlCard/ControlMargin/ControlVBox/TracksHFlow"]
+[node name="ChkLead" type="CheckBox" parent="MarginContainer/MainVBox/LegacyContainer/ControlCard/ControlMargin/ControlVBox/TracksHFlow"]
 unique_name_in_owner = true
 layout_mode = 2
-theme_override_font_sizes/font_size = 14
-text = "⚡ LEAD Track"
+text = "⚡ LEAD"
 
-[node name="ChkLeadCert" type="CheckBox" parent="MarginContainer/MainVBox/ControlCard/ControlMargin/ControlVBox/TracksHFlow"]
+[node name="ChkLeadCert" type="CheckBox" parent="MarginContainer/MainVBox/LegacyContainer/ControlCard/ControlMargin/ControlVBox/TracksHFlow"]
 unique_name_in_owner = true
 layout_mode = 2
-theme_override_font_sizes/font_size = 14
 text = "📜 LEAD Cert"
 
-[node name="LeadYearDropdown" type="OptionButton" parent="MarginContainer/MainVBox/ControlCard/ControlMargin/ControlVBox/TracksHFlow"]
+[node name="LeadYearDropdown" type="OptionButton" parent="MarginContainer/MainVBox/LegacyContainer/ControlCard/ControlMargin/ControlVBox/TracksHFlow"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(140, 40)
 layout_mode = 2
-theme_override_font_sizes/font_size = 14
 
-[node name="RosterCard" type="PanelContainer" parent="MarginContainer/MainVBox"]
+[node name="RosterCard" type="PanelContainer" parent="MarginContainer/MainVBox/LegacyContainer"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3

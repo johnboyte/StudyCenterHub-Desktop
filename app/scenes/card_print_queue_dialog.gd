@@ -324,10 +324,16 @@ func _preview_card_for_person(person_id: int) -> void:
 	var p_res = db.execute("SELECT * FROM people WHERE id = ? LIMIT 1;", [person_id])
 	if p_res["success"] and p_res["data"].size() > 0:
 		var p = p_res["data"][0]
-		var token = ""
-		var qr_res = db.execute("SELECT token_hint FROM participant_qr_credentials WHERE person_id = ? AND status = 'active' LIMIT 1;", [person_id])
-		if qr_res["success"] and qr_res["data"].size() > 0:
-			token = str(qr_res["data"][0].get("token_hint", ""))
+		var QRCredentialServiceScript = load("res://src/domain/security/qr_credential_service.gd")
+		var cred_svc = QRCredentialServiceScript.new(db)
+		var token = cred_svc.get_active_raw_token(person_id)
+		if token == "":
+			var err_dialog = AcceptDialog.new()
+			err_dialog.title = "OS Keychain Error"
+			err_dialog.dialog_text = "This credential cannot be printed on this device because the OS Keychain entry is unavailable (it may have been issued on another computer).\n\nPlease replace the credential on this computer to issue a new pass."
+			add_child(err_dialog)
+			err_dialog.popup_centered()
+			return
 		_open_card_preview(p, token)
 
 func _open_card_preview(person_data: Dictionary, token: String) -> void:

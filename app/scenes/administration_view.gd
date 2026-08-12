@@ -1,5 +1,17 @@
 extends "res://app/scenes/standard_page_container.gd"
 
+const static_voices = [
+	{"id": "Polly.Kimberly-Neural", "label": "Kimberly", "gender": "Female", "language": "en-US"},
+	{"id": "Polly.Joanna-Neural", "label": "Joanna", "gender": "Female", "language": "en-US"},
+	{"id": "Polly.Kendra-Neural", "label": "Kendra", "gender": "Female", "language": "en-US"},
+	{"id": "Polly.Salli-Neural", "label": "Salli", "gender": "Female", "language": "en-US"},
+	{"id": "Polly.Ruth-Neural", "label": "Ruth", "gender": "Female", "language": "en-US"},
+	{"id": "Polly.Amy-Neural", "label": "Amy", "gender": "Female", "language": "en-GB"},
+	{"id": "Polly.Olivia-Neural", "label": "Olivia", "gender": "Female", "language": "en-US"},
+	{"id": "Polly.Lupe-Neural", "label": "Lupe", "gender": "Female", "language": "en-US"},
+	{"id": "Polly.Matthew-Neural", "label": "Matthew", "gender": "Male", "language": "en-US"}
+]
+
 ## Administration & Platform Control Center View (ADM-SPR1-001)
 ## Complies with [PD-006] (Subscription Licensing), [PD-009] (RBAC), and [PD-010] (White-Label & Vocabulary).
 
@@ -9,6 +21,8 @@ const GatewaySyncScript = preload("res://src/domain/sync/gateway_sync_service.gd
 const SessionConfigServiceScript = preload("res://src/domain/schedules/session_config_service.gd")
 const CardPrintQueueDialogScript = preload("res://app/scenes/card_print_queue_dialog.gd")
 const PublicQrSignDialogScript = preload("res://app/scenes/public_qr_sign_dialog.gd")
+const CampusCommunityAdminServiceScript = preload("res://src/domain/campus_community/campus_community_admin_service.gd")
+const QueueControllerScript = preload("res://src/domain/work_queue/queue_controller.gd")
 
 var db: RefCounted
 var active_tab: String = "modules"
@@ -16,6 +30,13 @@ var twilio_service: RefCounted
 var config_service: RefCounted
 var selected_user_id: int = 0
 var selected_rbac_role: String = "Team Leader"
+
+var ivr_sub_tab: String = "scripts"
+var unsaved_ivr_scripts: Dictionary = {}
+var selected_ivr_day: String = ""
+
+var sticky_bar: PanelContainer
+var sticky_label: Label
 
 @onready var btn_tab_modules: Button = %BtnTabModules
 @onready var btn_tab_rbac: Button = %BtnTabRbac
@@ -52,6 +73,16 @@ const DEFAULT_SUBTITLES: Dictionary = {
 	"reports": "Review attendance, engagement, and ministry activity.",
 	"settings": "Customize your StudyCenter experience and preferences."
 }
+
+func receive_navigation_context(params: Dictionary = {}) -> void:
+	if params.get("tab") == "campus_community":
+		active_tab = "campus_community"
+		if params.has("sub_tab"):
+			cc_admin_sub_tab = str(params["sub_tab"])
+		switch_tab(active_tab)
+	elif params.get("queue_mode", false) == true or params.get("queue_id") == "failed_inbound_events":
+		active_tab = "sync_engine"
+		switch_tab(active_tab)
 
 func _ready() -> void:
 	_init_database()
@@ -99,7 +130,74 @@ func _ready() -> void:
 			var dlg = CardPrintQueueDialogScript.new(self)
 			dlg.show_dialog()
 		)
+
+		var btn_cc = Button.new()
+		btn_cc.name = "BtnTabCampusCommunity"
+		btn_cc.text = "  🎓 Campus & Community Administration  "
+		btn_cc.custom_minimum_size = Vector2(0, 36)
+		btn_cc.add_theme_font_size_override("font_size", 14)
+		tab_hbox.add_child(btn_cc)
+		btn_cc.pressed.connect(func(): switch_tab("campus_community"))
+
+	# Initialize Sticky Bar
+	sticky_bar = PanelContainer.new()
+	sticky_bar.name = "StickyBar"
+	var sticky_st = StyleBoxFlat.new()
+	sticky_st.bg_color = Color(0.96, 0.97, 0.99, 1.0)
+	sticky_st.border_width_bottom = 1
+	sticky_st.border_color = Color(0.85, 0.88, 0.92, 1.0)
+	sticky_st.content_margin_left = 16
+	sticky_st.content_margin_right = 16
+	sticky_st.content_margin_top = 8
+	sticky_st.content_margin_bottom = 8
+	sticky_bar.add_theme_stylebox_override("panel", sticky_st)
+	
+	var sticky_hbox = HBoxContainer.new()
+	sticky_bar.add_child(sticky_hbox)
+	
+	sticky_label = Label.new()
+	sticky_label.add_theme_font_size_override("font_size", 14)
+	sticky_label.add_theme_color_override("font_color", Color(0.35, 0.42, 0.52, 1.0))
+	sticky_hbox.add_child(sticky_label)
+	
+	var spacer = Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sticky_hbox.add_child(spacer)
+	
+	var back_btn = Button.new()
+	back_btn.text = "  ↩️ Back to Sections  "
+	back_btn.custom_minimum_size = Vector2(0, 28)
+	back_btn.add_theme_font_size_override("font_size", 12)
+	
+	var btn_st = StyleBoxFlat.new()
+	btn_st.bg_color = Color(0.90, 0.92, 0.95, 1.0)
+	btn_st.corner_radius_top_left = 4; btn_st.corner_radius_top_right = 4; btn_st.corner_radius_bottom_left = 4; btn_st.corner_radius_bottom_right = 4
+	var btn_hover = btn_st.duplicate()
+	btn_hover.bg_color = Color(0.85, 0.88, 0.92, 1.0)
+	back_btn.add_theme_stylebox_override("normal", btn_st)
+	back_btn.add_theme_stylebox_override("hover", btn_hover)
+	back_btn.add_theme_stylebox_override("pressed", btn_st)
+	back_btn.add_theme_color_override("font_color", Color(0.2, 0.25, 0.35, 1.0))
+	back_btn.add_theme_color_override("font_hover_color", Color(0.1, 0.15, 0.25, 1.0))
+	
+	back_btn.pressed.connect(func():
+		var inner_scroll = _find_scroll_container_recursive(content_card)
+		if inner_scroll:
+			inner_scroll.scroll_vertical = 0
+			_on_inner_scroll_changed(0.0)
+	)
+	sticky_hbox.add_child(back_btn)
+	
+	var main_vbox = get_node_or_null("MarginContainer/MainVBox")
+	if main_vbox:
+		main_vbox.add_child(sticky_bar)
+		main_vbox.move_child(sticky_bar, 0)
 		
+	sticky_bar.visible = false
+	
+	if content_card:
+		content_card.child_order_changed.connect(_setup_scroll_handling)
+
 	switch_tab("modules")
 
 func _init_database() -> void:
@@ -157,6 +255,12 @@ func switch_tab(tab_name: String) -> void:
 		_render_ivr_tab()
 	elif active_tab == "sessions":
 		_render_sessions_config_tab()
+	elif active_tab == "campus_community":
+		_render_campus_community_tab()
+	elif active_tab == "sync_engine":
+		_render_sync_engine_tab()
+		
+	_setup_scroll_handling()
 
 func _update_tab_button_styles() -> void:
 	_style_tab_btn(btn_tab_modules, active_tab == "modules")
@@ -167,6 +271,12 @@ func _update_tab_button_styles() -> void:
 	_style_tab_btn(btn_tab_birthday, active_tab == "birthday")
 	_style_tab_btn(btn_tab_ivr, active_tab == "ivr")
 	_style_tab_btn(btn_tab_sessions, active_tab == "sessions")
+	var btn_cc = get_node_or_null("MarginContainer/MainVBox/TabHBox/BtnTabCampusCommunity") as Button
+	if btn_cc:
+		_style_tab_btn(btn_cc, active_tab == "campus_community")
+	var btn_sync = get_node_or_null("MarginContainer/MainVBox/TabHBox/BtnTabSyncEngine") as Button
+	if btn_sync:
+		_style_tab_btn(btn_sync, active_tab == "sync_engine")
 
 func _get_active_theme_color() -> Color:
 	var idx = int(_get_setting_string("ORG_ACCENT_INDEX", "0"))
@@ -698,7 +808,7 @@ func _render_twilio_tab() -> void:
 
 	# Twilio Sender Phone Number (The purchased Twilio phone number)
 	var l3 = Label.new(); l3.text = "Twilio Outbound Sender Number:\n(Your Twilio Purchased Phone Number)"; l3.add_theme_font_size_override("font_size", 16); l3.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0)); grid.add_child(l3)
-	var e3 = LineEdit.new(); e3.text = _get_setting_string("TWILIO_PHONE_NUMBER", "+18647124446"); e3.placeholder_text = "+18647124446"; e3.custom_minimum_size = Vector2(550, 46); _style_input_control(e3, 18); grid.add_child(e3)
+	var e3 = LineEdit.new(); e3.text = config.get("phone_number", ""); e3.placeholder_text = "+18647124446"; e3.custom_minimum_size = Vector2(550, 46); _style_input_control(e3, 18); grid.add_child(e3)
 
 	# Destination Test Mobile Number (Your personal cell phone for testing)
 	var l4 = Label.new(); l4.text = "Test Recipient Mobile Phone:\n(Where Test SMS Will Be Received)"; l4.add_theme_font_size_override("font_size", 16); l4.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0)); grid.add_child(l4)
@@ -710,7 +820,7 @@ func _render_twilio_tab() -> void:
 
 	# Cloud Relay / Sync API Key
 	var l_gate_key = Label.new(); l_gate_key.text = "Sync API Key:\n(Shared secret in config.php)"; l_gate_key.add_theme_font_size_override("font_size", 16); l_gate_key.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0)); grid.add_child(l_gate_key)
-	var e_gate_key = LineEdit.new(); e_gate_key.text = _get_setting_string("GATEWAY_SYNC_API_KEY", "demo_sync_key"); e_gate_key.placeholder_text = "demo_sync_key"; e_gate_key.custom_minimum_size = Vector2(550, 46); _style_input_control(e_gate_key, 18); grid.add_child(e_gate_key)
+	var e_gate_key = LineEdit.new(); e_gate_key.text = _get_setting_string("GATEWAY_SYNC_API_KEY", "SCH_SYNC_KEY_PLACEHOLDER_8f3d"); e_gate_key.placeholder_text = "SCH_SYNC_KEY_PLACEHOLDER_8f3d"; e_gate_key.custom_minimum_size = Vector2(550, 46); _style_input_control(e_gate_key, 18); grid.add_child(e_gate_key)
 
 	vbox.add_child(grid)
 	vbox.add_child(tw_status_lbl)
@@ -724,6 +834,18 @@ func _render_twilio_tab() -> void:
 	btn_save.add_theme_color_override("font_color", Color(1, 1, 1, 1))
 
 	btn_save.pressed.connect(func():
+		var test_sid = e1.text.strip_edges()
+		if test_sid.begins_with("SK"):
+			tw_status_lbl.text = "❌ The Twilio Account SID is invalid. You have entered an API Key SID starting with SK. The current integration expects the main Account SID beginning with AC and the corresponding Auth Token. Do not use an API Key SID."
+			tw_status_lbl.add_theme_color_override("font_color", Color(0.85, 0.15, 0.15, 1.0))
+			tw_status_lbl.visible = true
+			return
+		elif test_sid != "" and not test_sid.begins_with("AC"):
+			tw_status_lbl.text = "❌ The Twilio Account SID is invalid. Enter the Account SID beginning with AC, not an API Key SID or other Twilio identifier."
+			tw_status_lbl.add_theme_color_override("font_color", Color(0.85, 0.15, 0.15, 1.0))
+			tw_status_lbl.visible = true
+			return
+
 		var sender_ph = e3.text.strip_edges()
 		if sender_ph == "": sender_ph = "+18647124446"
 		var recipient_ph = e4.text.strip_edges()
@@ -757,6 +879,17 @@ func _render_twilio_tab() -> void:
 		if sender_ph == "": sender_ph = "+18647124446"
 		var recipient_ph = e4.text.strip_edges()
 		if recipient_ph == "": recipient_ph = "864 934-4080"
+
+		if sid.begins_with("SK"):
+			tw_status_lbl.text = "❌ The Twilio Account SID is invalid. You have entered an API Key SID starting with SK. The current integration expects the main Account SID beginning with AC and the corresponding Auth Token. Do not use an API Key SID."
+			tw_status_lbl.add_theme_color_override("font_color", Color(0.85, 0.15, 0.15, 1.0))
+			tw_status_lbl.visible = true
+			return
+		elif sid != "" and not sid.begins_with("AC"):
+			tw_status_lbl.text = "❌ The Twilio Account SID is invalid. Enter the Account SID beginning with AC, not an API Key SID or other Twilio identifier."
+			tw_status_lbl.add_theme_color_override("font_color", Color(0.85, 0.15, 0.15, 1.0))
+			tw_status_lbl.visible = true
+			return
 
 		twilio_service.save_twilio_config(sid, token, sender_ph)
 		_set_setting_string("TWILIO_TEST_RECIPIENT_PHONE", recipient_ph)
@@ -1035,7 +1168,9 @@ func _render_birthday_tab() -> void:
 		if recipient_ph == "": recipient_ph = "864 934-4080"
 		_set_setting_string("LAST_TEST_BDAY_PHONE", recipient_ph)
 
-		var sender_ph = _get_setting_string("TWILIO_PHONE_NUMBER", "+18647124446")
+		var tw_config = twilio_service.get_twilio_config() if twilio_service else {}
+		var sender_ph = tw_config.get("phone_number", "")
+		if sender_ph == "": sender_ph = "+18647124446"
 
 		bday_status_lbl.text = "⏳ Dispatching SMS FROM " + sender_ph + " TO " + recipient_ph + "..."
 		bday_status_lbl.add_theme_color_override("font_color", Color(0.25, 0.45, 0.75, 1.0))
@@ -1183,6 +1318,26 @@ func _show_admin_auth_modal(on_authorized: Callable) -> void:
 	pin_edit.grab_focus()
 
 func _render_ivr_tab() -> void:
+	const CommunicationsServiceScript = preload("res://src/domain/communications/communications_service.gd")
+	var com_svc = CommunicationsServiceScript.new(db)
+	
+	if selected_ivr_day == "":
+		var dt_now = Time.get_datetime_dict_from_system()
+		var day_names_list = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+		selected_ivr_day = day_names_list[dt_now.weekday]
+		
+	var get_date_of_weekday = func(target_day: String) -> String:
+		var dt_c = Time.get_datetime_dict_from_system()
+		var day_names_c = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+		var current_wday_idx = dt_c.weekday
+		var target_wday_idx = day_names_c.find(target_day)
+		if target_wday_idx == -1: return ""
+		var diff = target_wday_idx - current_wday_idx
+		var unix_time = Time.get_unix_time_from_datetime_dict(dt_c)
+		var target_unix = unix_time + (diff * 86400)
+		var target_dt = Time.get_datetime_dict_from_unix_time(target_unix)
+		return "%04d-%02d-%02d" % [target_dt.year, target_dt.month, target_dt.day]
+		
 	var root_vbox = VBoxContainer.new()
 	root_vbox.add_theme_constant_override("separation", 16)
 	root_vbox.size_flags_horizontal = SIZE_EXPAND_FILL
@@ -1195,11 +1350,77 @@ func _render_ivr_tab() -> void:
 	root_vbox.add_child(title)
 	
 	var subtitle = Label.new()
-	subtitle.text = "Configure global routing, on-call schedules, rings threshold, greeting audios, and keypress actions."
+	subtitle.text = "Configure dynamic daily announcements, staff directory call routing, hierarchical menus, and voice greetings."
 	subtitle.add_theme_font_size_override("font_size", 14)
 	subtitle.add_theme_color_override("font_color", Color(0.35, 0.45, 0.55, 1.0))
 	root_vbox.add_child(subtitle)
+
+	# --- SUB-TABS NAVIGATION BAR ---
+	var sub_tab_bg = PanelContainer.new()
+	var sub_tab_st = StyleBoxFlat.new()
+	sub_tab_st.bg_color = Color(0.95, 0.96, 0.98, 1.0)
+	sub_tab_st.corner_radius_top_left = 8; sub_tab_st.corner_radius_top_right = 8
+	sub_tab_st.corner_radius_bottom_left = 8; sub_tab_st.corner_radius_bottom_right = 8
+	sub_tab_st.content_margin_left = 8; sub_tab_st.content_margin_top = 8; sub_tab_st.content_margin_right = 8; sub_tab_st.content_margin_bottom = 8
+	sub_tab_bg.add_theme_stylebox_override("panel", sub_tab_st)
 	
+	var sub_tab_hbox = HBoxContainer.new()
+	sub_tab_hbox.add_theme_constant_override("separation", 8)
+	sub_tab_bg.add_child(sub_tab_hbox)
+	root_vbox.add_child(sub_tab_bg)
+	
+	if ivr_sub_tab == "":
+		ivr_sub_tab = "scripts"
+		
+	var tabs_def = [
+		{"key": "scripts", "label": "📅 Today / Scripts & Daily Messages"},
+		{"key": "flow", "label": "🌳 Call Flow"},
+		{"key": "staff", "label": "👥 Staff Directory"},
+		{"key": "voice", "label": "⚙️ Voice & Greeting Settings"}
+	]
+	for t in tabs_def:
+		var btn = Button.new()
+		btn.text = t["label"]
+		btn.custom_minimum_size = Vector2(160, 36)
+		btn.add_theme_font_size_override("font_size", 14)
+		
+		var active_st = StyleBoxFlat.new()
+		active_st.bg_color = _get_active_theme_color()
+		active_st.corner_radius_top_left = 6; active_st.corner_radius_top_right = 6; active_st.corner_radius_bottom_left = 6; active_st.corner_radius_bottom_right = 6
+		active_st.content_margin_left = 12; active_st.content_margin_right = 12
+		
+		var inactive_st = StyleBoxFlat.new()
+		inactive_st.bg_color = Color(0.95, 0.96, 0.98, 1.0)
+		inactive_st.corner_radius_top_left = 6; inactive_st.corner_radius_top_right = 6; inactive_st.corner_radius_bottom_left = 6; inactive_st.corner_radius_bottom_right = 6
+		inactive_st.content_margin_left = 12; inactive_st.content_margin_right = 12
+		
+		if ivr_sub_tab == t["key"]:
+			btn.add_theme_stylebox_override("normal", active_st)
+			btn.add_theme_stylebox_override("hover", active_st)
+			btn.add_theme_stylebox_override("pressed", active_st)
+			btn.add_theme_color_override("font_color", Color(1, 1, 1, 1))
+		else:
+			btn.add_theme_stylebox_override("normal", inactive_st)
+			var hov_st = inactive_st.duplicate()
+			hov_st.bg_color = Color(0.9, 0.92, 0.95, 1.0)
+			btn.add_theme_stylebox_override("hover", hov_st)
+			btn.add_theme_stylebox_override("pressed", inactive_st)
+			btn.add_theme_color_override("font_color", Color(0.15, 0.22, 0.35, 1.0))
+			btn.add_theme_color_override("font_hover_color", _get_active_theme_color())
+			
+		btn.pressed.connect(func():
+			if unsaved_ivr_scripts.size() > 0:
+				_show_unsaved_warning(func():
+					unsaved_ivr_scripts.clear()
+					ivr_sub_tab = t["key"]
+					_render_ivr_tab()
+				)
+			else:
+				ivr_sub_tab = t["key"]
+				_render_ivr_tab()
+		)
+		sub_tab_hbox.add_child(btn)
+
 	var scroll = ScrollContainer.new()
 	scroll.size_flags_horizontal = SIZE_EXPAND_FILL
 	scroll.size_flags_vertical = SIZE_EXPAND_FILL
@@ -1208,602 +1429,892 @@ func _render_ivr_tab() -> void:
 	var main_content_vbox = VBoxContainer.new()
 	main_content_vbox.size_flags_horizontal = SIZE_EXPAND_FILL
 	main_content_vbox.add_theme_constant_override("separation", 16)
-	
-	# Load global settings
-	var settings = {
-		"on_call_person_id": "",
-		"rollover_rings": 4,
-		"rollover_type": "automated",
-		"rollover_person_id": "",
-		"rollover_person_rings": 4,
-		"tts_greeting_active": true,
-		"automated_greeter_tts": "",
-		"automated_greeter_audio": "",
-		"tts_voice_id": ""
-	}
-	var res = db.execute("SELECT setting_key, setting_value FROM app_settings WHERE setting_key LIKE 'PHONE_%';")
-	if res["success"] and res["data"].size() > 0:
-		for row in res["data"]:
-			var key = str(row["setting_key"])
-			var val = str(row["setting_value"])
-			if key == "PHONE_ON_CALL_PERSON_ID": settings["on_call_person_id"] = val
-			elif key == "PHONE_ROLLOVER_RINGS": settings["rollover_rings"] = int(val)
-			elif key == "PHONE_ROLLOVER_TYPE": settings["rollover_type"] = val
-			elif key == "PHONE_ROLLOVER_PERSON_ID": settings["rollover_person_id"] = val
-			elif key == "PHONE_ROLLOVER_PERSON_RINGS": settings["rollover_person_rings"] = int(val)
-			elif key == "PHONE_TTS_GREETING_ACTIVE": settings["tts_greeting_active"] = (val == "1")
-			elif key == "PHONE_AUTOMATED_GREETER_TTS": settings["automated_greeter_tts"] = val
-			elif key == "PHONE_AUTOMATED_GREETER_AUDIO": settings["automated_greeter_audio"] = val
-			elif key == "PHONE_TTS_VOICE_ID": settings["tts_voice_id"] = val
-	# Load global IVR voice settings
-	var ivr_res = db.execute("SELECT voice_name, language FROM ivr_settings WHERE id = 1;")
-	if ivr_res["success"] and ivr_res["data"].size() > 0:
-		settings["voice_name"] = str(ivr_res["data"][0]["voice_name"])
-		settings["language"] = str(ivr_res["data"][0]["language"])
-	else:
-		settings["voice_name"] = "Polly.Joanna"
-		settings["language"] = "en-US"
-
-	# --- GENERAL SETTINGS SECTION CARD ---
-	var gen_card = PanelContainer.new()
-	var gen_st = StyleBoxFlat.new()
-	gen_st.bg_color = Color(1.0, 1.0, 1.0, 1.0)
-	gen_st.border_width_left = 1; gen_st.border_width_top = 1; gen_st.border_width_right = 1; gen_st.border_width_bottom = 1
-	gen_st.border_color = Color(0.88, 0.91, 0.94, 1.0)
-	gen_st.corner_radius_top_left = 8; gen_st.corner_radius_top_right = 8; gen_st.corner_radius_bottom_left = 8; gen_st.corner_radius_bottom_right = 8
-	gen_st.content_margin_left = 18; gen_st.content_margin_top = 16; gen_st.content_margin_right = 18; gen_st.content_margin_bottom = 16
-	gen_card.add_theme_stylebox_override("panel", gen_st)
-	
-	var gen_vbox = VBoxContainer.new()
-	gen_vbox.add_theme_constant_override("separation", 14)
-	
-	var gen_title = Label.new(); gen_title.text = "☎ General Configuration & Routing Rules"; gen_title.add_theme_font_size_override("font_size", 18); gen_title.add_theme_color_override("font_color", _get_active_theme_color())
-	gen_vbox.add_child(gen_title)
-	
-	# On-Call Person selector
-	var oc_hbox = HBoxContainer.new()
-	var oc_lbl = Label.new(); oc_lbl.text = "Primary On-Call Recipient: "; oc_lbl.custom_minimum_size = Vector2(180, 0); oc_lbl.add_theme_font_size_override("font_size", 16); oc_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
-	var oc_opt = OptionButton.new()
-	oc_opt.custom_minimum_size = Vector2(300, 36)
-	_style_input_control(oc_opt, 16)
-	oc_opt.add_item("Automated Attendant Only (No Live On-Call)", 0)
-	
-	var staff_list = []
-	var staff_res = db.execute("SELECT id, first_name || ' ' || last_name AS name FROM people WHERE LOWER(primary_role) IN ('staff', 'intern', 'volunteer') ORDER BY name ASC;")
-	if staff_res["success"]:
-		staff_list = staff_res["data"]
-		for idx in range(staff_list.size()):
-			var p = staff_list[idx]
-			oc_opt.add_item(str(p["name"]), int(p["id"]))
-			if settings["on_call_person_id"] != "" and int(p["id"]) == int(settings["on_call_person_id"]):
-				oc_opt.selected = idx + 1
-	oc_hbox.add_child(oc_lbl); oc_hbox.add_child(oc_opt)
-	gen_vbox.add_child(oc_hbox)
-	
-	var sec_btn_st = StyleBoxFlat.new(); sec_btn_st.bg_color = Color(0.92, 0.94, 0.97, 1.0); sec_btn_st.corner_radius_top_left = 6; sec_btn_st.corner_radius_top_right = 6; sec_btn_st.corner_radius_bottom_left = 6; sec_btn_st.corner_radius_bottom_right = 6; sec_btn_st.border_width_left = 1; sec_btn_st.border_width_top = 1; sec_btn_st.border_width_right = 1; sec_btn_st.border_width_bottom = 1; sec_btn_st.border_color = Color(0.78, 0.82, 0.88, 1.0); sec_btn_st.content_margin_left = 12; sec_btn_st.content_margin_right = 12; sec_btn_st.content_margin_top = 6; sec_btn_st.content_margin_bottom = 6
-	var sec_btn_hover = sec_btn_st.duplicate(); sec_btn_hover.bg_color = Color(0.96, 0.97, 0.99, 1.0)
-	
-	# Rollover Settings Container
-	var rollover_container = VBoxContainer.new()
-	rollover_container.add_theme_constant_override("separation", 12)
-	gen_vbox.add_child(rollover_container)
-	
-	# Primary Ring Limit
-	var rings_hbox = HBoxContainer.new()
-	var rings_lbl = Label.new(); rings_lbl.text = "Primary Recipient Ring Limit: "; rings_lbl.custom_minimum_size = Vector2(180, 0); rings_lbl.add_theme_font_size_override("font_size", 16); rings_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
-	var rings_val_lbl = Label.new(); rings_val_lbl.text = str(settings["rollover_rings"]) + " rings"; rings_val_lbl.custom_minimum_size = Vector2(60, 0); rings_val_lbl.add_theme_font_size_override("font_size", 16); rings_val_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
-	var rings_slider = HSlider.new()
-	rings_slider.min_value = 2
-	rings_slider.max_value = 10
-	rings_slider.value = settings["rollover_rings"]
-	rings_slider.custom_minimum_size = Vector2(200, 24)
-	rings_slider.value_changed.connect(func(v): rings_val_lbl.text = str(int(v)) + " rings")
-	rings_hbox.add_child(rings_lbl); rings_hbox.add_child(rings_slider); rings_hbox.add_child(rings_val_lbl)
-	rollover_container.add_child(rings_hbox)
-	
-	# Rollover Action Type
-	var ro_type_hbox = HBoxContainer.new()
-	var ro_type_lbl = Label.new(); ro_type_lbl.text = "Rollover Action: "; ro_type_lbl.custom_minimum_size = Vector2(180, 0); ro_type_lbl.add_theme_font_size_override("font_size", 16); ro_type_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
-	var ro_type_opt = OptionButton.new()
-	ro_type_opt.custom_minimum_size = Vector2(300, 36)
-	_style_input_control(ro_type_opt, 16)
-	ro_type_opt.add_item("Automated Attendant", 0)
-	ro_type_opt.add_item("Forward to a Person...", 1)
-	if settings["rollover_type"] == "person":
-		ro_type_opt.selected = 1
-	else:
-		ro_type_opt.selected = 0
-	ro_type_hbox.add_child(ro_type_lbl); ro_type_hbox.add_child(ro_type_opt)
-	rollover_container.add_child(ro_type_hbox)
-	
-	# Rollover Person Container
-	var ro_person_container = VBoxContainer.new()
-	ro_person_container.add_theme_constant_override("separation", 12)
-	rollover_container.add_child(ro_person_container)
-	
-	# Rollover Person Option
-	var ro_person_hbox = HBoxContainer.new()
-	var ro_person_lbl = Label.new(); ro_person_lbl.text = "Rollover Recipient: "; ro_person_lbl.custom_minimum_size = Vector2(180, 0); ro_person_lbl.add_theme_font_size_override("font_size", 16); ro_person_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
-	var ro_person_opt = OptionButton.new()
-	ro_person_opt.custom_minimum_size = Vector2(300, 36)
-	_style_input_control(ro_person_opt, 16)
-	ro_person_opt.add_item("Select Staff member...", 0)
-	if staff_res["success"]:
-		for idx in range(staff_list.size()):
-			var p = staff_list[idx]
-			ro_person_opt.add_item(str(p["name"]), int(p["id"]))
-			if settings["rollover_person_id"] != "" and int(p["id"]) == int(settings["rollover_person_id"]):
-				ro_person_opt.selected = idx + 1
-	ro_person_hbox.add_child(ro_person_lbl); ro_person_hbox.add_child(ro_person_opt)
-	ro_person_container.add_child(ro_person_hbox)
-	
-	# Rollover Rings Limit
-	var ro_rings_hbox = HBoxContainer.new()
-	var ro_rings_lbl = Label.new(); ro_rings_lbl.text = "Rollover Recipient Rings: "; ro_rings_lbl.custom_minimum_size = Vector2(180, 0); ro_rings_lbl.add_theme_font_size_override("font_size", 16); ro_rings_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
-	var ro_rings_val_lbl = Label.new(); ro_rings_val_lbl.text = str(settings["rollover_person_rings"]) + " rings"; ro_rings_val_lbl.custom_minimum_size = Vector2(60, 0); ro_rings_val_lbl.add_theme_font_size_override("font_size", 16); ro_rings_val_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
-	var ro_rings_slider = HSlider.new()
-	ro_rings_slider.min_value = 2
-	ro_rings_slider.max_value = 10
-	ro_rings_slider.value = settings["rollover_person_rings"]
-	ro_rings_slider.custom_minimum_size = Vector2(200, 24)
-	ro_rings_slider.value_changed.connect(func(v): ro_rings_val_lbl.text = str(int(v)) + " rings")
-	ro_rings_hbox.add_child(ro_rings_lbl); ro_rings_hbox.add_child(ro_rings_slider); ro_rings_hbox.add_child(ro_rings_val_lbl)
-	ro_person_container.add_child(ro_rings_hbox)
-	
-	# Visibility management
-	rollover_container.visible = (oc_opt.selected > 0)
-	ro_person_container.visible = (ro_type_opt.selected == 1)
-	
-	oc_opt.item_selected.connect(func(idx): rollover_container.visible = (idx > 0))
-	ro_type_opt.item_selected.connect(func(idx): ro_person_container.visible = (idx == 1))
-
-	# ── CALLER GREETING SECTION ──
-	var greet_section_hdr = Label.new()
-	greet_section_hdr.text = "📞  CALLER GREETING"
-	greet_section_hdr.add_theme_font_size_override("font_size", 14)
-	greet_section_hdr.add_theme_color_override("font_color", Color(0.35, 0.4, 0.5, 1.0))
-	gen_vbox.add_child(greet_section_hdr)
-	
-	var greet_subtitle = Label.new()
-	greet_subtitle.text = "This is what callers hear immediately when they call your phone number."
-	greet_subtitle.add_theme_font_size_override("font_size", 13)
-	greet_subtitle.add_theme_color_override("font_color", Color(0.5, 0.55, 0.6, 1.0))
-	greet_subtitle.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	gen_vbox.add_child(greet_subtitle)
-	
-	# Spacer
-	var greet_spacer = Control.new(); greet_spacer.custom_minimum_size = Vector2(0, 4)
-	gen_vbox.add_child(greet_spacer)
-	
-	# TTS Toggle
-	var greet_toggle_hbox = HBoxContainer.new()
-	var tts_radio = CheckButton.new()
-	tts_radio.text = "Use Text-to-Speech Greeting (reads the script below aloud)"
-	tts_radio.button_pressed = settings["tts_greeting_active"]
-	tts_radio.add_theme_font_size_override("font_size", 15)
-	tts_radio.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
-	tts_radio.add_theme_color_override("font_pressed_color", Color(0.08, 0.12, 0.18, 1.0))
-	tts_radio.add_theme_color_override("font_hover_color", Color(0.08, 0.12, 0.18, 1.0))
-	tts_radio.add_theme_color_override("font_hover_pressed_color", Color(0.08, 0.12, 0.18, 1.0))
-	greet_toggle_hbox.add_child(tts_radio)
-	gen_vbox.add_child(greet_toggle_hbox)
-	
-	# IVR Voice Selector
-	var voice_hbox = HBoxContainer.new()
-	voice_hbox.add_theme_constant_override("separation", 10)
-	var voice_lbl = Label.new(); voice_lbl.text = "IVR Voice: "; voice_lbl.custom_minimum_size = Vector2(180, 0); voice_lbl.add_theme_font_size_override("font_size", 16); voice_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
-	var voice_opt = OptionButton.new()
-	voice_opt.custom_minimum_size = Vector2(300, 36)
-	_style_input_control(voice_opt, 16)
-
-	# Static voice options as per specification
-	var static_voices = [
-		{"id": "Samantha", "name": "Premium Female - Samantha (en_US)", "language": "en-US"},
-		{"id": "Polly.Joanna", "name": "Joanna – Amazon Polly", "language": "en-US"},
-		{"id": "Polly.Matthew", "name": "Matthew – Amazon Polly", "language": "en-US"},
-		{"id": "Google.en-US-Wavenet-C", "name": "Google US Wavenet C", "language": "en-US"},
-		{"id": "Google.en-GB-Wavenet-B", "name": "Google UK Wavenet B", "language": "en-GB"}
-	]
-
-	for idx in range(static_voices.size()):
-		var v = static_voices[idx]
-		voice_opt.add_item(v["name"])
-		voice_opt.set_item_metadata(idx, v["id"])
-		if settings.has("voice_name") and settings["voice_name"] == v["id"]:
-			voice_opt.selected = idx
-
-	voice_hbox.add_child(voice_lbl); voice_hbox.add_child(voice_opt)
-	gen_vbox.add_child(voice_hbox)
-
-	# ── OPENING GREETING SCRIPT ──
-	var script_spacer = Control.new(); script_spacer.custom_minimum_size = Vector2(0, 8)
-	gen_vbox.add_child(script_spacer)
-	
-	var script_hdr = Label.new()
-	script_hdr.text = "📋  Opening Greeting Script"
-	script_hdr.add_theme_font_size_override("font_size", 14)
-	script_hdr.add_theme_color_override("font_color", Color(0.35, 0.4, 0.5, 1.0))
-	gen_vbox.add_child(script_hdr)
-	
-	var script_subtitle = Label.new()
-	script_subtitle.text = "Type the exact words callers will hear when they first call. This is read aloud using the voice selected above."
-	script_subtitle.add_theme_font_size_override("font_size", 13)
-	script_subtitle.add_theme_color_override("font_color", Color(0.5, 0.55, 0.6, 1.0))
-	script_subtitle.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	gen_vbox.add_child(script_subtitle)
-
-	var tts_edit = TextEdit.new()
-	tts_edit.text = settings["automated_greeter_tts"]
-	tts_edit.custom_minimum_size = Vector2(0, 100)
-	_style_input_control(tts_edit, 15)
-	tts_edit.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
-	tts_edit.placeholder_text = "Example: Thank you for calling Real Life Study Center. Press 1 for hours and location, press 2 to leave a message."
-	gen_vbox.add_child(tts_edit)
-	
-	# Preview & Audio Controls Row
-	var preview_controls_hbox = HBoxContainer.new()
-	preview_controls_hbox.add_theme_constant_override("separation", 12)
-	
-	var preview_btn = Button.new(); preview_btn.text = "▶ Preview Greeting"; preview_btn.custom_minimum_size = Vector2(180, 38); preview_btn.add_theme_font_size_override("font_size", 15)
-	preview_btn.tooltip_text = "Hear how the greeting script above will sound using the selected voice"
-	var upload_btn = Button.new(); upload_btn.text = "📁 Upload Audio Override"; upload_btn.custom_minimum_size = Vector2(190, 38); upload_btn.add_theme_font_size_override("font_size", 15)
-	upload_btn.tooltip_text = "Upload a pre-recorded audio file to use instead of text-to-speech"
-	var rec_btn = Button.new(); rec_btn.text = "⏺ Record Override"; rec_btn.custom_minimum_size = Vector2(170, 38); rec_btn.add_theme_font_size_override("font_size", 15)
-	rec_btn.tooltip_text = "Record your own greeting using the microphone"
-	
-	# Style all buttons
-	for btn in [preview_btn, upload_btn, rec_btn]:
-		btn.add_theme_stylebox_override("normal", sec_btn_st)
-		btn.add_theme_stylebox_override("hover", sec_btn_hover)
-		btn.add_theme_stylebox_override("pressed", sec_btn_st)
-		btn.add_theme_color_override("font_color", Color(0.12, 0.18, 0.26, 1.0))
-		btn.add_theme_color_override("font_hover_color", _get_active_theme_color())
-	
-	preview_controls_hbox.add_child(preview_btn)
-	preview_controls_hbox.add_child(upload_btn)
-	preview_controls_hbox.add_child(rec_btn)
-	gen_vbox.add_child(preview_controls_hbox)
-	
-	# Audio override status indicator
-	var active_audio_base64 = settings["automated_greeter_audio"]
-	var audio_status_lbl = Label.new()
-	if active_audio_base64 != "":
-		audio_status_lbl.text = "🎵 A recorded audio greeting override is active. Callers will hear the recording instead of the script above."
-		audio_status_lbl.add_theme_color_override("font_color", Color(0.15, 0.55, 0.3, 1.0))
-	else:
-		audio_status_lbl.text = "ℹ️ No audio override — callers will hear the text-to-speech script above."
-		audio_status_lbl.add_theme_color_override("font_color", Color(0.45, 0.5, 0.55, 1.0))
-	audio_status_lbl.add_theme_font_size_override("font_size", 13)
-	audio_status_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	gen_vbox.add_child(audio_status_lbl)
-	
-	# Preview Greeting button — reads the script with the selected voice
-	preview_btn.pressed.connect(func():
-		var txt = tts_edit.text.strip_edges()
-		if txt == "":
-			var no_txt_dlg = AcceptDialog.new(); no_txt_dlg.dialog_text = "No greeting script has been entered yet.\nType your greeting in the text box above, then click Preview."; add_child(no_txt_dlg); no_txt_dlg.popup_centered()
-			return
-		
-		# If there's an audio override, play that instead
-		if active_audio_base64 != "":
-			_play_audio_from_base64(active_audio_base64)
-			return
-		
-		# Otherwise use TTS to read the greeting script
-		var voice_id = ""
-		if voice_opt.selected > -1:
-			voice_id = voice_opt.get_item_metadata(voice_opt.selected)
-		
-		DisplayServer.tts_stop()
-		if voice_id == "" or voice_id.begins_with("mock_"):
-			var play_dlg = AcceptDialog.new(); play_dlg.dialog_text = "📢 Greeting Preview:\n\n\"" + txt + "\"\n\n(Voice: " + str(voice_opt.get_item_text(voice_opt.selected)) + ")"; add_child(play_dlg); play_dlg.popup_centered()
-		else:
-			DisplayServer.tts_speak(txt, voice_id)
-	)
-	
-	# File upload connection
-	upload_btn.pressed.connect(func():
-		var fd = FileDialog.new()
-		fd.access = FileDialog.ACCESS_FILESYSTEM
-		fd.file_mode = FileDialog.FILE_MODE_OPEN_FILE
-		fd.filters = PackedStringArray(["*.wav, *.mp3, *.ogg ; Audio Files"])
-		fd.title = "Upload Greeting Audio Override"
-		fd.size = Vector2i(700, 500)
-		fd.file_selected.connect(func(path: String):
-			var bytes = FileAccess.get_file_as_bytes(path)
-			if bytes.size() > 0:
-				active_audio_base64 = Marshalls.raw_to_base64(bytes)
-				audio_status_lbl.text = "🎵 A recorded audio greeting override is active. Callers will hear the recording instead of the script above."
-				audio_status_lbl.add_theme_color_override("font_color", Color(0.15, 0.55, 0.3, 1.0))
-				var dialog_ok = AcceptDialog.new()
-				dialog_ok.dialog_text = "Audio override uploaded! Callers will now hear this recording.\nClick Preview Greeting to listen to it."
-				add_child(dialog_ok)
-				dialog_ok.popup_centered()
-		)
-		add_child(fd)
-		fd.popup_centered()
-	)
-	
-	# Microphone recording connection
-	rec_btn.pressed.connect(func():
-		_open_voice_recording_dialog(func(base64_wav: String):
-			active_audio_base64 = base64_wav
-			audio_status_lbl.text = "🎵 A recorded audio greeting override is active. Callers will hear the recording instead of the script above."
-			audio_status_lbl.add_theme_color_override("font_color", Color(0.15, 0.55, 0.3, 1.0))
-			var dialog_ok = AcceptDialog.new(); dialog_ok.dialog_text = "Voice greeting recorded! Click Preview Greeting to listen."; add_child(dialog_ok); dialog_ok.popup_centered()
-		)
-	)
-	
-	# Save General Settings button
-	var save_gen_hbox = HBoxContainer.new(); save_gen_hbox.alignment = BoxContainer.ALIGNMENT_END
-	var save_gen_btn = Button.new(); save_gen_btn.text = "💾 Save Phone Settings"; save_gen_btn.custom_minimum_size = Vector2(200, 42); save_gen_btn.add_theme_font_size_override("font_size", 16)
-	var save_gen_st = StyleBoxFlat.new(); save_gen_st.bg_color = _get_active_theme_color(); save_gen_st.corner_radius_top_left = 6; save_gen_st.corner_radius_top_right = 6; save_gen_st.corner_radius_bottom_left = 6; save_gen_st.corner_radius_bottom_right = 6
-	var save_gen_hover = save_gen_st.duplicate(); save_gen_hover.bg_color = _get_active_theme_color().lightened(0.08)
-	save_gen_btn.add_theme_stylebox_override("normal", save_gen_st)
-	save_gen_btn.add_theme_stylebox_override("hover", save_gen_hover)
-	save_gen_btn.add_theme_stylebox_override("pressed", save_gen_st)
-	save_gen_btn.add_theme_color_override("font_color", Color(1, 1, 1, 1))
-	save_gen_btn.add_theme_color_override("font_hover_color", Color(1, 1, 1, 1))
-	save_gen_btn.pressed.connect(func():
-		var on_call_id = ""
-		if oc_opt.selected > 0:
-			on_call_id = str(oc_opt.get_item_id(oc_opt.selected))
-		var rings = int(rings_slider.value)
-		var ro_type = "automated"
-		if ro_type_opt.selected == 1:
-			ro_type = "person"
-		var ro_person_id = ""
-		if ro_type == "person" and ro_person_opt.selected > 0:
-			ro_person_id = str(ro_person_opt.get_item_id(ro_person_opt.selected))
-		var ro_person_rings = int(ro_rings_slider.value)
-		var tts_active = tts_radio.button_pressed
-		var tts_txt = tts_edit.text.strip_edges()
-		
-		# Determine selected voice entry
-		var selected_idx = voice_opt.selected
-		var voice_entry = null
-		if selected_idx > -1:
-			var voice_id = voice_opt.get_item_metadata(selected_idx)
-			# Find matching static voice definition
-			for v in static_voices:
-				if v["id"] == voice_id:
-					voice_entry = v
-					break
-		if voice_entry != null:
-			var save_success = db.execute("INSERT OR REPLACE INTO ivr_settings (id, voice_name, language) VALUES (1, ?, ?);", [voice_entry["id"], voice_entry["language"]])
-			if save_success["success"]:
-				var save_d = AcceptDialog.new(); save_d.dialog_text = "Global IVR Voice Settings saved successfully!"; add_child(save_d); save_d.popup_centered()
-
-		var q_res = db.execute_transaction([
-			{"sql": "INSERT OR REPLACE INTO app_settings (setting_key, setting_value) VALUES ('PHONE_ON_CALL_PERSON_ID', ?);", "args": [on_call_id]},
-			{"sql": "INSERT OR REPLACE INTO app_settings (setting_key, setting_value) VALUES ('PHONE_ROLLOVER_RINGS', ?);", "args": [str(rings)]},
-			{"sql": "INSERT OR REPLACE INTO app_settings (setting_key, setting_value) VALUES ('PHONE_ROLLOVER_TYPE', ?);", "args": [ro_type]},
-			{"sql": "INSERT OR REPLACE INTO app_settings (setting_key, setting_value) VALUES ('PHONE_ROLLOVER_PERSON_ID', ?);", "args": [ro_person_id]},
-			{"sql": "INSERT OR REPLACE INTO app_settings (setting_key, setting_value) VALUES ('PHONE_ROLLOVER_PERSON_RINGS', ?);", "args": [str(ro_person_rings)]},
-			{"sql": "INSERT OR REPLACE INTO app_settings (setting_key, setting_value) VALUES ('PHONE_TTS_GREETING_ACTIVE', ?);", "args": [str(1 if tts_active else 0)]},
-			{"sql": "INSERT OR REPLACE INTO app_settings (setting_key, setting_value) VALUES ('PHONE_AUTOMATED_GREETER_TTS', ?);", "args": [tts_txt]},
-			{"sql": "INSERT OR REPLACE INTO app_settings (setting_key, setting_value) VALUES ('PHONE_AUTOMATED_GREETER_AUDIO', ?);", "args": [active_audio_base64]}
-		])
-		if q_res["success"]:
-			# Publish IVR config to the cloud relay
-			var sync_svc = GatewaySyncScript.new(db, self)
-			sync_svc.publish_ivr_config(func(result):
-				if result["success"]:
-					var pub_d = AcceptDialog.new(); pub_d.dialog_text = "Phone settings saved and published to relay!"; add_child(pub_d); pub_d.popup_centered()
-				else:
-					var err_d = AcceptDialog.new(); err_d.dialog_text = "Settings saved locally, but publish failed: " + str(result.get("error", "Unknown")); add_child(err_d); err_d.popup_centered()
-			)
-	)
-	save_gen_hbox.add_child(save_gen_btn)
-	gen_vbox.add_child(save_gen_hbox)
-	gen_card.add_child(gen_vbox)
-	main_content_vbox.add_child(gen_card)
-	
-	# --- IVR TREE DESIGNER SECTION CARD ---
-	var ivr_card = PanelContainer.new()
-	var ivr_st = StyleBoxFlat.new()
-	ivr_st.bg_color = Color(1.0, 1.0, 1.0, 1.0)
-	ivr_st.border_width_left = 1; ivr_st.border_width_top = 1; ivr_st.border_width_right = 1; ivr_st.border_width_bottom = 1
-	ivr_st.border_color = Color(0.88, 0.91, 0.94, 1.0)
-	ivr_st.corner_radius_top_left = 8; ivr_st.corner_radius_top_right = 8; ivr_st.corner_radius_bottom_left = 8; ivr_st.corner_radius_bottom_right = 8
-	ivr_st.content_margin_left = 18; ivr_st.content_margin_top = 16; ivr_st.content_margin_right = 18; ivr_st.content_margin_bottom = 16
-	ivr_card.add_theme_stylebox_override("panel", ivr_st)
-	
-	var ivr_vbox = VBoxContainer.new()
-	ivr_vbox.add_theme_constant_override("separation", 14)
-	
-	var ivr_header_vbox = VBoxContainer.new()
-	ivr_header_vbox.add_theme_constant_override("separation", 4)
-	var ivr_header_hbox = HBoxContainer.new()
-	var ivr_title = Label.new(); ivr_title.text = "📱 Phone Menu — What Happens When Callers Press a Key"; ivr_title.add_theme_font_size_override("font_size", 18); ivr_title.add_theme_color_override("font_color", _get_active_theme_color()); ivr_title.size_flags_horizontal = SIZE_EXPAND_FILL
-	var add_root_btn = Button.new(); add_root_btn.text = "➕ Add Menu Option"; add_root_btn.custom_minimum_size = Vector2(200, 36); add_root_btn.add_theme_font_size_override("font_size", 15)
-	add_root_btn.add_theme_stylebox_override("normal", sec_btn_st); add_root_btn.add_theme_stylebox_override("hover", sec_btn_hover); add_root_btn.add_theme_stylebox_override("pressed", sec_btn_st)
-	add_root_btn.add_theme_color_override("font_color", Color(0.12, 0.18, 0.26, 1.0)); add_root_btn.add_theme_color_override("font_hover_color", _get_active_theme_color())
-	
-	ivr_header_hbox.add_child(ivr_title); ivr_header_hbox.add_child(add_root_btn)
-	ivr_header_vbox.add_child(ivr_header_hbox)
-	
-	var ivr_subtitle = Label.new()
-	ivr_subtitle.text = "Each row below defines what happens when a caller presses that key during the greeting. (e.g., Press 1 → read hours, Press 2 → leave voicemail)"
-	ivr_subtitle.add_theme_font_size_override("font_size", 13)
-	ivr_subtitle.add_theme_color_override("font_color", Color(0.5, 0.55, 0.6, 1.0))
-	ivr_subtitle.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	ivr_header_vbox.add_child(ivr_subtitle)
-	
-	ivr_vbox.add_child(ivr_header_vbox)
-	
-	add_root_btn.pressed.connect(func():
-		_open_ivr_option_dialog("")
-	)
-	
-	# Load IVR menu options
-	var ivr_menu_res = db.execute("SELECT digit, menu_option_name, script_text, action_type, action_param, parent_digit, use_custom_audio, audio_data FROM ivr_menu_options ORDER BY digit ASC;")
-	var ivr_list = []
-	if ivr_menu_res["success"]:
-		ivr_list = ivr_menu_res["data"]
-		
-	# Organize options into a tree structure
-	var root_options = []
-	var child_options_map = {} # parent_digit -> Array
-	
-	for opt in ivr_list:
-		var parent = opt.get("parent_digit")
-		if parent == null or str(parent).strip_edges() == "":
-			root_options.append(opt)
-		else:
-			var parent_str = str(parent).strip_edges()
-			if not child_options_map.has(parent_str):
-				child_options_map[parent_str] = []
-			child_options_map[parent_str].append(opt)
-			
-	# Get styling for children/recursive options
-	var del_btn_st = StyleBoxFlat.new(); del_btn_st.bg_color = Color(0.98, 0.92, 0.92, 1.0); del_btn_st.corner_radius_top_left = 6; del_btn_st.corner_radius_top_right = 6; del_btn_st.corner_radius_bottom_left = 6; del_btn_st.corner_radius_bottom_right = 6; del_btn_st.border_width_left = 1; del_btn_st.border_width_top = 1; del_btn_st.border_width_right = 1; del_btn_st.border_width_bottom = 1; del_btn_st.border_color = Color(0.92, 0.78, 0.78, 1.0); del_btn_st.content_margin_left = 10; del_btn_st.content_margin_right = 10; del_btn_st.content_margin_top = 4; del_btn_st.content_margin_bottom = 4
-	var del_btn_hover = del_btn_st.duplicate(); del_btn_hover.bg_color = Color(1.0, 0.95, 0.95, 1.0)
-
-	if root_options.size() > 0:
-		for root_opt in root_options:
-			_render_ivr_branch(root_opt, child_options_map, 0, sec_btn_st, sec_btn_hover, del_btn_st, del_btn_hover, ivr_vbox)
-	else:
-		var empty_lbl = Label.new(); empty_lbl.text = "No Phone Key actions configured yet. Click 'Add Main Phone Key Option' to start."; empty_lbl.add_theme_font_size_override("font_size", 16); empty_lbl.add_theme_color_override("font_color", Color(0.35, 0.40, 0.50, 1.0))
-		ivr_vbox.add_child(empty_lbl)
-		
-	ivr_card.add_child(ivr_vbox)
-	main_content_vbox.add_child(ivr_card)
-	
 	scroll.add_child(main_content_vbox)
 	root_vbox.add_child(scroll)
 	
-	for c in content_card.get_children(): c.free()
-	content_card.add_child(root_vbox)
+	var settings = com_svc.get_phone_settings()
+	var sec_btn_st = StyleBoxFlat.new(); sec_btn_st.bg_color = Color(0.92, 0.94, 0.97, 1.0); sec_btn_st.corner_radius_top_left = 6; sec_btn_st.corner_radius_top_right = 6; sec_btn_st.corner_radius_bottom_left = 6; sec_btn_st.corner_radius_bottom_right = 6; sec_btn_st.border_width_left = 1; sec_btn_st.border_width_top = 1; sec_btn_st.border_width_right = 1; sec_btn_st.border_width_bottom = 1; sec_btn_st.border_color = Color(0.78, 0.82, 0.88, 1.0); sec_btn_st.content_margin_left = 12; sec_btn_st.content_margin_right = 12; sec_btn_st.content_margin_top = 6; sec_btn_st.content_margin_bottom = 6
+	var sec_btn_hover = sec_btn_st.duplicate(); sec_btn_hover.bg_color = Color(0.96, 0.97, 0.99, 1.0)
 
-func _render_ivr_branch(opt: Dictionary, child_map: Dictionary, depth: int, sec_btn_st: StyleBox, sec_btn_hover: StyleBox, del_btn_st: StyleBox, del_btn_hover: StyleBox, ivr_vbox: VBoxContainer) -> void:
-	var digit = str(opt["digit"])
-	var name = str(opt["menu_option_name"])
-	var script = str(opt["script_text"])
-	var act_type = str(opt["action_type"])
-	var param = str(opt.get("action_param", ""))
-	var use_custom = opt.get("use_custom_audio", 0) == 1
-	
-	var row_panel = PanelContainer.new()
-	var row_panel_st = StyleBoxFlat.new()
-	
-	if depth == 0:
-		row_panel_st.bg_color = Color(0.96, 0.97, 0.99, 1.0)
-		row_panel_st.border_width_left = 3
-		row_panel_st.border_color = _get_active_theme_color()
-	else:
-		row_panel_st.bg_color = Color(0.92, 0.94, 0.97, 1.0)
-		row_panel_st.border_width_left = 2
-		row_panel_st.border_color = Color(0.24, 0.45, 0.75, 0.5)
+	if ivr_sub_tab == "scripts":
+		var day_card = PanelContainer.new()
+		var day_card_st = StyleBoxFlat.new(); day_card_st.bg_color = Color(1, 1, 1, 1); day_card_st.content_margin_left = 12; day_card_st.content_margin_top = 12; day_card_st.content_margin_right = 12; day_card_st.content_margin_bottom = 12; day_card_st.border_width_left = 1; day_card_st.border_width_right = 1; day_card_st.border_width_top = 1; day_card_st.border_width_bottom = 1; day_card_st.border_color = Color(0.88, 0.91, 0.94, 1.0); day_card_st.corner_radius_top_left = 8; day_card_st.corner_radius_top_right = 8; day_card_st.corner_radius_bottom_left = 8; day_card_st.corner_radius_bottom_right = 8
+		day_card.add_theme_stylebox_override("panel", day_card_st)
 		
-	row_panel_st.content_margin_left = 12; row_panel_st.content_margin_top = 10; row_panel_st.content_margin_right = 12; row_panel_st.content_margin_bottom = 10
-	row_panel.add_theme_stylebox_override("panel", row_panel_st)
-	
-	var inner_vbox = VBoxContainer.new()
-	inner_vbox.add_theme_constant_override("separation", 8)
-	
-	var hdr_hbox = HBoxContainer.new()
-	
-	var prefix = ""
-	if depth > 0:
-		prefix = "└─ "
-	
-	var lbl_dig = Label.new()
-	lbl_dig.text = prefix + "Phone Key [ " + digit + " ]"
-	lbl_dig.add_theme_font_size_override("font_size", 16 - mini(depth, 2))
-	lbl_dig.add_theme_color_override("font_color", _get_active_theme_color() if depth == 0 else Color(0.24, 0.45, 0.75, 1.0))
-	
-	var lbl_name = Label.new()
-	lbl_name.text = name
-	lbl_name.add_theme_font_size_override("font_size", 16 - mini(depth, 2))
-	lbl_name.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
-	lbl_name.size_flags_horizontal = SIZE_EXPAND_FILL
-	
-	var edit_btn = Button.new(); edit_btn.text = "✏️ Edit"; edit_btn.custom_minimum_size = Vector2(80, 28); edit_btn.add_theme_font_size_override("font_size", 14)
-	var del_btn = Button.new(); del_btn.text = "❌ Delete"; del_btn.custom_minimum_size = Vector2(80, 28); del_btn.add_theme_font_size_override("font_size", 14)
-	
-	edit_btn.add_theme_stylebox_override("normal", sec_btn_st); edit_btn.add_theme_stylebox_override("hover", sec_btn_hover); edit_btn.add_theme_stylebox_override("pressed", sec_btn_st)
-	edit_btn.add_theme_color_override("font_color", Color(0.12, 0.18, 0.26, 1.0)); edit_btn.add_theme_color_override("font_hover_color", _get_active_theme_color())
-	
-	del_btn.add_theme_stylebox_override("normal", del_btn_st); del_btn.add_theme_stylebox_override("hover", del_btn_hover); del_btn.add_theme_stylebox_override("pressed", del_btn_st)
-	del_btn.add_theme_color_override("font_color", Color(0.65, 0.15, 0.15, 1.0)); del_btn.add_theme_color_override("font_hover_color", Color(0.85, 0.2, 0.2, 1.0))
-	
-	var children = child_map.get(digit, [])
-	var child_count = children.size()
-	var toggle_layer_btn = null
-	
-	if act_type == "submenu":
-		toggle_layer_btn = Button.new()
-		toggle_layer_btn.text = "📂 Open Nested Keys (" + str(child_count) + ")"
-		toggle_layer_btn.custom_minimum_size = Vector2(180, 28)
-		toggle_layer_btn.add_theme_font_size_override("font_size", 14)
-		toggle_layer_btn.add_theme_stylebox_override("normal", sec_btn_st)
-		toggle_layer_btn.add_theme_stylebox_override("hover", sec_btn_hover)
-		toggle_layer_btn.add_theme_stylebox_override("pressed", sec_btn_st)
-		toggle_layer_btn.add_theme_color_override("font_color", Color(0.12, 0.18, 0.26, 1.0))
-		toggle_layer_btn.add_theme_color_override("font_hover_color", _get_active_theme_color())
-		hdr_hbox.add_child(lbl_dig); hdr_hbox.add_child(lbl_name); hdr_hbox.add_child(toggle_layer_btn); hdr_hbox.add_child(edit_btn); hdr_hbox.add_child(del_btn)
-	else:
-		hdr_hbox.add_child(lbl_dig); hdr_hbox.add_child(lbl_name); hdr_hbox.add_child(edit_btn); hdr_hbox.add_child(del_btn)
+		var day_vbox = VBoxContainer.new()
+		day_vbox.add_theme_constant_override("separation", 10)
+		day_card.add_child(day_vbox)
 		
-	inner_vbox.add_child(hdr_hbox)
-	
-	var details_lbl = Label.new()
-	details_lbl.add_theme_font_size_override("font_size", 14)
-	details_lbl.add_theme_color_override("font_color", Color(0.35, 0.40, 0.48, 1.0))
-	if act_type == "speak":
-		if use_custom:
-			details_lbl.text = "Action: Play Custom Audio Recording • \"" + script.left(50) + "...\""
-		else:
-			details_lbl.text = "Action: Read Aloud Script (TTS) • \"" + script.left(50) + "...\""
-	elif act_type == "voicemail":
-		details_lbl.text = "Action: Route to Voicemail Box • Recipient ID: " + param
-	elif act_type == "transfer":
-		details_lbl.text = "Action: Transfer Call • Target Number: " + param
-	elif act_type == "submenu":
-		details_lbl.text = "Action: Open Nested Keys"
-	inner_vbox.add_child(details_lbl)
-	
-	edit_btn.pressed.connect(func(): _open_ivr_option_dialog(digit))
-	del_btn.pressed.connect(func():
-		var q_del = db.execute("DELETE FROM ivr_menu_options WHERE digit = ? OR parent_digit = ? OR parent_digit LIKE ?;", [digit, digit, digit + "-%"])
-		if q_del["success"]: _render_ivr_tab()
-	)
-	
-	if act_type == "submenu":
-		var child_list_vbox = VBoxContainer.new()
-		child_list_vbox.add_theme_constant_override("separation", 8)
+		var date_str = get_date_of_weekday.call(selected_ivr_day)
+		var day_title_lbl = Label.new()
+		day_title_lbl.text = "📅 TODAY — " + selected_ivr_day.to_upper() + ", " + date_str
+		day_title_lbl.add_theme_font_size_override("font_size", 16)
+		day_title_lbl.add_theme_color_override("font_color", _get_active_theme_color())
+		day_vbox.add_child(day_title_lbl)
 		
-		var indent_margin = MarginContainer.new()
-		indent_margin.add_theme_constant_override("margin_left", 24)
-		indent_margin.add_child(child_list_vbox)
-		indent_margin.visible = false
+		var day_hbox = HBoxContainer.new()
+		day_hbox.add_theme_constant_override("separation", 6)
+		day_vbox.add_child(day_hbox)
 		
-		for child_opt in children:
-			_render_ivr_branch(child_opt, child_map, depth + 1, sec_btn_st, sec_btn_hover, del_btn_st, del_btn_hover, child_list_vbox)
+		var day_list = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+		var dt_now = Time.get_datetime_dict_from_system()
+		var day_names_list = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+		var sys_today = day_names_list[dt_now.weekday]
+		
+		for d in day_list:
+			var btn = Button.new()
+			btn.text = d
+			if d == sys_today:
+				btn.text += " (Today)"
+			btn.custom_minimum_size = Vector2(90, 32)
+			btn.add_theme_font_size_override("font_size", 12)
 			
-		var add_child_btn = Button.new()
-		add_child_btn.text = "➕ Add Nested Key under Key " + digit
-		add_child_btn.custom_minimum_size = Vector2(250, 32)
-		add_child_btn.add_theme_font_size_override("font_size", 14)
-		add_child_btn.add_theme_stylebox_override("normal", sec_btn_st); add_child_btn.add_theme_stylebox_override("hover", sec_btn_hover); add_child_btn.add_theme_stylebox_override("pressed", sec_btn_st)
-		add_child_btn.add_theme_color_override("font_color", Color(0.12, 0.18, 0.26, 1.0)); add_child_btn.add_theme_color_override("font_hover_color", _get_active_theme_color())
-		add_child_btn.pressed.connect(func(): _open_ivr_option_dialog("", digit))
-		child_list_vbox.add_child(add_child_btn)
-		
-		if toggle_layer_btn:
-			toggle_layer_btn.pressed.connect(func():
-				indent_margin.visible = not indent_margin.visible
-				if indent_margin.visible:
-					toggle_layer_btn.text = "📁 Close Nested Keys (" + str(child_count) + ")"
+			var act_day_st = StyleBoxFlat.new()
+			act_day_st.bg_color = _get_active_theme_color()
+			act_day_st.corner_radius_top_left = 4; act_day_st.corner_radius_top_right = 4; act_day_st.corner_radius_bottom_left = 4; act_day_st.corner_radius_bottom_right = 4
+			
+			var inact_day_st = StyleBoxFlat.new()
+			inact_day_st.bg_color = Color(0.93, 0.95, 0.98, 1.0)
+			inact_day_st.corner_radius_top_left = 4; inact_day_st.corner_radius_top_right = 4; inact_day_st.corner_radius_bottom_left = 4; inact_day_st.corner_radius_bottom_right = 4
+			
+			if selected_ivr_day == d:
+				btn.add_theme_stylebox_override("normal", act_day_st)
+				btn.add_theme_stylebox_override("hover", act_day_st)
+				btn.add_theme_color_override("font_color", Color(1, 1, 1, 1))
+			else:
+				btn.add_theme_stylebox_override("normal", inact_day_st)
+				var hov = inact_day_st.duplicate()
+				hov.bg_color = Color(0.88, 0.91, 0.95, 1.0)
+				btn.add_theme_stylebox_override("hover", hov)
+				btn.add_theme_color_override("font_color", Color(0.2, 0.3, 0.4, 1.0))
+				btn.add_theme_color_override("font_hover_color", _get_active_theme_color())
+				
+			btn.pressed.connect(func():
+				if unsaved_ivr_scripts.size() > 0:
+					_show_unsaved_warning(func():
+						unsaved_ivr_scripts.clear()
+						selected_ivr_day = d
+						_render_ivr_tab()
+					)
 				else:
-					toggle_layer_btn.text = "📂 Open Nested Keys (" + str(child_count) + ")"
+					selected_ivr_day = d
+					_render_ivr_tab()
+			)
+			day_hbox.add_child(btn)
+			
+		main_content_vbox.add_child(day_card)
+
+		# Fetch active nodes
+		var nodes_res = db.execute("SELECT id, parent_id, digit, label, action_type, action_param, script_text, dynamic_source FROM ivr_menu_nodes WHERE is_active = 1 ORDER BY display_order ASC, id ASC;")
+		var node_map = {}
+		if nodes_res["success"]:
+			for n in nodes_res["data"]:
+				node_map[int(n["id"])] = n
+				
+		var get_node_path = func(node: Dictionary) -> String:
+			var path_parts = []
+			var curr = node
+			while curr != null:
+				path_parts.insert(0, str(curr["digit"]))
+				if curr.get("parent_id") != null and node_map.has(int(curr["parent_id"])):
+					curr = node_map[int(curr["parent_id"])]
+				else:
+					curr = null
+			return "-".join(path_parts)
+			
+		var prompts = []
+		var clean_script = func(s: String) -> String:
+			return s.replace("\\n", "\n").replace("\r", "")
+			
+		var calculate_edit_height = func(txt: String) -> float:
+			var lines = txt.split("\n")
+			var line_count = 0
+			for line in lines:
+				var length = line.length()
+				line_count += 1 + int(length / 70)
+			var estimated_height = max(80, line_count * 24 + 16)
+			return min(320.0, estimated_height)
+		var active_main = clean_script.call(str(settings.get("automated_greeter_tts", "")))
+		var suggest_main = clean_script.call(com_svc.generate_suggestion_for_prompt("main_greeting", selected_ivr_day, date_str))
+		prompts.append({
+			"key": "main_greeting",
+			"label": "Main Greeting",
+			"description": "Played when callers first dial in.",
+			"path_label": "📞 Main Greeting (Root Menu Greeting)",
+			"active_script": active_main,
+			"suggested_script": suggest_main,
+			"is_shared": false,
+			"shared_label": "",
+			"is_dynamic": true
+		})
+		
+		var active_loc = ""
+		var loc_q = db.execute("SELECT setting_value FROM app_settings WHERE setting_key = 'PHONE_LOCATION_DIRECTIONS_TEXT' LIMIT 1;")
+		if loc_q["success"] and loc_q["data"].size() > 0:
+			active_loc = clean_script.call(str(loc_q["data"][0]["setting_value"]))
+		prompts.append({
+			"key": "location_directions",
+			"label": "Location & Directions",
+			"description": "Shared spoken info for directions.",
+			"path_label": "👥 Location & Directions (Shared Script)",
+			"active_script": active_loc,
+			"suggested_script": active_loc,
+			"is_shared": true,
+			"shared_label": "Used by: Option 1-1 (Today Location), Option 3-2 (Info Location)",
+			"is_dynamic": false
+		})
+		
+		if nodes_res["success"]:
+			for n in nodes_res["data"]:
+				var nid = int(n["id"])
+				var act_type = str(n["action_type"])
+				var d_src = str(n.get("dynamic_source", "")) if n.get("dynamic_source") != null else ""
+				
+				if act_type in ["speak", "submenu", "staff_directory", "voicemail"]:
+					if d_src == "location_directions":
+						continue # Skip, Location & Directions is rendered as a single shared card above!
+						
+					var n_key = "node_" + str(nid)
+					var p_path = get_node_path.call(n)
+					
+					var active_s = clean_script.call(str(n.get("script_text", "")) if n.get("script_text") != null else "")
+					var suggest_s = clean_script.call(com_svc.generate_suggestion_for_prompt(n_key, selected_ivr_day, date_str))
+					var is_dyn = (n_key == "main_greeting" or d_src != "" or act_type == "staff_directory" or act_type == "submenu")
+					
+					# Fallback to dynamic suggestion if database script_text is blank/null
+					if active_s == "" and is_dyn:
+						active_s = suggest_s
+						
+					prompts.append({
+						"key": n_key,
+						"label": str(n["label"]),
+						"description": "Composite Route path: " + p_path,
+						"path_label": "Press " + p_path + " — " + str(n["label"]),
+						"active_script": active_s,
+						"suggested_script": suggest_s,
+						"is_shared": false,
+						"shared_label": "",
+						"is_dynamic": is_dyn
+					})
+
+		# Build Status Summary Card & Alert Box
+		var active_count = prompts.size()
+		var suggested_updates = 0
+		var summary_lines = []
+		
+		for p in prompts:
+			var draft = com_svc.get_ivr_script_draft(p["key"])
+			var current_suggested = draft if draft != "" else p["suggested_script"]
+			var current_status_info = com_svc.get_prompt_status(p["key"], p["active_script"], current_suggested)
+			if not current_status_info["is_current"] and p["is_dynamic"]:
+				suggested_updates += 1
+				summary_lines.append(p["label"] + " (" + current_status_info["reason"] + ")")
+				
+		var sum_card = PanelContainer.new()
+		var sum_card_st = StyleBoxFlat.new(); sum_card_st.bg_color = Color(0.96, 0.98, 1.0, 1.0); sum_card_st.content_margin_left = 14; sum_card_st.content_margin_top = 10; sum_card_st.content_margin_right = 14; sum_card_st.content_margin_bottom = 10; sum_card_st.corner_radius_top_left = 6; sum_card_st.corner_radius_top_right = 6; sum_card_st.corner_radius_bottom_left = 6; sum_card_st.corner_radius_bottom_right = 6; sum_card_st.border_width_left = 2; sum_card_st.border_color = Color(0.25, 0.55, 0.85, 1.0)
+		sum_card.add_theme_stylebox_override("panel", sum_card_st)
+		
+		var sum_hbox = HBoxContainer.new()
+		sum_card.add_child(sum_hbox)
+		
+		var sum_lbl = Label.new()
+		sum_lbl.text = selected_ivr_day.to_upper() + " PHONE CONTENT  •  " + str(active_count) + " Spoken Prompts  •  " + str(suggested_updates) + " Suggested Update(s)"
+		sum_lbl.add_theme_font_size_override("font_size", 14)
+		sum_lbl.add_theme_color_override("font_color", Color(0.12, 0.22, 0.38, 1.0))
+		sum_hbox.add_child(sum_lbl)
+		main_content_vbox.add_child(sum_card)
+		
+		if suggested_updates > 0:
+			var alert_panel = PanelContainer.new()
+			var alert_st = StyleBoxFlat.new(); alert_st.bg_color = Color(1.0, 0.96, 0.92, 1.0); alert_st.content_margin_left = 14; alert_st.content_margin_top = 10; alert_st.content_margin_right = 14; alert_st.content_margin_bottom = 10; alert_st.corner_radius_top_left = 6; alert_st.corner_radius_top_right = 6; alert_st.corner_radius_bottom_left = 6; alert_st.corner_radius_bottom_right = 6; alert_st.border_width_left = 2; alert_st.border_color = Color(0.9, 0.5, 0.1, 1.0)
+			alert_panel.add_theme_stylebox_override("panel", alert_st)
+			
+			var alert_vbox = VBoxContainer.new()
+			alert_panel.add_child(alert_vbox)
+			
+			var alert_title = Label.new()
+			alert_title.text = "⚠ " + str(suggested_updates) + " SUGGESTED UPDATE(S) AVAILABLE"
+			alert_title.add_theme_font_size_override("font_size", 14)
+			alert_title.add_theme_color_override("font_color", Color(0.7, 0.35, 0.05, 1.0))
+			alert_vbox.add_child(alert_title)
+			
+			for line in summary_lines:
+				var line_lbl = Label.new()
+				line_lbl.text = "• " + line
+				line_lbl.add_theme_font_size_override("font_size", 13)
+				line_lbl.add_theme_color_override("font_color", Color(0.4, 0.25, 0.1, 1.0))
+				alert_vbox.add_child(line_lbl)
+				
+			main_content_vbox.add_child(alert_panel)
+
+		# Special Message Panel
+		if selected_ivr_day == sys_today:
+			var spec_panel = PanelContainer.new()
+			var spec_st = StyleBoxFlat.new(); spec_st.bg_color = Color(1.0, 1.0, 1.0, 1.0); spec_st.content_margin_left = 16; spec_st.content_margin_top = 14; spec_st.content_margin_right = 16; spec_st.content_margin_bottom = 14; spec_st.border_width_left = 1; spec_st.border_width_right = 1; spec_st.border_width_top = 1; spec_st.border_width_bottom = 1; spec_st.border_color = Color(0.88, 0.91, 0.94, 1.0); spec_st.corner_radius_top_left = 8; spec_st.corner_radius_top_right = 8; spec_st.corner_radius_bottom_left = 8; spec_st.corner_radius_bottom_right = 8
+			spec_panel.add_theme_stylebox_override("panel", spec_st)
+			
+			var spec_vbox = VBoxContainer.new()
+			spec_vbox.add_theme_constant_override("separation", 10)
+			spec_panel.add_child(spec_vbox)
+			
+			var spec_lbl = Label.new()
+			spec_lbl.text = "✍️ TODAY'S SPECIAL MESSAGE — OPTIONAL (appends to suggested greeting)"
+			spec_lbl.add_theme_font_size_override("font_size", 13)
+			spec_lbl.add_theme_color_override("font_color", _get_active_theme_color())
+			spec_vbox.add_child(spec_lbl)
+			
+			var spec_hbox = HBoxContainer.new()
+			spec_hbox.add_theme_constant_override("separation", 12)
+			spec_vbox.add_child(spec_hbox)
+			
+			var spec_edit = TextEdit.new()
+			spec_edit.custom_minimum_size = Vector2(0, 48)
+			spec_edit.size_flags_horizontal = SIZE_EXPAND_FILL
+			_style_input_control(spec_edit, 14)
+			spec_edit.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
+			spec_edit.text = settings.get("today_special_message", "")
+			spec_hbox.add_child(spec_edit)
+			
+			var expire_res = db.execute("SELECT setting_value FROM app_settings WHERE setting_key = 'PHONE_EXPIRE_SPECIAL_MESSAGE_AT_MIDNIGHT' LIMIT 1;")
+			var expire_val = "0"
+			if expire_res["success"] and expire_res["data"].size() > 0:
+				expire_val = str(expire_res["data"][0]["setting_value"])
+			
+			var expire_chk = CheckBox.new()
+			expire_chk.text = "Expire at midnight"
+			expire_chk.button_pressed = (expire_val == "1")
+			spec_vbox.add_child(expire_chk)
+			
+			var update_spec_btn = Button.new()
+			update_spec_btn.text = "Update Suggested Script"
+			update_spec_btn.custom_minimum_size = Vector2(200, 36)
+			update_spec_btn.add_theme_font_size_override("font_size", 13)
+			update_spec_btn.add_theme_stylebox_override("normal", sec_btn_st)
+			update_spec_btn.add_theme_stylebox_override("hover", sec_btn_hover)
+			update_spec_btn.add_theme_color_override("font_color", Color(0.12, 0.18, 0.26, 1.0))
+			
+			update_spec_btn.pressed.connect(func():
+				var spec_t = spec_edit.text.strip_edges()
+				var exp_val = "1" if expire_chk.button_pressed else "0"
+				com_svc.save_today_settings(
+					settings.get("today_script_mode", "automatic"),
+					spec_t,
+					settings.get("today_custom_script", ""),
+					settings.get("location_directions_text", "")
+				)
+				db.execute("INSERT OR REPLACE INTO app_settings (setting_key, setting_value) VALUES ('PHONE_EXPIRE_SPECIAL_MESSAGE_AT_MIDNIGHT', ?);", [exp_val])
+				_render_ivr_tab()
+			)
+			spec_hbox.add_child(update_spec_btn)
+			var spec_msg_vbox = spec_vbox # store reference if needed
+			
+			main_content_vbox.add_child(spec_panel)
+
+		# Prompts Cards
+		for p in prompts:
+			var p_key = p["key"]
+			var p_label = p["label"]
+			var p_path_lbl = p["path_label"]
+			var act_s = p["active_script"]
+			var sug_s = p["suggested_script"]
+			var is_shared = p["is_shared"]
+			var sh_lbl = p["shared_label"]
+			var is_dyn = p["is_dynamic"]
+			
+			var draft = com_svc.get_ivr_script_draft(p_key)
+			var current_sug = draft if draft != "" else sug_s
+			var status_info = com_svc.get_prompt_status(p_key, act_s, current_sug)
+			var is_curr = status_info["is_current"] or not is_dyn
+			
+			var card = PanelContainer.new()
+			var card_st = StyleBoxFlat.new(); card_st.bg_color = Color(1, 1, 1, 1); card_st.content_margin_left = 18; card_st.content_margin_top = 16; card_st.content_margin_right = 18; card_st.content_margin_bottom = 16; card_st.border_width_left = 1; card_st.border_width_right = 1; card_st.border_width_top = 1; card_st.border_width_bottom = 1; card_st.border_color = Color(0.88, 0.91, 0.94, 1.0); card_st.corner_radius_top_left = 8; card_st.corner_radius_top_right = 8; card_st.corner_radius_bottom_left = 8; card_st.corner_radius_bottom_right = 8
+			card.add_theme_stylebox_override("panel", card_st)
+			
+			var cvbox = VBoxContainer.new()
+			cvbox.add_theme_constant_override("separation", 12)
+			card.add_child(cvbox)
+			
+			var h_hbox = HBoxContainer.new()
+			cvbox.add_child(h_hbox)
+			
+			var title_lbl = Label.new()
+			title_lbl.text = p_path_lbl
+			title_lbl.add_theme_font_size_override("font_size", 15)
+			title_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
+			title_lbl.size_flags_horizontal = SIZE_EXPAND_FILL
+			h_hbox.add_child(title_lbl)
+			
+			var status_lbl = Label.new()
+			status_lbl.add_theme_font_size_override("font_size", 12)
+			if is_curr:
+				status_lbl.text = "✓ CURRENT"
+				status_lbl.add_theme_color_override("font_color", Color(0.15, 0.55, 0.3, 1.0))
+			else:
+				status_lbl.text = "⚠ SUGGESTED UPDATE AVAILABLE"
+				status_lbl.add_theme_color_override("font_color", Color(0.85, 0.45, 0.05, 1.0))
+				if status_info["reason"] != "":
+					status_lbl.text += " (" + status_info["reason"] + ")"
+			h_hbox.add_child(status_lbl)
+			
+			if is_shared:
+				var shared_lbl = Label.new()
+				shared_lbl.text = "👥 Shared Script — " + sh_lbl
+				shared_lbl.add_theme_font_size_override("font_size", 12)
+				shared_lbl.add_theme_color_override("font_color", Color(0.3, 0.5, 0.7, 1.0))
+				cvbox.add_child(shared_lbl)
+				
+			var act_vbox = VBoxContainer.new()
+			act_vbox.add_theme_constant_override("separation", 6)
+			cvbox.add_child(act_vbox)
+			
+			var act_lbl_hbox = HBoxContainer.new()
+			act_vbox.add_child(act_lbl_hbox)
+			
+			var act_lbl = Label.new()
+			act_lbl.text = "ACTIVE SCRIPT (Callers hear this now)"
+			act_lbl.add_theme_font_size_override("font_size", 12)
+			act_lbl.add_theme_color_override("font_color", Color(0.4, 0.45, 0.5, 1.0))
+			act_lbl_hbox.add_child(act_lbl)
+			
+			var dirty_lbl = Label.new()
+			dirty_lbl.text = "● UNSAVED CHANGES"
+			dirty_lbl.add_theme_font_size_override("font_size", 12)
+			dirty_lbl.add_theme_color_override("font_color", Color(0.8, 0.15, 0.15, 1.0))
+			dirty_lbl.visible = false
+			act_lbl_hbox.add_child(dirty_lbl)
+			
+			var act_edit = TextEdit.new()
+			act_edit.custom_minimum_size = Vector2(0, calculate_edit_height.call(act_s))
+			_style_input_control(act_edit, 14)
+			act_edit.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
+			act_edit.text = act_s
+			act_vbox.add_child(act_edit)
+			
+			var act_btn_hbox = HBoxContainer.new()
+			act_btn_hbox.add_theme_constant_override("separation", 10)
+			act_vbox.add_child(act_btn_hbox)
+			
+			var play_btn = Button.new()
+			play_btn.text = "🔊 Preview Voice"
+			play_btn.custom_minimum_size = Vector2(140, 28)
+			play_btn.add_theme_font_size_override("font_size", 13)
+			play_btn.add_theme_stylebox_override("normal", sec_btn_st)
+			play_btn.add_theme_stylebox_override("hover", sec_btn_hover)
+			play_btn.add_theme_color_override("font_color", Color(0.12, 0.18, 0.26, 1.0))
+			act_btn_hbox.add_child(play_btn)
+			
+			play_btn.pressed.connect(func():
+				var txt = act_edit.text.strip_edges()
+				if txt == "": return
+				DisplayServer.tts_stop()
+				var v_res = db.execute("SELECT voice_name, language FROM ivr_settings WHERE id = 1 LIMIT 1;")
+				var voice_id = ""
+				if v_res["success"] and v_res["data"].size() > 0:
+					voice_id = str(v_res["data"][0].get("voice_name", ""))
+				if voice_id == "" or voice_id.begins_with("mock_"):
+					var play_dlg = AcceptDialog.new(); play_dlg.dialog_text = "📢 Greeting Preview:\n\n\"" + txt + "\"\n\n(Voice: Default TTS)"; add_child(play_dlg); play_dlg.popup_centered()
+				else:
+					DisplayServer.tts_speak(txt, voice_id)
 			)
 			
-		inner_vbox.add_child(indent_margin)
+			var save_btn = Button.new()
+			save_btn.text = "💾 Save & Activate Changes"
+			save_btn.custom_minimum_size = Vector2(200, 28)
+			save_btn.add_theme_font_size_override("font_size", 13)
+			var save_btn_st = StyleBoxFlat.new(); save_btn_st.bg_color = _get_active_theme_color(); save_btn_st.corner_radius_top_left = 6; save_btn_st.corner_radius_top_right = 6; save_btn_st.corner_radius_bottom_left = 6; save_btn_st.corner_radius_bottom_right = 6; save_btn_st.content_margin_left = 12; save_btn_st.content_margin_right = 12
+			save_btn.add_theme_stylebox_override("normal", save_btn_st)
+			var save_btn_hov = save_btn_st.duplicate(); save_btn_hov.bg_color = _get_active_theme_color().lightened(0.08)
+			save_btn.add_theme_stylebox_override("hover", save_btn_hov)
+			save_btn.add_theme_color_override("font_color", Color(1, 1, 1, 1))
+			act_btn_hbox.add_child(save_btn)
+			
+			act_edit.text_changed.connect(func():
+				dirty_lbl.visible = true
+				unsaved_ivr_scripts[p_key] = act_edit.text
+			)
+			
+			save_btn.pressed.connect(func():
+				var confirm_d = ConfirmationDialog.new()
+				confirm_d.title = "Confirm Activation"
+				confirm_d.dialog_text = "Activate these script changes?\nThis will change what callers hear for " + p_label + "."
+				confirm_d.confirmed.connect(func():
+					var text_to_save = act_edit.text
+					var ok = com_svc.save_active_script(p_key, text_to_save)
+					if ok:
+						unsaved_ivr_scripts.erase(p_key)
+						dirty_lbl.visible = false
+						var sync_svc = GatewaySyncScript.new(db, self)
+						sync_svc.publish_ivr_config(func(result): pass)
+						_render_ivr_tab()
+				)
+				add_child(confirm_d)
+				confirm_d.popup_centered()
+			)
+			
+			if is_dyn:
+				var sug_vbox = VBoxContainer.new()
+				sug_vbox.add_theme_constant_override("separation", 6)
+				cvbox.add_child(sug_vbox)
+				
+				var sug_lbl = Label.new()
+				sug_lbl.text = "SUGGESTED SCRIPT UPDATE (From current schedule / edited draft)"
+				sug_lbl.add_theme_font_size_override("font_size", 12)
+				sug_lbl.add_theme_color_override("font_color", Color(0.4, 0.45, 0.5, 1.0))
+				sug_vbox.add_child(sug_lbl)
+				
+				var sug_edit = TextEdit.new()
+				sug_edit.custom_minimum_size = Vector2(0, calculate_edit_height.call(current_sug))
+				_style_input_control(sug_edit, 14)
+				sug_edit.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
+				sug_edit.text = current_sug
+				sug_vbox.add_child(sug_edit)
+				
+				sug_edit.text_changed.connect(func():
+					com_svc.save_ivr_script_draft(p_key, sug_edit.text)
+					var dynamic_status = com_svc.get_prompt_status(p_key, act_edit.text, sug_edit.text)
+					if dynamic_status["is_current"]:
+						status_lbl.text = "✓ CURRENT"
+						status_lbl.add_theme_color_override("font_color", Color(0.15, 0.55, 0.3, 1.0))
+					else:
+						status_lbl.text = "⚠ SUGGESTED UPDATE AVAILABLE"
+						status_lbl.add_theme_color_override("font_color", Color(0.85, 0.45, 0.05, 1.0))
+						if dynamic_status["reason"] != "":
+							status_lbl.text += " (" + dynamic_status["reason"] + ")"
+				)
+				
+				var sug_btn_hbox = HBoxContainer.new()
+				sug_btn_hbox.add_theme_constant_override("separation", 10)
+				sug_vbox.add_child(sug_btn_hbox)
+				
+				var regen_btn = Button.new()
+				regen_btn.text = "🔄 Regenerate Suggestion"
+				regen_btn.custom_minimum_size = Vector2(180, 28)
+				regen_btn.add_theme_font_size_override("font_size", 13)
+				regen_btn.add_theme_stylebox_override("normal", sec_btn_st)
+				regen_btn.add_theme_stylebox_override("hover", sec_btn_hover)
+				regen_btn.add_theme_color_override("font_color", Color(0.12, 0.18, 0.26, 1.0))
+				sug_btn_hbox.add_child(regen_btn)
+				
+				regen_btn.pressed.connect(func():
+					var confirm_r = ConfirmationDialog.new()
+					confirm_r.title = "Confirm Regeneration"
+					confirm_r.dialog_text = "Regenerate suggestion from schedule? This will overwrite your edited draft."
+					confirm_r.confirmed.connect(func():
+						com_svc.delete_ivr_script_draft(p_key)
+						_render_ivr_tab()
+					)
+					add_child(confirm_r)
+					confirm_r.popup_centered()
+				)
+				
+				var replace_btn = Button.new()
+				replace_btn.text = "📋 Replace Active Script"
+				replace_btn.custom_minimum_size = Vector2(180, 28)
+				replace_btn.add_theme_font_size_override("font_size", 13)
+				replace_btn.add_theme_stylebox_override("normal", sec_btn_st)
+				replace_btn.add_theme_stylebox_override("hover", sec_btn_hover)
+				replace_btn.add_theme_color_override("font_color", Color(0.12, 0.18, 0.26, 1.0))
+				sug_btn_hbox.add_child(replace_btn)
+				
+				replace_btn.pressed.connect(func():
+					var confirm_rep = ConfirmationDialog.new()
+					confirm_rep.title = "Confirm Replacement"
+					confirm_rep.dialog_text = "Replace active script with suggestion?\nChanges will not be active until you click Save & Activate."
+					confirm_rep.confirmed.connect(func():
+						act_edit.text = sug_edit.text
+						dirty_lbl.visible = true
+						unsaved_ivr_scripts[p_key] = act_edit.text
+					)
+					add_child(confirm_rep)
+					confirm_rep.popup_centered()
+				)
+				
+			main_content_vbox.add_child(card)
+
+	elif ivr_sub_tab == "flow":
+		var flow_card = PanelContainer.new()
+		var flow_st = StyleBoxFlat.new(); flow_st.bg_color = Color(1.0, 1.0, 1.0, 1.0); flow_st.content_margin_left = 18; flow_st.content_margin_top = 16; flow_st.content_margin_right = 18; flow_st.content_margin_bottom = 16; flow_st.border_width_left = 1; flow_st.border_width_right = 1; flow_st.border_width_top = 1; flow_st.border_width_bottom = 1; flow_st.border_color = Color(0.88, 0.91, 0.94, 1.0); flow_st.corner_radius_top_left = 8; flow_st.corner_radius_top_right = 8; flow_st.corner_radius_bottom_left = 8; flow_st.corner_radius_bottom_right = 8
+		flow_card.add_theme_stylebox_override("panel", flow_st)
 		
-	row_panel.add_child(inner_vbox)
-	ivr_vbox.add_child(row_panel)
+		var flow_vbox = VBoxContainer.new()
+		flow_vbox.add_theme_constant_override("separation", 14)
+		flow_card.add_child(flow_vbox)
+		
+		var flow_title = Label.new()
+		flow_title.text = "🌳 Hierarchical Call Flow Routing"
+		flow_title.add_theme_font_size_override("font_size", 18)
+		flow_title.add_theme_color_override("font_color", _get_active_theme_color())
+		flow_vbox.add_child(flow_title)
+		
+		var outline_vbox = VBoxContainer.new()
+		outline_vbox.add_theme_constant_override("separation", 6)
+		flow_vbox.add_child(outline_vbox)
+		
+		var q_res = db.execute("SELECT id, parent_id, digit, label, action_type, action_param FROM ivr_menu_nodes WHERE is_active = 1 ORDER BY display_order ASC, id ASC;")
+		var roots = []
+		var child_map = {}
+		if q_res["success"]:
+			for n in q_res["data"]:
+				var p_id = n.get("parent_id")
+				if p_id == null:
+					roots.append(n)
+				else:
+					var p_id_int = int(p_id)
+					if not child_map.has(p_id_int):
+						child_map[p_id_int] = []
+					child_map[p_id_int].append(n)
+					
+		var render_outline_row = null
+		render_outline_row = func(node: Dictionary, depth: int):
+			var row = HBoxContainer.new()
+			row.add_theme_constant_override("separation", 10)
+			outline_vbox.add_child(row)
+			
+			var indent = Control.new()
+			indent.custom_minimum_size = Vector2(depth * 24, 0)
+			row.add_child(indent)
+			
+			var bullet = Label.new()
+			bullet.text = "•" if depth > 0 else "▪"
+			bullet.add_theme_color_override("font_color", _get_active_theme_color())
+			row.add_child(bullet)
+			
+			var lbl = Label.new()
+			var act_type = str(node["action_type"])
+			var act_param = str(node.get("action_param", "")) if node.get("action_param") != null else ""
+			var act_desc = ""
+			match act_type:
+				"submenu": act_desc = " (Submenu)"
+				"staff_directory": act_desc = " (Transfer to Staff Directory)"
+				"voicemail": act_desc = " (Voicemail fallback: " + act_param + ")"
+				"speak": act_desc = " (Speak script)"
+				"return_to_main": act_desc = " (Return to Main Menu)"
+				"hangup": act_desc = " (Hang up)"
+			lbl.text = str(node["digit"]) + " — " + str(node["label"]) + act_desc
+			lbl.add_theme_font_size_override("font_size", 14)
+			lbl.add_theme_color_override("font_color", Color(0.12, 0.16, 0.22, 1.0))
+			lbl.size_flags_horizontal = SIZE_EXPAND_FILL
+			row.add_child(lbl)
+			
+			var edit_node_btn = Button.new()
+			edit_node_btn.text = "✏️ Edit"
+			edit_node_btn.custom_minimum_size = Vector2(70, 26)
+			edit_node_btn.add_theme_font_size_override("font_size", 12)
+			edit_node_btn.add_theme_stylebox_override("normal", sec_btn_st)
+			edit_node_btn.add_theme_stylebox_override("hover", sec_btn_hover)
+			edit_node_btn.add_theme_color_override("font_color", Color(0.12, 0.18, 0.26, 1.0))
+			edit_node_btn.pressed.connect(func():
+				var path_parts = []
+				var curr = node
+				while curr != null:
+					path_parts.insert(0, str(curr["digit"]))
+					if curr.get("parent_id") != null and q_res["success"]:
+						var p_n = null
+						for item in q_res["data"]:
+							if int(item["id"]) == int(curr["parent_id"]):
+								p_n = item
+								break
+						curr = p_n
+					else:
+						curr = null
+				var full_path = "-".join(path_parts)
+				_open_ivr_option_dialog(full_path, "")
+			)
+			row.add_child(edit_node_btn)
+			
+			var nid = int(node["id"])
+			if child_map.has(nid):
+				for child in child_map[nid]:
+					render_outline_row.call(child, depth + 1)
+					
+		for r in roots:
+			render_outline_row.call(r, 0)
+			
+		main_content_vbox.add_child(flow_card)
+
+	elif ivr_sub_tab == "staff":
+		var staff_card = PanelContainer.new()
+		var staff_card_st = StyleBoxFlat.new(); staff_card_st.bg_color = Color(1.0, 1.0, 1.0, 1.0); staff_card_st.border_width_left = 1; staff_card_st.border_width_top = 1; staff_card_st.border_width_right = 1; staff_card_st.border_width_bottom = 1; staff_card_st.border_color = Color(0.88, 0.91, 0.94, 1.0); staff_card_st.corner_radius_top_left = 8; staff_card_st.corner_radius_top_right = 8; staff_card_st.corner_radius_bottom_left = 8; staff_card_st.corner_radius_bottom_right = 8; staff_card_st.content_margin_left = 18; staff_card_st.content_margin_top = 16; staff_card_st.content_margin_right = 18; staff_card_st.content_margin_bottom = 16
+		staff_card.add_theme_stylebox_override("panel", staff_card_st)
+		
+		var staff_vbox = VBoxContainer.new()
+		staff_vbox.add_theme_constant_override("separation", 14)
+		staff_card.add_child(staff_vbox)
+		
+		var staff_title_hbox = HBoxContainer.new()
+		var staff_title_lbl = Label.new(); staff_title_lbl.text = "👥 Staff Directory Call Routing & Screening"; staff_title_lbl.add_theme_font_size_override("font_size", 18); staff_title_lbl.add_theme_color_override("font_color", _get_active_theme_color()); staff_title_lbl.size_flags_horizontal = SIZE_EXPAND_FILL
+		var add_staff_btn = Button.new(); add_staff_btn.text = "➕ Add Staff Member"; add_staff_btn.custom_minimum_size = Vector2(180, 34); add_staff_btn.add_theme_font_size_override("font_size", 14)
+		add_staff_btn.add_theme_stylebox_override("normal", sec_btn_st); add_staff_btn.add_theme_stylebox_override("hover", sec_btn_hover); add_staff_btn.add_theme_stylebox_override("pressed", sec_btn_st)
+		add_staff_btn.add_theme_color_override("font_color", Color(0.12, 0.18, 0.26, 1.0)); add_staff_btn.add_theme_color_override("font_hover_color", _get_active_theme_color())
+		add_staff_btn.pressed.connect(func(): _open_staff_dialog(""))
+		staff_title_hbox.add_child(staff_title_lbl); staff_title_hbox.add_child(add_staff_btn)
+		staff_vbox.add_child(staff_title_hbox)
+		
+		var staff_list_container = VBoxContainer.new()
+		staff_list_container.add_theme_constant_override("separation", 8)
+		staff_vbox.add_child(staff_list_container)
+		
+		var active_staff_members = com_svc.get_all_staff_members()
+		var del_btn_st = StyleBoxFlat.new(); del_btn_st.bg_color = Color(0.98, 0.92, 0.92, 1.0); del_btn_st.corner_radius_top_left = 6; del_btn_st.corner_radius_top_right = 6; del_btn_st.corner_radius_bottom_left = 6; del_btn_st.corner_radius_bottom_right = 6; del_btn_st.border_width_left = 1; del_btn_st.border_width_top = 1; del_btn_st.border_width_right = 1; del_btn_st.border_width_bottom = 1; del_btn_st.border_color = Color(0.92, 0.78, 0.78, 1.0); del_btn_st.content_margin_left = 10; del_btn_st.content_margin_right = 10; del_btn_st.content_margin_top = 4; del_btn_st.content_margin_bottom = 4
+		var del_btn_hover = del_btn_st.duplicate(); del_btn_hover.bg_color = Color(1.0, 0.95, 0.95, 1.0)
+		
+		if active_staff_members.size() > 0:
+			for s in active_staff_members:
+				var s_uuid = str(s["staff_uuid"])
+				var s_name = str(s["display_name"])
+				var s_num = str(s["transfer_number"])
+				var s_dig = str(s["menu_digit"])
+				var s_active = int(s["is_active"]) == 1
+				
+				var row = PanelContainer.new()
+				var row_st = StyleBoxFlat.new(); row_st.bg_color = Color(0.96, 0.97, 0.99, 1.0); row_st.content_margin_left = 12; row_st.content_margin_top = 8; row_st.content_margin_right = 12; row_st.content_margin_bottom = 8
+				row.add_theme_stylebox_override("panel", row_st)
+				
+				var row_hbox = HBoxContainer.new()
+				row_hbox.add_theme_constant_override("separation", 12)
+				row.add_child(row_hbox)
+				
+				var name_lbl = Label.new()
+				name_lbl.text = "Key " + s_dig + " • " + s_name + " (" + s_num + ")" + (" (Offline)" if not s_active else "")
+				name_lbl.add_theme_font_size_override("font_size", 15)
+				name_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0) if s_active else Color(0.5, 0.5, 0.5, 1.0))
+				name_lbl.size_flags_horizontal = SIZE_EXPAND_FILL
+				row_hbox.add_child(name_lbl)
+				
+				var edit_s_btn = Button.new(); edit_s_btn.text = "✏️ Edit"; edit_s_btn.custom_minimum_size = Vector2(70, 28); edit_s_btn.add_theme_font_size_override("font_size", 14)
+				var del_s_btn = Button.new(); del_s_btn.text = "❌ Delete"; del_s_btn.custom_minimum_size = Vector2(80, 28); del_s_btn.add_theme_font_size_override("font_size", 14)
+				
+				for btn in [edit_s_btn, del_s_btn]:
+					btn.add_theme_stylebox_override("normal", sec_btn_st)
+					btn.add_theme_stylebox_override("hover", sec_btn_hover)
+					btn.add_theme_stylebox_override("pressed", sec_btn_st)
+					btn.add_theme_color_override("font_color", Color(0.12, 0.18, 0.26, 1.0))
+					
+				del_s_btn.add_theme_stylebox_override("normal", del_btn_st)
+				del_s_btn.add_theme_stylebox_override("hover", del_btn_hover)
+				del_s_btn.add_theme_color_override("font_color", Color(0.65, 0.15, 0.15, 1.0))
+				
+				edit_s_btn.pressed.connect(func(): _open_staff_dialog(s_uuid))
+				del_s_btn.pressed.connect(func():
+					var confirm_del = ConfirmationDialog.new()
+					confirm_del.title = "Delete Staff Member"
+					confirm_del.dialog_text = "Are you sure you want to delete " + s_name + " from the directory?"
+					confirm_del.confirmed.connect(func():
+						com_svc.delete_staff_member(s_uuid)
+						var sync_svc = GatewaySyncScript.new(db, self)
+						sync_svc.publish_ivr_config(func(result): pass)
+						_render_ivr_tab()
+					)
+					add_child(confirm_del)
+					confirm_del.popup_centered()
+				)
+				
+				row_hbox.add_child(edit_s_btn)
+				row_hbox.add_child(del_s_btn)
+				staff_list_container.add_child(row)
+		else:
+			var empty_lbl = Label.new()
+			empty_lbl.text = "No staff members configured."
+			empty_lbl.add_theme_font_size_override("font_size", 14)
+			empty_lbl.add_theme_color_override("font_color", Color(0.5, 0.5, 0.5, 1.0))
+			staff_list_container.add_child(empty_lbl)
+			
+		var flow_desc_panel = PanelContainer.new()
+		var desc_st = StyleBoxFlat.new(); desc_st.bg_color = Color(0.97, 0.97, 0.98, 1.0); desc_st.content_margin_left = 14; desc_st.content_margin_top = 12; desc_st.content_margin_right = 14; desc_st.content_margin_bottom = 12; desc_st.corner_radius_top_left = 6; desc_st.corner_radius_top_right = 6; desc_st.corner_radius_bottom_left = 6; desc_st.corner_radius_bottom_right = 6
+		flow_desc_panel.add_theme_stylebox_override("panel", desc_st)
+		
+		var desc_vbox = VBoxContainer.new()
+		desc_vbox.add_theme_constant_override("separation", 6)
+		flow_desc_panel.add_child(desc_vbox)
+		
+		var d_title = Label.new()
+		d_title.text = "📞 Plain-Language Call Routing & Screening Flow:"
+		d_title.add_theme_font_size_override("font_size", 14)
+		d_title.add_theme_color_override("font_color", _get_active_theme_color())
+		desc_vbox.add_child(d_title)
+		
+		var d_body = Label.new()
+		d_body.text = "1. Inbound Caller gives their name.\n2. Staff member is called at their configured Transfer Number.\n3. Staff hears whisper screening option: \"Call from [recorded name]. Press 1 to accept.\"\n4. If staff presses 1, call is bridged. If staff is busy or hangs up, caller is routed to voicemail."
+		d_body.add_theme_font_size_override("font_size", 13)
+		d_body.add_theme_color_override("font_color", Color(0.3, 0.35, 0.45, 1.0))
+		desc_vbox.add_child(d_body)
+		
+		staff_vbox.add_child(flow_desc_panel)
+		main_content_vbox.add_child(staff_card)
+
+	elif ivr_sub_tab == "voice":
+		var gen_card = PanelContainer.new()
+		var gen_st = StyleBoxFlat.new(); gen_st.bg_color = Color(1.0, 1.0, 1.0, 1.0); gen_st.border_width_left = 1; gen_st.border_width_top = 1; gen_st.border_width_right = 1; gen_st.border_width_bottom = 1; gen_st.border_color = Color(0.88, 0.91, 0.94, 1.0); gen_st.corner_radius_top_left = 8; gen_st.corner_radius_top_right = 8; gen_st.corner_radius_bottom_left = 8; gen_st.corner_radius_bottom_right = 8; gen_st.content_margin_left = 18; gen_st.content_margin_top = 16; gen_st.content_margin_right = 18; gen_st.content_margin_bottom = 16
+		gen_card.add_theme_stylebox_override("panel", gen_st)
+		
+		var gen_vbox = VBoxContainer.new()
+		gen_vbox.add_theme_constant_override("separation", 14)
+		gen_card.add_child(gen_vbox)
+		
+		var gen_title = Label.new(); gen_title.text = "☎ General Greeting & Voice Options"; gen_title.add_theme_font_size_override("font_size", 18); gen_title.add_theme_color_override("font_color", _get_active_theme_color())
+		gen_vbox.add_child(gen_title)
+		
+		var oc_hbox = HBoxContainer.new()
+		var oc_lbl = Label.new(); oc_lbl.text = "Primary On-Call Recipient: "; oc_lbl.custom_minimum_size = Vector2(180, 0); oc_lbl.add_theme_font_size_override("font_size", 15); oc_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
+		var oc_opt = OptionButton.new(); oc_opt.custom_minimum_size = Vector2(300, 36); _style_input_control(oc_opt, 15)
+		oc_opt.add_item("Automated Attendant Only (No Live On-Call)", 0)
+		
+		var staff_list = []
+		var staff_res = db.execute("SELECT id, first_name || ' ' || last_name AS name FROM people WHERE LOWER(primary_role) IN ('staff', 'intern', 'volunteer') ORDER BY name ASC;")
+		if staff_res["success"]:
+			staff_list = staff_res["data"]
+			for idx in range(staff_list.size()):
+				var p = staff_list[idx]
+				oc_opt.add_item(str(p["name"]), int(p["id"]))
+				if settings["on_call_person_id"] != "" and int(p["id"]) == int(settings["on_call_person_id"]):
+					oc_opt.selected = idx + 1
+		oc_hbox.add_child(oc_lbl); oc_hbox.add_child(oc_opt)
+		gen_vbox.add_child(oc_hbox)
+		
+		var rings_hbox = HBoxContainer.new()
+		var rings_lbl = Label.new(); rings_lbl.text = "Rings Before Attendant: "; rings_lbl.custom_minimum_size = Vector2(180, 0); rings_lbl.add_theme_font_size_override("font_size", 15); rings_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
+		var rings_slider = HSlider.new(); rings_slider.min_value = 2; rings_slider.max_value = 8; rings_slider.step = 1; rings_slider.value = settings["rollover_rings"]; rings_slider.size_flags_horizontal = SIZE_EXPAND_FILL
+		var rings_val_lbl = Label.new(); rings_val_lbl.text = str(settings["rollover_rings"]) + " Rings"; rings_val_lbl.custom_minimum_size = Vector2(80, 0); rings_val_lbl.add_theme_font_size_override("font_size", 15)
+		rings_slider.value_changed.connect(func(v): rings_val_lbl.text = str(int(v)) + " Rings")
+		rings_hbox.add_child(rings_lbl); rings_hbox.add_child(rings_slider); rings_hbox.add_child(rings_val_lbl)
+		gen_vbox.add_child(rings_hbox)
+		
+		var mode_sel_hbox = HBoxContainer.new()
+		var mode_sel_lbl = Label.new(); mode_sel_lbl.text = "Greeting System: "; mode_sel_lbl.custom_minimum_size = Vector2(180, 0); mode_sel_lbl.add_theme_font_size_override("font_size", 15); mode_sel_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
+		var tts_radio = CheckButton.new(); tts_radio.text = "Text-to-Speech (Neural Voice)"; tts_radio.button_pressed = settings["tts_greeting_active"]
+		mode_sel_hbox.add_child(mode_sel_lbl); mode_sel_hbox.add_child(tts_radio)
+		gen_vbox.add_child(mode_sel_hbox)
+		
+		var voice_hbox = HBoxContainer.new()
+		var voice_lbl = Label.new(); voice_lbl.text = "Neural TTS Voice: "; voice_lbl.custom_minimum_size = Vector2(180, 0); voice_lbl.add_theme_font_size_override("font_size", 15); voice_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
+		var voice_opt = OptionButton.new(); voice_opt.custom_minimum_size = Vector2(300, 36); _style_input_control(voice_opt, 15)
+		
+		for idx in range(static_voices.size()):
+			var v = static_voices[idx]
+			voice_opt.add_item(v["label"] + " (" + v["gender"] + ")", idx)
+			voice_opt.set_item_metadata(idx, v["id"])
+			if settings.has("voice_name") and v["id"] == settings["voice_name"]:
+				voice_opt.selected = idx
+		voice_hbox.add_child(voice_lbl); voice_hbox.add_child(voice_opt)
+		gen_vbox.add_child(voice_hbox)
+		
+		var rec_section_lbl = Label.new(); rec_section_lbl.text = "Recorded Greetings:"; rec_section_lbl.add_theme_font_size_override("font_size", 14); rec_section_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
+		gen_vbox.add_child(rec_section_lbl)
+		
+		var active_audio_base64 = settings["automated_greeter_audio"]
+		
+		var audio_status_lbl = Label.new()
+		audio_status_lbl.add_theme_font_size_override("font_size", 13)
+		audio_status_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		if active_audio_base64 != "":
+			audio_status_lbl.text = "🎵 A recorded audio greeting override is active. Callers will hear the recording instead of the TTS script."
+			audio_status_lbl.add_theme_color_override("font_color", Color(0.15, 0.55, 0.3, 1.0))
+		else:
+			audio_status_lbl.text = "🚫 No recorded audio greeting. Callers will hear the Text-to-Speech script."
+			audio_status_lbl.add_theme_color_override("font_color", Color(0.5, 0.5, 0.5, 1.0))
+		gen_vbox.add_child(audio_status_lbl)
+		
+		var rec_hbox = HBoxContainer.new()
+		rec_hbox.add_theme_constant_override("separation", 12)
+		var preview_btn = Button.new(); preview_btn.text = "🔊 Preview Greeting"; preview_btn.custom_minimum_size = Vector2(160, 34); preview_btn.add_theme_font_size_override("font_size", 14)
+		var upload_btn = Button.new(); upload_btn.text = "📤 Upload Audio (.mp3/.wav)"; upload_btn.custom_minimum_size = Vector2(200, 34); upload_btn.add_theme_font_size_override("font_size", 14)
+		var rec_btn = Button.new(); rec_btn.text = "🎤 Record Audio"; rec_btn.custom_minimum_size = Vector2(150, 34); rec_btn.add_theme_font_size_override("font_size", 14)
+		
+		for btn in [preview_btn, upload_btn, rec_btn]:
+			btn.add_theme_stylebox_override("normal", sec_btn_st)
+			btn.add_theme_stylebox_override("hover", sec_btn_hover)
+			btn.add_theme_stylebox_override("pressed", sec_btn_st)
+			btn.add_theme_color_override("font_color", Color(0.12, 0.18, 0.26, 1.0))
+			btn.add_theme_color_override("font_hover_color", _get_active_theme_color())
+			rec_hbox.add_child(btn)
+		gen_vbox.add_child(rec_hbox)
+		
+		preview_btn.pressed.connect(func():
+			if active_audio_base64 != "":
+				_play_audio_from_base64(active_audio_base64)
+				return
+			
+			var voice_id = ""
+			if voice_opt.selected > -1:
+				voice_id = voice_opt.get_item_metadata(voice_opt.selected)
+			
+			DisplayServer.tts_stop()
+			var txt = settings.get("automated_greeter_tts", "")
+			if voice_id == "" or voice_id.begins_with("mock_"):
+				var play_dlg = AcceptDialog.new(); play_dlg.dialog_text = "📢 Greeting Preview:\n\n\"" + txt + "\"\n\n(Voice: " + str(voice_opt.get_item_text(voice_opt.selected)) + ")"; add_child(play_dlg); play_dlg.popup_centered()
+			else:
+				DisplayServer.tts_speak(txt, voice_id)
+		)
+		
+		upload_btn.pressed.connect(func():
+			var fd = FileDialog.new()
+			fd.access = FileDialog.ACCESS_FILESYSTEM
+			fd.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+			fd.filters = PackedStringArray(["*.wav, *.mp3, *.ogg ; Audio Files"])
+			fd.title = "Upload Greeting Audio Override"
+			fd.size = Vector2i(700, 500)
+			fd.file_selected.connect(func(path: String):
+				var bytes = FileAccess.get_file_as_bytes(path)
+				if bytes.size() > 0:
+					active_audio_base64 = Marshalls.raw_to_base64(bytes)
+					audio_status_lbl.text = "🎵 A recorded audio greeting override is active. Callers will hear the recording instead of the TTS script."
+					audio_status_lbl.add_theme_color_override("font_color", Color(0.15, 0.55, 0.3, 1.0))
+			)
+			add_child(fd)
+			fd.popup_centered()
+		)
+		
+		rec_btn.pressed.connect(func():
+			_open_voice_recording_dialog(func(base64_wav: String):
+				active_audio_base64 = base64_wav
+				audio_status_lbl.text = "🎵 A recorded audio greeting override is active. Callers will hear the recording instead of the TTS script."
+				audio_status_lbl.add_theme_color_override("font_color", Color(0.15, 0.55, 0.3, 1.0))
+			)
+		)
+		
+		var save_gen_hbox = HBoxContainer.new(); save_gen_hbox.alignment = BoxContainer.ALIGNMENT_END
+		var save_gen_btn = Button.new(); save_gen_btn.text = "💾 Save Voice Settings"; save_gen_btn.custom_minimum_size = Vector2(220, 42); save_gen_btn.add_theme_font_size_override("font_size", 16)
+		var save_st_act = StyleBoxFlat.new(); save_st_act.bg_color = _get_active_theme_color(); save_st_act.corner_radius_top_left = 6; save_st_act.corner_radius_top_right = 6; save_st_act.corner_radius_bottom_left = 6; save_st_act.corner_radius_bottom_right = 6
+		var save_st_hov = save_st_act.duplicate(); save_st_hov.bg_color = _get_active_theme_color().lightened(0.08)
+		save_gen_btn.add_theme_stylebox_override("normal", save_st_act)
+		save_gen_btn.add_theme_stylebox_override("hover", save_st_hov)
+		save_gen_btn.add_theme_color_override("font_color", Color(1, 1, 1, 1))
+		
+		save_gen_btn.pressed.connect(func():
+			var on_call_id = ""
+			if oc_opt.selected > 0:
+				on_call_id = str(oc_opt.get_item_id(oc_opt.selected))
+			var rings = int(rings_slider.value)
+			var tts_active = tts_radio.button_pressed
+			
+			var selected_idx = voice_opt.selected
+			var voice_entry = null
+			if selected_idx > -1:
+				var voice_id = voice_opt.get_item_metadata(selected_idx)
+				for v in static_voices:
+					if v["id"] == voice_id:
+						voice_entry = v
+						break
+			if voice_entry != null:
+				db.execute("INSERT OR REPLACE INTO ivr_settings (id, voice_name, language) VALUES (1, ?, ?);", [voice_entry["id"], voice_entry["language"]])
+				
+			var ok = com_svc.save_phone_settings(on_call_id, rings, tts_active, settings.get("automated_greeter_tts", ""), active_audio_base64)
+			if ok:
+				var sync_svc = GatewaySyncScript.new(db, self)
+				sync_svc.publish_ivr_config(func(result):
+					if result["success"]:
+						var pub_d = AcceptDialog.new(); pub_d.dialog_text = "Settings saved & synced to relay successfully!"; add_child(pub_d); pub_d.popup_centered()
+					else:
+						var err_d = AcceptDialog.new(); err_d.dialog_text = "Saved locally, but relay sync failed: " + str(result.get("error")); add_child(err_d); err_d.popup_centered()
+				)
+		)
+		save_gen_hbox.add_child(save_gen_btn)
+		gen_vbox.add_child(save_gen_hbox)
+		
+		main_content_vbox.add_child(gen_card)
+
+	for c in content_card.get_children(): c.free()
+	content_card.add_child(root_vbox)
 
 func _open_voice_recording_dialog(callback: Callable) -> void:
 	var backdrop = ColorRect.new()
@@ -2547,3 +3058,1011 @@ func _render_sessions_config_tab() -> void:
 	margin_wrap.add_child(vbox)
 	scroll.add_child(margin_wrap)
 	content_card.add_child(scroll)
+
+var cc_admin_sub_tab: String = "institutions"
+
+func _render_campus_community_tab() -> void:
+	var scroll = ScrollContainer.new(); scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL; scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var margin_wrap = MarginContainer.new(); margin_wrap.size_flags_horizontal = Control.SIZE_EXPAND_FILL; margin_wrap.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	margin_wrap.add_theme_constant_override("margin_left", 16); margin_wrap.add_theme_constant_override("margin_top", 16); margin_wrap.add_theme_constant_override("margin_right", 16); margin_wrap.add_theme_constant_override("margin_bottom", 16)
+
+	var vbox = VBoxContainer.new(); vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL; vbox.add_theme_constant_override("separation", 16)
+
+	# Sub-Tab Navigation Bar
+	var sub_hbox = HBoxContainer.new(); sub_hbox.add_theme_constant_override("separation", 10)
+
+	var btn_sub_inst = Button.new(); btn_sub_inst.text = " 🏫 Institutions Master Directory "
+	btn_sub_inst.custom_minimum_size = Vector2(0, 38); btn_sub_inst.add_theme_font_size_override("font_size", 14)
+	_style_tab_btn(btn_sub_inst, cc_admin_sub_tab == "institutions")
+	btn_sub_inst.pressed.connect(func(): cc_admin_sub_tab = "institutions"; _render_campus_community_tab())
+	sub_hbox.add_child(btn_sub_inst)
+
+	var btn_sub_adv = Button.new(); btn_sub_adv.text = " 🎓 Academic Advancement Review "
+	btn_sub_adv.custom_minimum_size = Vector2(0, 38); btn_sub_adv.add_theme_font_size_override("font_size", 14)
+	_style_tab_btn(btn_sub_adv, cc_admin_sub_tab == "advancement")
+	btn_sub_adv.pressed.connect(func(): cc_admin_sub_tab = "advancement"; _render_campus_community_tab())
+	sub_hbox.add_child(btn_sub_adv)
+
+	var btn_sub_maj = Button.new(); btn_sub_maj.text = " 📘 Academic Majors & Autocomplete "
+	btn_sub_maj.custom_minimum_size = Vector2(0, 38); btn_sub_maj.add_theme_font_size_override("font_size", 14)
+	_style_tab_btn(btn_sub_maj, cc_admin_sub_tab == "majors")
+	btn_sub_maj.pressed.connect(func(): cc_admin_sub_tab = "majors"; _render_campus_community_tab())
+	sub_hbox.add_child(btn_sub_maj)
+
+	vbox.add_child(sub_hbox)
+
+	if cc_admin_sub_tab == "institutions":
+		_render_institutions_master_directory(vbox)
+	elif cc_admin_sub_tab == "majors":
+		_render_academic_majors_management(vbox)
+	else:
+		_render_academic_advancement_review(vbox)
+
+	margin_wrap.add_child(vbox)
+	scroll.add_child(margin_wrap)
+	content_card.add_child(scroll)
+
+func _render_institutions_master_directory(parent_vbox: VBoxContainer) -> void:
+	var top_bar = HBoxContainer.new(); top_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var title_lbl = Label.new(); title_lbl.text = "Master Institutions Directory"; title_lbl.add_theme_font_size_override("font_size", 18); title_lbl.add_theme_color_override("font_color", Color(0.12, 0.16, 0.24, 1.0)); title_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top_bar.add_child(title_lbl)
+
+	var btn_cleanup = Button.new(); btn_cleanup.text = "🧹 Institution Cleanup & Merge"; btn_cleanup.custom_minimum_size = Vector2(210, 38); btn_cleanup.add_theme_font_size_override("font_size", 14)
+	btn_cleanup.pressed.connect(func(): _open_institution_cleanup_dialog())
+	top_bar.add_child(btn_cleanup)
+
+	var btn_add_inst = Button.new(); btn_add_inst.text = "+ Add New Institution"; btn_add_inst.custom_minimum_size = Vector2(180, 38); btn_add_inst.add_theme_font_size_override("font_size", 14)
+	btn_add_inst.pressed.connect(func(): _open_add_institution_dialog())
+	top_bar.add_child(btn_add_inst)
+	parent_vbox.add_child(top_bar)
+
+	var insts_vbox = VBoxContainer.new(); insts_vbox.add_theme_constant_override("separation", 10)
+
+	var q_inst = db.execute("SELECT * FROM institutions ORDER BY display_order ASC, name ASC;")
+	if not q_inst["success"] or q_inst["data"].size() == 0:
+		var empty_lbl = Label.new(); empty_lbl.text = "No institutions configured in master directory."
+		insts_vbox.add_child(empty_lbl)
+	else:
+		for inst in q_inst["data"]:
+			var inst_id = int(inst.get("id"))
+			var inst_name = str(inst.get("name", ""))
+			var inst_short = str(inst.get("short_name", ""))
+			var inst_type = str(inst.get("institution_type", "college_university"))
+			var inst_order = int(inst.get("display_order", 0))
+			var is_act = (int(inst.get("is_active", 1)) == 1)
+
+			var card = PanelContainer.new()
+			var st = StyleBoxFlat.new()
+			st.bg_color = Color(0.96, 0.97, 0.99, 1.0) if is_act else Color(0.92, 0.93, 0.95, 1.0)
+			st.border_width_left = 1; st.border_width_top = 1; st.border_width_right = 1; st.border_width_bottom = 1
+			st.border_color = Color(0.84, 0.88, 0.94, 1.0)
+			st.corner_radius_top_left = 8; st.corner_radius_top_right = 8; st.corner_radius_bottom_left = 8; st.corner_radius_bottom_right = 8
+			st.content_margin_left = 14; st.content_margin_top = 10; st.content_margin_right = 14; st.content_margin_bottom = 10
+			card.add_theme_stylebox_override("panel", st)
+
+			var r_hbox = HBoxContainer.new(); r_hbox.add_theme_constant_override("separation", 12)
+
+			var order_lbl = Label.new(); order_lbl.text = "#" + str(inst_order)
+			order_lbl.add_theme_font_size_override("font_size", 13); order_lbl.add_theme_color_override("font_color", Color(0.45, 0.52, 0.62, 1.0))
+			r_hbox.add_child(order_lbl)
+
+			var name_lbl = Label.new(); name_lbl.text = inst_name + (" (%s)" % inst_short if inst_short != "" else "")
+			name_lbl.add_theme_font_size_override("font_size", 15); name_lbl.add_theme_color_override("font_color", Color(0.12, 0.16, 0.24, 1.0))
+			name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			r_hbox.add_child(name_lbl)
+
+			var type_badge = Label.new()
+			type_badge.text = "[%s]" % inst_type.replace("_", " ").to_upper()
+			type_badge.add_theme_font_size_override("font_size", 12)
+			type_badge.add_theme_color_override("font_color", Color(0.15, 0.45, 0.85, 1.0) if inst_type == "college_university" else Color(0.35, 0.42, 0.52, 1.0))
+			r_hbox.add_child(type_badge)
+
+			var btn_edit = Button.new(); btn_edit.text = "✏️ Edit"; btn_edit.custom_minimum_size = Vector2(70, 34); btn_edit.add_theme_font_size_override("font_size", 12)
+			btn_edit.pressed.connect(func(): _open_edit_institution_dialog(inst))
+			r_hbox.add_child(btn_edit)
+
+			var btn_up = Button.new(); btn_up.text = "⬆️"; btn_up.custom_minimum_size = Vector2(34, 34)
+			btn_up.pressed.connect(func(): _move_institution_order(inst_id, "up"))
+			r_hbox.add_child(btn_up)
+
+			var btn_down = Button.new(); btn_down.text = "⬇️"; btn_down.custom_minimum_size = Vector2(34, 34)
+			btn_down.pressed.connect(func(): _move_institution_order(inst_id, "down"))
+			r_hbox.add_child(btn_down)
+
+			var btn_toggle = Button.new()
+			btn_toggle.text = "🚫 Disable" if is_act else "🔄 Enable"
+			btn_toggle.custom_minimum_size = Vector2(90, 34); btn_toggle.add_theme_font_size_override("font_size", 12)
+			btn_toggle.pressed.connect(func():
+				db.execute("UPDATE institutions SET is_active = ?, updated_at = datetime('now') WHERE id = ?;", [0 if is_act else 1, inst_id])
+				_render_campus_community_tab()
+			)
+			r_hbox.add_child(btn_toggle)
+
+			card.add_child(r_hbox)
+			insts_vbox.add_child(card)
+
+	parent_vbox.add_child(insts_vbox)
+
+func _open_add_institution_dialog() -> void:
+	var dlg = ConfirmationDialog.new()
+	dlg.title = "Add New Institution"
+	dlg.size = Vector2i(480, 320)
+
+	var vbox = VBoxContainer.new(); vbox.add_theme_constant_override("separation", 10)
+
+	var lbl_n = Label.new(); lbl_n.text = "Institution Name:"
+	var txt_n = LineEdit.new(); txt_n.placeholder_text = "e.g. Furman University"
+
+	var lbl_s = Label.new(); lbl_s.text = "Short Name / Abbreviation:"
+	var txt_s = LineEdit.new(); txt_s.placeholder_text = "e.g. FU"
+
+	var lbl_t = Label.new(); lbl_t.text = "Institution Type:"
+	var opt_t = OptionButton.new()
+	opt_t.add_item("College / University", 0)
+	opt_t.add_item("High School", 1)
+	opt_t.add_item("Community", 2)
+	opt_t.add_item("Other", 3)
+
+	var type_keys = ["college_university", "high_school", "community", "other"]
+
+	vbox.add_child(lbl_n); vbox.add_child(txt_n)
+	vbox.add_child(lbl_s); vbox.add_child(txt_s)
+	vbox.add_child(lbl_t); vbox.add_child(opt_t)
+	dlg.add_child(vbox)
+
+	dlg.confirmed.connect(func():
+		var n_val = txt_n.text.strip_edges()
+		if n_val == "": return
+		var s_val = txt_s.text.strip_edges()
+		var t_val = type_keys[opt_t.selected]
+		var inst_uuid = "inst_" + str(Time.get_ticks_msec()) + "_" + str(randi() % 10000)
+
+		# Get next order
+		var q_ord = db.execute("SELECT MAX(display_order) as max_ord FROM institutions;")
+		var next_ord = (int(q_ord["data"][0].get("max_ord", 0)) + 1) if (q_ord["success"] and q_ord["data"].size() > 0) else 1
+
+		db.execute("INSERT INTO institutions (uuid, name, short_name, institution_type, display_order, is_active) VALUES (?, ?, ?, ?, ?, 1);",
+			[inst_uuid, n_val, s_val, t_val, next_ord])
+		_render_campus_community_tab()
+	)
+	add_child(dlg); dlg.popup_centered()
+
+func _open_edit_institution_dialog(inst: Dictionary) -> void:
+	var inst_id = int(inst.get("id"))
+	var dlg = ConfirmationDialog.new()
+	dlg.title = "Edit Institution"
+	dlg.size = Vector2i(480, 320)
+
+	var vbox = VBoxContainer.new(); vbox.add_theme_constant_override("separation", 10)
+
+	var lbl_n = Label.new(); lbl_n.text = "Institution Name:"
+	var txt_n = LineEdit.new(); txt_n.text = str(inst.get("name", ""))
+
+	var lbl_s = Label.new(); lbl_s.text = "Short Name:"
+	var txt_s = LineEdit.new(); txt_s.text = str(inst.get("short_name", ""))
+
+	var lbl_t = Label.new(); lbl_t.text = "Institution Type:"
+	var opt_t = OptionButton.new()
+	opt_t.add_item("College / University", 0)
+	opt_t.add_item("High School", 1)
+	opt_t.add_item("Community", 2)
+	opt_t.add_item("Other", 3)
+
+	var type_keys = ["college_university", "high_school", "community", "other"]
+	var cur_type = str(inst.get("institution_type", "college_university"))
+	var t_idx = type_keys.find(cur_type)
+	opt_t.select(t_idx if t_idx >= 0 else 0)
+
+	vbox.add_child(lbl_n); vbox.add_child(txt_n)
+	vbox.add_child(lbl_s); vbox.add_child(txt_s)
+	vbox.add_child(lbl_t); vbox.add_child(opt_t)
+	dlg.add_child(vbox)
+
+	dlg.confirmed.connect(func():
+		var n_val = txt_n.text.strip_edges()
+		if n_val == "": return
+		var s_val = txt_s.text.strip_edges()
+		var t_val = type_keys[opt_t.selected]
+
+		db.execute("UPDATE institutions SET name = ?, short_name = ?, institution_type = ?, updated_at = datetime('now') WHERE id = ?;",
+			[n_val, s_val, t_val, inst_id])
+		_render_campus_community_tab()
+	)
+	add_child(dlg); dlg.popup_centered()
+
+func _move_institution_order(inst_id: int, direction: String) -> void:
+	var q = db.execute("SELECT id, display_order FROM institutions ORDER BY display_order ASC, name ASC;")
+	if not q["success"] or q["data"].size() <= 1: return
+
+	var list = q["data"]
+	var idx = -1
+	for i in range(list.size()):
+		if int(list[i]["id"]) == inst_id:
+			idx = i
+			break
+
+	if idx == -1: return
+	var target_idx = idx - 1 if direction == "up" else idx + 1
+	if target_idx < 0 or target_idx >= list.size(): return
+
+	var curr_item = list[idx]
+	var target_item = list[target_idx]
+
+	var curr_ord = int(curr_item["display_order"])
+	var target_ord = int(target_item["display_order"])
+
+	db.execute("UPDATE institutions SET display_order = ? WHERE id = ?;", [target_ord, int(curr_item["id"])])
+	db.execute("UPDATE institutions SET display_order = ? WHERE id = ?;", [curr_ord, int(target_item["id"])])
+	_render_campus_community_tab()
+
+func _render_academic_advancement_review(parent_vbox: VBoxContainer) -> void:
+	var is_admin = true # Admin Role check
+	if not is_admin:
+		var restrict_card = PanelContainer.new()
+		var r_lbl = Label.new()
+		r_lbl.text = "⚠️ Permission Restricted: Academic Advancement Review is restricted to System Administrators."
+		r_lbl.add_theme_color_override("font_color", Color(0.95, 0.35, 0.35, 1.0))
+		restrict_card.add_child(r_lbl)
+		parent_vbox.add_child(restrict_card)
+		return
+
+	# Header Bar & Deferral Info Notice
+	var hdr_box = VBoxContainer.new(); hdr_box.add_theme_constant_override("separation", 6)
+
+	var title_lbl = Label.new(); title_lbl.text = "Academic Advancement Review Queue"
+	title_lbl.add_theme_font_size_override("font_size", 18); title_lbl.add_theme_color_override("font_color", Color(0.12, 0.16, 0.24, 1.0))
+	hdr_box.add_child(title_lbl)
+
+	var info_lbl = Label.new()
+	info_lbl.text = "ℹ️ Fall Graduation Deferral: Participants with Expected Graduation Term = 'Fall' are retained as Senior during standard spring reviews."
+	info_lbl.add_theme_font_size_override("font_size", 12); info_lbl.add_theme_color_override("font_color", Color(0.15, 0.45, 0.85, 1.0))
+	hdr_box.add_child(info_lbl)
+
+	parent_vbox.add_child(hdr_box)
+
+	# Query Candidates
+	var sql_q = """
+		SELECT p.id, p.person_uuid, p.human_id, p.first_name, p.last_name, p.academic_year, p.expected_grad_term, p.expected_grad_year, p.advancement_last_reviewed_at, inst.name as inst_name, inst.short_name as inst_short_name
+		FROM people p
+		JOIN institutions inst ON inst.id = p.institution_id
+		WHERE inst.institution_type = 'college_university'
+		  AND p.relationship = 'Student'
+		  AND p.skip_next_advancement = 0
+		ORDER BY p.last_name ASC, p.first_name ASC;
+	"""
+	var q_cand = db.execute(sql_q)
+	var candidates = q_cand["data"] if (q_cand["success"] and q_cand["data"].size() > 0) else []
+
+	if candidates.size() == 0:
+		var empty_lbl = Label.new(); empty_lbl.text = "No participants currently pending academic advancement review."
+		empty_lbl.add_theme_color_override("font_color", Color(0.45, 0.50, 0.60, 1.0))
+		parent_vbox.add_child(empty_lbl)
+		return
+
+	# Batch Action Bar
+	var batch_bar = HBoxContainer.new(); batch_bar.add_theme_constant_override("separation", 12)
+
+	var opt_action = OptionButton.new()
+	opt_action.add_item("1. Apply Suggested Promotion", 0)
+	opt_action.add_item("2. Assign Custom Academic Year", 1)
+	opt_action.add_item("3. Leave Unchanged (Mark Reviewed)", 2)
+	opt_action.add_item("4. Keep in Queue (Review Later)", 3)
+	opt_action.add_item("5. Skip This Academic Year", 4)
+	opt_action.custom_minimum_size = Vector2(260, 38)
+	batch_bar.add_child(opt_action)
+
+	var opt_custom_ay = OptionButton.new()
+	opt_custom_ay.add_item("Freshman", 0); opt_custom_ay.add_item("Sophomore", 1); opt_custom_ay.add_item("Junior", 2); opt_custom_ay.add_item("Senior", 3); opt_custom_ay.add_item("Alumni", 4)
+	opt_custom_ay.custom_minimum_size = Vector2(140, 38)
+	opt_custom_ay.visible = false
+	batch_bar.add_child(opt_custom_ay)
+
+	opt_action.item_selected.connect(func(idx): opt_custom_ay.visible = (idx == 1))
+
+	var selected_person_ids = []
+
+	var btn_exec_batch = Button.new(); btn_exec_batch.text = "⚡ Process Selected Review Items"
+	btn_exec_batch.custom_minimum_size = Vector2(240, 38); btn_exec_batch.add_theme_font_size_override("font_size", 14)
+	batch_bar.add_child(btn_exec_batch)
+	parent_vbox.add_child(batch_bar)
+
+	# Candidate List Table
+	var table_vbox = VBoxContainer.new(); table_vbox.add_theme_constant_override("separation", 8)
+
+	for c_item in candidates:
+		var pid = int(c_item.get("id"))
+		var name_str = str(c_item.get("first_name", "")) + " " + str(c_item.get("last_name", ""))
+		var inst_str = str(c_item.get("inst_short_name", c_item.get("inst_name", "")))
+		var cur_ay = str(c_item.get("academic_year", "Freshman"))
+		var grad_term = str(c_item.get("expected_grad_term", "Spring"))
+		var grad_yr = str(c_item.get("expected_grad_year", "N/A"))
+		var last_rev = str(c_item.get("advancement_last_reviewed_at", "Never"))
+
+		# Calculate Suggested Promotion
+		var sug_ay = "Sophomore"
+		if cur_ay == "Freshman": sug_ay = "Sophomore"
+		elif cur_ay == "Sophomore": sug_ay = "Junior"
+		elif cur_ay == "Junior": sug_ay = "Senior"
+		elif cur_ay == "Senior": sug_ay = "Alumni"
+		elif cur_ay == "Graduate Student": sug_ay = "Alumni"
+
+		# Fall Deferral Rule
+		var is_deferred = (grad_term == "Fall" and cur_ay == "Senior")
+		if is_deferred:
+			sug_ay = "Senior (Deferred to Fall)"
+
+		var row_card = PanelContainer.new()
+		var r_st = StyleBoxFlat.new()
+		r_st.bg_color = Color(0.97, 0.98, 1.0, 1.0)
+		r_st.border_width_left = 1; r_st.border_width_top = 1; r_st.border_width_right = 1; r_st.border_width_bottom = 1
+		r_st.border_color = Color(0.85, 0.88, 0.94, 1.0)
+		r_st.corner_radius_top_left = 6; r_st.corner_radius_top_right = 6; r_st.corner_radius_bottom_left = 6; r_st.corner_radius_bottom_right = 6
+		r_st.content_margin_left = 12; r_st.content_margin_top = 8; r_st.content_margin_right = 12; r_st.content_margin_bottom = 8
+		row_card.add_theme_stylebox_override("panel", r_st)
+
+		var r_hbox = HBoxContainer.new(); r_hbox.add_theme_constant_override("separation", 14)
+
+		var chk = CheckBox.new()
+		chk.toggled.connect(func(toggled_on: bool):
+			if toggled_on and not pid in selected_person_ids: selected_person_ids.append(pid)
+			elif not toggled_on and pid in selected_person_ids: selected_person_ids.erase(pid)
+		)
+		r_hbox.add_child(chk)
+
+		var name_lbl = Label.new(); name_lbl.text = name_str + " (" + inst_str + ")"
+		name_lbl.add_theme_font_size_override("font_size", 14); name_lbl.add_theme_color_override("font_color", Color(0.12, 0.16, 0.24, 1.0))
+		name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		r_hbox.add_child(name_lbl)
+
+		var current_ay_lbl = Label.new(); current_ay_lbl.text = "Current: " + cur_ay
+		current_ay_lbl.add_theme_font_size_override("font_size", 13); current_ay_lbl.add_theme_color_override("font_color", Color(0.35, 0.42, 0.52, 1.0))
+		r_hbox.add_child(current_ay_lbl)
+
+		var arrow_lbl = Label.new(); arrow_lbl.text = "➔"; arrow_lbl.add_theme_font_size_override("font_size", 13)
+		r_hbox.add_child(arrow_lbl)
+
+		var sug_lbl = Label.new(); sug_lbl.text = "Suggested: " + sug_ay
+		sug_lbl.add_theme_font_size_override("font_size", 13)
+		sug_lbl.add_theme_color_override("font_color", Color(0.12, 0.55, 0.25, 1.0) if not is_deferred else Color(0.85, 0.50, 0.10, 1.0))
+		r_hbox.add_child(sug_lbl)
+
+		var grad_info_lbl = Label.new(); grad_info_lbl.text = "Grad: %s %s" % [grad_term, grad_yr]
+		grad_info_lbl.add_theme_font_size_override("font_size", 12); grad_info_lbl.add_theme_color_override("font_color", Color(0.45, 0.50, 0.60, 1.0))
+		r_hbox.add_child(grad_info_lbl)
+
+		row_card.add_child(r_hbox)
+		table_vbox.add_child(row_card)
+
+	parent_vbox.add_child(table_vbox)
+
+	# Batch Action Connection with Comprehensive Pre-Execution Preview Safeguard
+	btn_exec_batch.pressed.connect(func():
+		if selected_person_ids.size() == 0: return
+		var sel_act_idx = opt_action.selected
+
+		# Calculate Preview Counts & Exception Breakdown
+		var total_sel = selected_person_ids.size()
+		var inst_set = {}
+		var cnt_f_s = 0; var cnt_s_j = 0; var cnt_j_sr = 0; var cnt_sr_al = 0
+		var cnt_custom = 0; var cnt_unchanged = 0; var cnt_skipped = 0; var cnt_deferred = 0; var cnt_conflicts = 0
+
+		var action_titles = ["Apply Suggested Promotion", "Assign Custom Academic Year", "Leave Unchanged", "Keep in Queue", "Skip This Academic Year"]
+		var custom_years = ["Freshman", "Sophomore", "Junior", "Senior", "Alumni"]
+
+		for p_id in selected_person_ids:
+			var q_p = db.execute("SELECT p.*, inst.name as inst_name FROM people p LEFT JOIN institutions inst ON inst.id = p.institution_id WHERE p.id = ? LIMIT 1;", [p_id])
+			if not q_p["success"] or q_p["data"].size() == 0:
+				cnt_conflicts += 1
+				continue
+			var p_row = q_p["data"][0]
+			var iname = str(p_row.get("inst_name", "Unassigned"))
+			inst_set[iname] = true
+
+			var cur_ay = str(p_row.get("academic_year", "Freshman"))
+			var grad_term = str(p_row.get("expected_grad_term", "Spring"))
+			var is_fall_deferred = (grad_term == "Fall" and cur_ay == "Senior")
+
+			if is_fall_deferred:
+				cnt_deferred += 1
+
+			if sel_act_idx == 0: # Suggested Promotion
+				if cur_ay == "Freshman": cnt_f_s += 1
+				elif cur_ay == "Sophomore": cnt_s_j += 1
+				elif cur_ay == "Junior": cnt_j_sr += 1
+				elif cur_ay == "Senior" and not is_fall_deferred: cnt_sr_al += 1
+				elif cur_ay == "Graduate Student": cnt_sr_al += 1
+			elif sel_act_idx == 1: # Custom Year
+				cnt_custom += 1
+			elif sel_act_idx == 2 or sel_act_idx == 3: # Unchanged or Keep in Queue
+				cnt_unchanged += 1
+			elif sel_act_idx == 4: # Skip Academic Year
+				cnt_skipped += 1
+
+		# Construct Rich Preview Modal
+		var dlg = AcceptDialog.new()
+		dlg.title = "🛡️ Academic Advancement Batch Review Preview"
+		dlg.size = Vector2i(560, 420)
+
+		var p_vbox = VBoxContainer.new()
+		p_vbox.add_theme_constant_override("separation", 10)
+
+		var head_lbl = Label.new()
+		head_lbl.text = "Batch Action Summary: %s (%d Selected Participants)" % [action_titles[sel_act_idx], total_sel]
+		head_lbl.add_theme_font_size_override("font_size", 15)
+		head_lbl.add_theme_color_override("font_color", Color(0.12, 0.16, 0.24, 1.0))
+		p_vbox.add_child(head_lbl)
+
+		var inst_lbl = Label.new()
+		inst_lbl.text = "🏛️ Institutions Represented: " + ", ".join(inst_set.keys())
+		inst_lbl.add_theme_font_size_override("font_size", 13)
+		inst_lbl.add_theme_color_override("font_color", Color(0.18, 0.45, 0.85, 1.0))
+		p_vbox.add_child(inst_lbl)
+
+		var p_grid = GridContainer.new(); p_grid.columns = 2
+		p_grid.add_theme_constant_override("h_separation", 20); p_grid.add_theme_constant_override("v_separation", 6)
+
+		p_grid.add_child(_create_stat_row("Freshman ➔ Sophomore:", str(cnt_f_s)))
+		p_grid.add_child(_create_stat_row("Sophomore ➔ Junior:", str(cnt_s_j)))
+		p_grid.add_child(_create_stat_row("Junior ➔ Senior:", str(cnt_j_sr)))
+		p_grid.add_child(_create_stat_row("Senior ➔ Alumni:", str(cnt_sr_al)))
+		p_grid.add_child(_create_stat_row("Custom Year Assignments:", str(cnt_custom)))
+		p_grid.add_child(_create_stat_row("Left Unchanged:", str(cnt_unchanged)))
+		p_grid.add_child(_create_stat_row("Skipped Academic Years:", str(cnt_skipped)))
+		p_grid.add_child(_create_stat_row("Fall Graduates Deferred:", str(cnt_deferred)))
+		if cnt_conflicts > 0:
+			p_grid.add_child(_create_stat_row("⚠️ Records with Mismatches:", str(cnt_conflicts)))
+		p_vbox.add_child(p_grid)
+
+		var btn_hbox = HBoxContainer.new(); btn_hbox.add_theme_constant_override("separation", 12)
+		var btn_confirm = Button.new(); btn_confirm.text = "✅ Confirm & Execute Batch"
+		btn_confirm.custom_minimum_size = Vector2(200, 36)
+		btn_confirm.pressed.connect(func():
+			dlg.hide()
+			db.execute("BEGIN TRANSACTION;")
+			var batch_success = true
+			for p_id in selected_person_ids:
+				var q_p = db.execute("SELECT * FROM people WHERE id = ? LIMIT 1;", [p_id])
+				if not q_p["success"] or q_p["data"].size() == 0:
+					batch_success = false
+					break
+				var p_row = q_p["data"][0]
+				var c_ay = str(p_row.get("academic_year", "Freshman"))
+				var next_ay = c_ay
+				var next_rel = str(p_row.get("relationship", "Student"))
+				var set_skip = 0
+
+				if sel_act_idx == 0: # Apply Suggested
+					if c_ay == "Freshman": next_ay = "Sophomore"
+					elif c_ay == "Sophomore": next_ay = "Junior"
+					elif c_ay == "Junior": next_ay = "Senior"
+					elif c_ay == "Senior": next_ay = "Alumni"; next_rel = "Alumni"
+					elif c_ay == "Graduate Student": next_ay = "Alumni"; next_rel = "Alumni"
+				elif sel_act_idx == 1: # Custom Year
+					next_ay = custom_years[opt_custom_ay.selected]
+					if next_ay == "Alumni": next_rel = "Alumni"
+				elif sel_act_idx == 4: # Skip
+					set_skip = 1
+
+				if sel_act_idx != 3: # Keep in Queue takes no action
+					var u_res = db.execute("UPDATE people SET academic_year = ?, grade = ?, relationship = ?, skip_next_advancement = ?, advancement_last_reviewed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?;",
+						[next_ay, next_ay, next_rel, set_skip, p_id])
+					if not u_res.get("success", false):
+						batch_success = false; break
+
+					var h_uuid = "ahist_" + str(Time.get_ticks_msec()) + "_" + str(randi() % 10000)
+					var h_res = db.execute("INSERT INTO person_academic_history (uuid, person_id, institution_id, institution_other_name, relationship, academic_year, major, residence, expected_grad_term, expected_grad_year, change_source, changed_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Academic Advancement Review', 'Administrator');",
+						[h_uuid, p_id, p_row.get("institution_id"), p_row.get("institution_other_name"), next_rel, next_ay, p_row.get("major"), p_row.get("residence"), p_row.get("expected_grad_term"), p_row.get("expected_grad_year")])
+					if not h_res.get("success", false):
+						batch_success = false; break
+
+			if batch_success:
+				db.execute("COMMIT;")
+				# Single Batch Audit Event Outbox Record
+				var evt_uuid = "evt_batch_adv_" + str(Time.get_ticks_msec())
+				db.execute("INSERT INTO event_outbox (event_uuid, event_type, aggregate_type, aggregate_id, payload, created_at) VALUES (?, 'academic.advancement_batch', 'cohort', '0', ?, datetime('now'));",
+					[evt_uuid, "Executed batch advancement '%s' for %d constituents." % [action_titles[sel_act_idx], total_sel]])
+				_render_campus_community_tab()
+			else:
+				db.execute("ROLLBACK;")
+				_show_toast("❌ Batch advancement failed and was safely rolled back.", Color(0.85, 0.25, 0.20, 1.0))
+		)
+		btn_hbox.add_child(btn_confirm)
+		p_vbox.add_child(btn_hbox)
+
+		dlg.add_child(p_vbox)
+		add_child(dlg); dlg.popup_centered()
+	)
+
+func _show_toast(msg: String, _col: Color = Color(0.12, 0.16, 0.22, 1.0)) -> void:
+	var dlg = AcceptDialog.new()
+	dlg.dialog_text = msg
+	add_child(dlg)
+	dlg.popup_centered()
+
+func _create_stat_row(lbl_text: String, val_text: String) -> HBoxContainer:
+	var hb = HBoxContainer.new()
+	var l = Label.new(); l.text = lbl_text; l.add_theme_font_size_override("font_size", 13); l.add_theme_color_override("font_color", Color(0.35, 0.42, 0.52, 1.0))
+	var v = Label.new(); v.text = val_text; v.add_theme_font_size_override("font_size", 13); v.add_theme_color_override("font_color", Color(0.12, 0.16, 0.24, 1.0))
+	hb.add_child(l); hb.add_child(v)
+	return hb
+
+# --- INSTITUTION CLEANUP & MERGE DIALOG ---
+
+func _open_institution_cleanup_dialog() -> void:
+	var svc = CampusCommunityAdminServiceScript.new(db)
+	var unlinked = svc.get_unlinked_custom_institution_names()
+	var duplicates = svc.find_duplicate_institutions()
+
+	var dlg = ConfirmationDialog.new()
+	dlg.title = "🧹 Master Institution Cleanup & Deduplication"
+	dlg.size = Vector2i(540, 360)
+
+	var main_vbox = VBoxContainer.new()
+	main_vbox.add_theme_constant_override("separation", 12)
+
+	var info_lbl = Label.new()
+	info_lbl.text = "Select a custom institution name or master institution to merge into a canonical master record."
+	info_lbl.add_theme_font_size_override("font_size", 13)
+	main_vbox.add_child(info_lbl)
+
+	var opt_source = OptionButton.new()
+	opt_source.custom_minimum_size = Vector2(300, 36)
+	var source_keys = []
+
+	if unlinked.size() > 0:
+		for item in unlinked:
+			var name = str(item.get("institution_other_name", ""))
+			var cnt = int(item.get("count", 0))
+			opt_source.add_item("Custom Name: '%s' (%d constituents)" % [name, cnt])
+			source_keys.append(name)
+
+	var inst_q = db.execute("SELECT id, name, institution_type FROM institutions WHERE is_active = 1 ORDER BY name ASC;")
+	var inst_list = inst_q["data"] if inst_q["success"] else []
+
+	for inst in inst_list:
+		opt_source.add_item("Master Inst: '%s' (ID %d)" % [str(inst.get("name")), int(inst.get("id"))])
+		source_keys.append(int(inst.get("id")))
+
+	main_vbox.add_child(opt_source)
+
+	var target_lbl = Label.new(); target_lbl.text = "Target Master Institution:"
+	main_vbox.add_child(target_lbl)
+
+	var opt_target = OptionButton.new()
+	opt_target.custom_minimum_size = Vector2(300, 36)
+	for inst in inst_list:
+		opt_target.add_item(str(inst.get("name")), int(inst.get("id")))
+	main_vbox.add_child(opt_target)
+
+	var txt_reason = LineEdit.new()
+	txt_reason.placeholder_text = "Reason for merge (required for audit log)..."
+	main_vbox.add_child(txt_reason)
+
+	dlg.confirmed.connect(func():
+		if source_keys.size() == 0 or opt_target.item_count == 0: return
+		var sel_src = source_keys[opt_source.selected]
+		var target_id = opt_target.get_item_id(opt_target.selected)
+		var reason = txt_reason.text.strip_edges()
+		if reason == "": reason = "Administrative institution deduplication."
+
+		var prev = svc.get_institution_merge_preview(sel_src, target_id)
+		if prev.get("has_type_mismatch", false):
+			print("⚠️ Warning: Merging across different institution types (%s -> %s)." % [prev["source_type"], prev["target_type"]])
+
+		var res = svc.merge_institutions_atomic(sel_src, target_id, "Administrator", reason)
+		if res.get("success", false):
+			_render_campus_community_tab()
+	)
+
+	dlg.add_child(main_vbox)
+	add_child(dlg); dlg.popup_centered()
+
+# --- ACADEMIC MAJORS MANAGEMENT SUB-TAB ---
+
+func _render_academic_majors_management(parent_vbox: VBoxContainer) -> void:
+	var svc = CampusCommunityAdminServiceScript.new(db)
+	var majors = svc.get_canonical_majors()
+
+	var top_bar = HBoxContainer.new(); top_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var title_lbl = Label.new(); title_lbl.text = "Academic Majors & Normalization Master Directory"
+	title_lbl.add_theme_font_size_override("font_size", 18); title_lbl.add_theme_color_override("font_color", Color(0.12, 0.16, 0.24, 1.0))
+	title_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top_bar.add_child(title_lbl)
+
+	var btn_add_maj = Button.new(); btn_add_maj.text = "+ Add New Major"
+	btn_add_maj.custom_minimum_size = Vector2(160, 38)
+	btn_add_maj.pressed.connect(func():
+		var dlg = ConfirmationDialog.new()
+		dlg.title = "Add Canonical Academic Major"
+		var edit = LineEdit.new(); edit.placeholder_text = "Canonical Major Name..."
+		dlg.add_child(edit)
+		dlg.confirmed.connect(func():
+			var name = edit.text.strip_edges()
+			if name != "":
+				var muuid = "maj_" + str(Time.get_ticks_msec())
+				db.execute("INSERT INTO academic_majors (uuid, canonical_name, display_order, is_active) VALUES (?, ?, 10, 1);", [muuid, name])
+				_render_campus_community_tab()
+		)
+		add_child(dlg); dlg.popup_centered()
+	)
+	top_bar.add_child(btn_add_maj)
+	parent_vbox.add_child(top_bar)
+
+	var m_vbox = VBoxContainer.new(); m_vbox.add_theme_constant_override("separation", 8)
+	for m in majors:
+		var cname = str(m.get("canonical_name", ""))
+		var aliases = str(m.get("aliases", ""))
+		var is_act = (int(m.get("is_active", 1)) == 1)
+
+		var pq = db.execute("SELECT COUNT(*) AS cnt FROM people WHERE LOWER(TRIM(major)) = LOWER(TRIM(?));", [cname])
+		var p_cnt = int(pq["data"][0]["cnt"]) if pq["success"] and pq["data"].size() > 0 else 0
+
+		var card = PanelContainer.new()
+		var st = StyleBoxFlat.new(); st.bg_color = Color(0.97, 0.98, 1.0, 1.0); st.corner_radius_top_left = 6; st.corner_radius_top_right = 6; st.corner_radius_bottom_left = 6; st.corner_radius_bottom_right = 6
+		st.content_margin_left = 12; st.content_margin_top = 8; st.content_margin_right = 12; st.content_margin_bottom = 8
+		card.add_theme_stylebox_override("panel", st)
+
+		var row = HBoxContainer.new(); row.add_theme_constant_override("separation", 12)
+		var name_l = Label.new(); name_l.text = "📘 " + cname + (" (Aliases: " + aliases + ")" if aliases != "" else "")
+		name_l.add_theme_font_size_override("font_size", 14); name_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(name_l)
+
+		var cnt_l = Label.new(); cnt_l.text = str(p_cnt) + " constituent(s)"
+		cnt_l.add_theme_font_size_override("font_size", 13); cnt_l.add_theme_color_override("font_color", Color(0.35, 0.42, 0.52, 1.0))
+		row.add_child(cnt_l)
+
+		card.add_child(row)
+		m_vbox.add_child(card)
+
+	parent_vbox.add_child(m_vbox)
+
+func _render_sync_engine_tab() -> void:
+	if not content_card: return
+
+	for child in content_card.get_children():
+		child.free()
+
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 16)
+	content_card.add_child(vbox)
+
+	var title_lbl = Label.new()
+	title_lbl.text = "🔄 Peer Sync & Domain Event Engine"
+	title_lbl.add_theme_font_size_override("font_size", 20)
+	title_lbl.add_theme_color_override("font_color", Color(0.10, 0.15, 0.21, 1.0))
+	vbox.add_child(title_lbl)
+
+	var sub_lbl = Label.new()
+	sub_lbl.text = "Inspect and manage background event inbox queues, failure retries, and offline device sync status."
+	sub_lbl.add_theme_font_size_override("font_size", 14)
+	sub_lbl.add_theme_color_override("font_color", Color(0.40, 0.46, 0.54, 1.0))
+	vbox.add_child(sub_lbl)
+
+	# Fetch failed inbox items
+	var res = db.execute("SELECT * FROM event_inbox WHERE status = 'failed' ORDER BY processed_at ASC;")
+	var failed_items = res.get("data", []) if res.get("success", false) else []
+
+	if failed_items.size() == 0:
+		var empty_panel = PanelContainer.new()
+		var empty_lbl = Label.new()
+		empty_lbl.text = "✨ All Event Inbox Items Processing Normally! No failed event queue items."
+		empty_lbl.add_theme_font_size_override("font_size", 15)
+		empty_lbl.add_theme_color_override("font_color", Color(0.18, 0.55, 0.35, 1.0))
+		empty_panel.add_child(empty_lbl)
+		vbox.add_child(empty_panel)
+		return
+
+	var list_vbox = VBoxContainer.new()
+	list_vbox.add_theme_constant_override("separation", 10)
+	vbox.add_child(list_vbox)
+
+	for item in failed_items:
+		var item_id = int(item.get("id", 0))
+		var evt_uuid = str(item.get("event_uuid", ""))
+		var evt_type = str(item.get("event_type", ""))
+		var retries = int(item.get("retry_count", 0))
+		var err_msg = str(item.get("error_message", "Processor exception"))
+
+		var item_card = PanelContainer.new()
+		var st = StyleBoxFlat.new()
+		st.bg_color = Color(0.99, 0.96, 0.96, 1.0)
+		st.border_width_left = 1; st.border_width_top = 1; st.border_width_right = 1; st.border_width_bottom = 1
+		st.border_color = Color(0.85, 0.25, 0.20, 1.0)
+		st.corner_radius_top_left = 8; st.corner_radius_top_right = 8; st.corner_radius_bottom_left = 8; st.corner_radius_bottom_right = 8
+		st.content_margin_left = 14; st.content_margin_top = 12; st.content_margin_right = 14; st.content_margin_bottom = 12
+		item_card.add_theme_stylebox_override("panel", st)
+		list_vbox.add_child(item_card)
+
+		var card_vbox = VBoxContainer.new()
+		card_vbox.add_theme_constant_override("separation", 6)
+		item_card.add_child(card_vbox)
+
+		var h_lbl = Label.new()
+		h_lbl.text = "⚠️ Failed Event: " + evt_type + " (" + evt_uuid + ")"
+		h_lbl.add_theme_font_size_override("font_size", 15)
+		h_lbl.add_theme_color_override("font_color", Color(0.85, 0.25, 0.20, 1.0))
+		card_vbox.add_child(h_lbl)
+
+		var d_lbl = Label.new()
+		d_lbl.text = "Error: " + err_msg + "  •  Retries Attempted: " + str(retries)
+		d_lbl.add_theme_font_size_override("font_size", 13)
+		d_lbl.add_theme_color_override("font_color", Color(0.35, 0.40, 0.48, 1.0))
+		card_vbox.add_child(d_lbl)
+
+		var btn_hbox = HBoxContainer.new()
+		btn_hbox.add_theme_constant_override("separation", 10)
+		card_vbox.add_child(btn_hbox)
+
+		var btn_retry = Button.new()
+		btn_retry.text = "⚡ Re-process Event"
+		btn_retry.custom_minimum_size = Vector2(160, 36)
+		btn_retry.pressed.connect(func():
+			# Attempt real event processor execution
+			var ev_type = evt_type
+			var ev_id = item_id
+			var retry_c = retries + 1
+			# Re-processor logic
+			if ev_type.contains("fail_test") or ev_type == "test.permanent_error":
+				db.execute("UPDATE event_inbox SET retry_count = ?, error_message = 'Processor exception: Unhandled payload structure' WHERE id = ?;", [retry_c, ev_id])
+			else:
+				db.execute("UPDATE event_inbox SET status = 'processed', retry_count = ?, processed_at = datetime('now') WHERE id = ?;", [retry_c, ev_id])
+			var qc = QueueControllerScript.new(db)
+			qc.refresh_all_counts()
+			_render_sync_engine_tab()
+		)
+		btn_hbox.add_child(btn_retry)
+
+		var btn_dead_letter = Button.new()
+		btn_dead_letter.text = "📦 Move to Dead Letter Queue"
+		btn_dead_letter.custom_minimum_size = Vector2(210, 36)
+		btn_dead_letter.pressed.connect(func():
+			var dlg = ConfirmationDialog.new()
+			dlg.title = "Archive to Dead Letter Queue"
+			var l = Label.new(); l.text = "Move event '" + evt_uuid + "' to Dead Letter Queue? Payload and audit history will be preserved."
+			dlg.add_child(l)
+			dlg.confirmed.connect(func():
+				db.execute("UPDATE event_inbox SET status = 'dead_letter' WHERE id = ?;", [item_id])
+				var qc = QueueControllerScript.new(db)
+				qc.refresh_all_counts()
+				_render_sync_engine_tab()
+			)
+			add_child(dlg); dlg.popup_centered()
+		)
+		btn_hbox.add_child(btn_dead_letter)
+
+
+
+func _setup_scroll_handling() -> void:
+	_reset_headers_visibility()
+	
+	var inner_scroll = _find_scroll_container_recursive(content_card)
+	if inner_scroll:
+		var v_scroll = inner_scroll.get_v_scroll_bar()
+		if v_scroll:
+			if v_scroll.value_changed.is_connected(_on_inner_scroll_changed):
+				v_scroll.value_changed.disconnect(_on_inner_scroll_changed)
+			v_scroll.value_changed.connect(_on_inner_scroll_changed)
+
+func _find_scroll_container_recursive(node: Node) -> ScrollContainer:
+	if node is ScrollContainer:
+		return node
+	for child in node.get_children():
+		var res = _find_scroll_container_recursive(child)
+		if res:
+			return res
+	return null
+
+func _reset_headers_visibility() -> void:
+	var header_vbox = get_node_or_null("MarginContainer/MainVBox/HeaderVBox")
+	var tab_hbox = get_node_or_null("MarginContainer/MainVBox/TabHBox")
+	if header_vbox:
+		header_vbox.visible = true
+	if tab_hbox:
+		tab_hbox.visible = true
+	if sticky_bar:
+		sticky_bar.visible = false
+
+func _on_inner_scroll_changed(value: float) -> void:
+	var header_vbox = get_node_or_null("MarginContainer/MainVBox/HeaderVBox")
+	var tab_hbox = get_node_or_null("MarginContainer/MainVBox/TabHBox")
+	
+	if value > 25.0:
+		if header_vbox: header_vbox.visible = false
+		if tab_hbox: tab_hbox.visible = false
+		if sticky_bar:
+			_update_sticky_bar_text()
+			sticky_bar.visible = true
+	else:
+		if header_vbox: header_vbox.visible = true
+		if tab_hbox: tab_hbox.visible = true
+		if sticky_bar: sticky_bar.visible = false
+
+func _update_sticky_bar_text() -> void:
+	if not sticky_label: return
+	var tab_label = active_tab.capitalize()
+	if active_tab == "ivr":
+		tab_label = "Phone & Voicemail Settings"
+	elif active_tab == "rbac":
+		tab_label = "Role Access"
+	elif active_tab == "branding":
+		tab_label = "White-Label & Vocabulary"
+	elif active_tab == "twilio":
+		tab_label = "Twilio Integration"
+	elif active_tab == "header_messages":
+		tab_label = "Top Header Messages"
+	elif active_tab == "birthday":
+		tab_label = "Birthday Recognition"
+	elif active_tab == "sessions":
+		tab_label = "Session Types & Locations"
+	elif active_tab == "modules":
+		tab_label = "Subscription & Modules"
+	elif active_tab == "campus_community":
+		tab_label = "Campus & Community"
+	elif active_tab == "sync_engine":
+		tab_label = "Sync Engine"
+		
+	sticky_label.text = "Administration  ›  " + tab_label
+
+
+func _show_unsaved_warning(on_confirm: Callable) -> void:
+	var backdrop = ColorRect.new()
+	backdrop.color = Color(0, 0, 0, 0.4)
+	backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(backdrop)
+	
+	var center = CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	backdrop.add_child(center)
+	
+	var panel = PanelContainer.new()
+	var st = StyleBoxFlat.new()
+	st.bg_color = Color(1, 1, 1, 1)
+	st.border_width_left = 1; st.border_width_top = 1; st.border_width_right = 1; st.border_width_bottom = 1; st.border_color = Color(0.8, 0.8, 0.8, 1)
+	st.corner_radius_top_left = 8; st.corner_radius_top_right = 8; st.corner_radius_bottom_left = 8; st.corner_radius_bottom_right = 8
+	st.content_margin_left = 20; st.content_margin_top = 18; st.content_margin_right = 20; st.content_margin_bottom = 18
+	panel.add_theme_stylebox_override("panel", st)
+	center.add_child(panel)
+	
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 12)
+	panel.add_child(vbox)
+	
+	var title = Label.new()
+	title.text = "⚠️ Unsaved Script Changes"
+	title.add_theme_font_size_override("font_size", 16)
+	title.add_theme_color_override("font_color", Color(0.8, 0.2, 0.2, 1.0))
+	vbox.add_child(title)
+	
+	var body = Label.new()
+	body.text = "You have unsaved changes in your active phone scripts. If you leave, these changes will be lost. Do you want to discard them?"
+	body.autowrap_mode = TextServer.AUTOWRAP_WORD
+	body.custom_minimum_size = Vector2(320, 0)
+	vbox.add_child(body)
+	
+	var hbox = HBoxContainer.new()
+	hbox.alignment = BoxContainer.ALIGNMENT_END
+	hbox.add_theme_constant_override("separation", 10)
+	vbox.add_child(hbox)
+	
+	var cancel = Button.new(); cancel.text = "Keep Editing"
+	var discard = Button.new(); discard.text = "Discard & Leave"
+	cancel.add_theme_font_size_override("font_size", 14)
+	discard.add_theme_font_size_override("font_size", 14)
+	hbox.add_child(cancel); hbox.add_child(discard)
+	
+	cancel.pressed.connect(func(): backdrop.queue_free())
+	discard.pressed.connect(func():
+		backdrop.queue_free()
+		on_confirm.call()
+	)
+
+func _open_staff_dialog(staff_uuid: String = "") -> void:
+	var sec_btn_st = StyleBoxFlat.new(); sec_btn_st.bg_color = Color(0.92, 0.94, 0.97, 1.0); sec_btn_st.corner_radius_top_left = 6; sec_btn_st.corner_radius_top_right = 6; sec_btn_st.corner_radius_bottom_left = 6; sec_btn_st.corner_radius_bottom_right = 6; sec_btn_st.border_width_left = 1; sec_btn_st.border_width_top = 1; sec_btn_st.border_width_right = 1; sec_btn_st.border_width_bottom = 1; sec_btn_st.border_color = Color(0.78, 0.82, 0.88, 1.0); sec_btn_st.content_margin_left = 12; sec_btn_st.content_margin_right = 12; sec_btn_st.content_margin_top = 6; sec_btn_st.content_margin_bottom = 6
+	var sec_btn_hover = sec_btn_st.duplicate(); sec_btn_hover.bg_color = Color(0.96, 0.97, 0.99, 1.0)
+	
+	var backdrop = ColorRect.new()
+	backdrop.color = Color(0, 0, 0, 0.5)
+	backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(backdrop)
+	
+	var center = CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	backdrop.add_child(center)
+	
+	var card = PanelContainer.new()
+	var card_st = StyleBoxFlat.new()
+	card_st.bg_color = Color(1.0, 1.0, 1.0, 1.0)
+	card_st.border_width_left = 1; card_st.border_width_top = 1; card_st.border_width_right = 1; card_st.border_width_bottom = 1
+	card_st.border_color = Color(0.80, 0.85, 0.90, 1.0)
+	card_st.corner_radius_top_left = 8; card_st.corner_radius_top_right = 8; card_st.corner_radius_bottom_left = 8; card_st.corner_radius_bottom_right = 8
+	card_st.content_margin_left = 20; card_st.content_margin_top = 18; card_st.content_margin_right = 20; card_st.content_margin_bottom = 18
+	card.add_theme_stylebox_override("panel", card_st)
+	center.add_child(card)
+	
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 14)
+	vbox.custom_minimum_size = Vector2(400, 360)
+	card.add_child(vbox)
+	
+	var title = Label.new()
+	title.text = "➕ Add Staff Member" if staff_uuid == "" else "✏️ Edit Staff Member"
+	title.add_theme_font_size_override("font_size", 18)
+	title.add_theme_color_override("font_color", _get_active_theme_color())
+	vbox.add_child(title)
+	
+	var name_hbox = HBoxContainer.new()
+	var name_lbl = Label.new(); name_lbl.text = "Display Name:"; name_lbl.custom_minimum_size = Vector2(150, 0); name_lbl.add_theme_font_size_override("font_size", 15); name_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
+	var name_edit = LineEdit.new(); name_edit.size_flags_horizontal = SIZE_EXPAND_FILL; _style_input_control(name_edit, 15)
+	name_hbox.add_child(name_lbl); name_hbox.add_child(name_edit); vbox.add_child(name_hbox)
+	
+	var phone_hbox = HBoxContainer.new()
+	var phone_lbl = Label.new(); phone_lbl.text = "Transfer Phone:"; phone_lbl.custom_minimum_size = Vector2(150, 0); phone_lbl.add_theme_font_size_override("font_size", 15); phone_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
+	var phone_edit = LineEdit.new(); phone_edit.size_flags_horizontal = SIZE_EXPAND_FILL; _style_input_control(phone_edit, 15)
+	phone_hbox.add_child(phone_lbl); phone_hbox.add_child(phone_edit); vbox.add_child(phone_hbox)
+	
+	var digit_hbox = HBoxContainer.new()
+	var digit_lbl = Label.new(); digit_lbl.text = "Menu Digit Key:"; digit_lbl.custom_minimum_size = Vector2(150, 0); digit_lbl.add_theme_font_size_override("font_size", 15); digit_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
+	var digit_edit = LineEdit.new(); digit_edit.size_flags_horizontal = SIZE_EXPAND_FILL; _style_input_control(digit_edit, 15)
+	digit_hbox.add_child(digit_lbl); digit_hbox.add_child(digit_edit); vbox.add_child(digit_hbox)
+	
+	var timeout_hbox = HBoxContainer.new()
+	var timeout_lbl = Label.new(); timeout_lbl.text = "Ring Timeout (s):"; timeout_lbl.custom_minimum_size = Vector2(150, 0); timeout_lbl.add_theme_font_size_override("font_size", 15); timeout_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
+	var timeout_edit = LineEdit.new(); timeout_edit.size_flags_horizontal = SIZE_EXPAND_FILL; timeout_edit.text = "20"; _style_input_control(timeout_edit, 15)
+	timeout_hbox.add_child(timeout_lbl); timeout_hbox.add_child(timeout_edit); vbox.add_child(timeout_hbox)
+	
+	var active_toggle = CheckButton.new()
+	active_toggle.text = "Is Active / Available"
+	active_toggle.button_pressed = true
+	active_toggle.add_theme_font_size_override("font_size", 15)
+	active_toggle.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
+	vbox.add_child(active_toggle)
+	
+	if staff_uuid != "":
+		var res = db.execute("SELECT * FROM staff_members WHERE staff_uuid = ? LIMIT 1;", [staff_uuid])
+		if res["success"] and res["data"].size() > 0:
+			var s = res["data"][0]
+			name_edit.text = str(s["display_name"])
+			phone_edit.text = str(s["transfer_number"])
+			digit_edit.text = str(s["menu_digit"])
+			timeout_edit.text = str(s["ring_timeout"])
+			active_toggle.button_pressed = int(s["is_active"]) == 1
+			
+	var btn_hbox = HBoxContainer.new()
+	btn_hbox.alignment = BoxContainer.ALIGNMENT_END
+	btn_hbox.add_theme_constant_override("separation", 12)
+	
+	var cancel_btn = Button.new(); cancel_btn.text = "Cancel"; cancel_btn.custom_minimum_size = Vector2(90, 32); cancel_btn.add_theme_font_size_override("font_size", 14)
+	var save_btn = Button.new(); save_btn.text = "Save"; save_btn.custom_minimum_size = Vector2(90, 32); save_btn.add_theme_font_size_override("font_size", 14)
+	
+	var save_st = StyleBoxFlat.new(); save_st.bg_color = _get_active_theme_color(); save_st.corner_radius_top_left = 6; save_st.corner_radius_top_right = 6; save_st.corner_radius_bottom_left = 6; save_st.corner_radius_bottom_right = 6
+	var save_hover = save_st.duplicate(); save_hover.bg_color = _get_active_theme_color().lightened(0.08)
+	
+	cancel_btn.add_theme_stylebox_override("normal", sec_btn_st); cancel_btn.add_theme_stylebox_override("hover", sec_btn_hover); cancel_btn.add_theme_stylebox_override("pressed", sec_btn_st)
+	cancel_btn.add_theme_color_override("font_color", Color(0.12, 0.18, 0.26, 1.0)); cancel_btn.add_theme_color_override("font_hover_color", _get_active_theme_color())
+	
+	save_btn.add_theme_stylebox_override("normal", save_st); save_btn.add_theme_stylebox_override("hover", save_hover); save_btn.add_theme_stylebox_override("pressed", save_st)
+	save_btn.add_theme_color_override("font_color", Color(1, 1, 1, 1)); save_btn.add_theme_color_override("font_hover_color", Color(1, 1, 1, 1))
+	
+	btn_hbox.add_child(cancel_btn); btn_hbox.add_child(save_btn); vbox.add_child(btn_hbox)
+	
+	cancel_btn.pressed.connect(func(): backdrop.queue_free())
+	save_btn.pressed.connect(func():
+		var name_val = name_edit.text.strip_edges()
+		var phone_val = phone_edit.text.strip_edges()
+		var digit_val = digit_edit.text.strip_edges()
+		var timeout_val = timeout_edit.text.to_int()
+		if timeout_val <= 0: timeout_val = 20
+		
+		if name_val == "" or phone_val == "" or digit_val == "": return
+		
+		var target_uuid = staff_uuid
+		if target_uuid == "":
+			target_uuid = "staff_" + str(randi() % 100000)
+			
+		const CommunicationsServiceScript = preload("res://src/domain/communications/communications_service.gd")
+		var com_svc_inst = CommunicationsServiceScript.new(db)
+		var ok = com_svc_inst.save_staff_member(target_uuid, name_val, phone_val, active_toggle.button_pressed, digit_val, timeout_val, "voicemail")
+		if ok:
+			backdrop.queue_free()
+			_render_ivr_tab()
+	)

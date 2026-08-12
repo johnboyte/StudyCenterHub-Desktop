@@ -27,6 +27,9 @@ func set_app_shell(shell_node: Node) -> void:
 	app_shell = shell_node
 
 func receive_navigation_context(_params: Dictionary) -> void:
+	var qc = _get_queue_controller()
+	if qc and qc.has_method("refresh_all_counts"):
+		qc.refresh_all_counts()
 	_setup_middle_cards()
 
 func _ready() -> void:

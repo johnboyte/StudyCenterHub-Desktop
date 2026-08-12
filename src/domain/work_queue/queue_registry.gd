@@ -213,6 +213,97 @@ static func get_registry() -> Dictionary:
 			"completion_sql": "UPDATE card_print_queue SET status = 'printed', printed_at = datetime('now') WHERE id = ?;",
 			"primary_button": "Issue Passes",
 			"queue_mode_supported": true
+		},
+		"missing_institution": {
+			"queue_id": "missing_institution",
+			"title": "Missing Institution",
+			"description": "Constituents enrolled without a linked campus or community institution",
+			"target_view": "people",
+			"required_permission": "people.manage",
+			"urgency": "normal",
+			"count_sql": "SELECT COUNT(*) AS cnt FROM people WHERE status = 'active' AND (institution_id IS NULL OR institution_id = 0) AND primary_role NOT IN ('Staff', 'System Admin');",
+			"record_sql": "SELECT id, person_uuid, first_name, last_name, primary_role FROM people WHERE status = 'active' AND (institution_id IS NULL OR institution_id = 0) AND primary_role NOT IN ('Staff', 'System Admin') ORDER BY last_name ASC, first_name ASC;",
+			"completion_sql": "UPDATE people SET updated_at = datetime('now') WHERE id = ?;",
+			"primary_button": "Assign Institution",
+			"queue_mode_supported": true
+		},
+		"missing_academic_year": {
+			"queue_id": "missing_academic_year",
+			"title": "Missing Academic Year",
+			"description": "Students missing their academic year classification (Freshman, Senior, etc.)",
+			"target_view": "people",
+			"required_permission": "people.manage",
+			"urgency": "normal",
+			"count_sql": "SELECT COUNT(*) AS cnt FROM people p LEFT JOIN institutions i ON p.institution_id = i.id WHERE p.status = 'active' AND p.relationship NOT IN ('Alumni', 'Community Member', 'Faculty', 'Staff') AND (i.institution_type IS NULL OR i.institution_type != 'community') AND (p.academic_year IS NULL OR p.academic_year = '' OR p.academic_year = 'Not Applicable');",
+			"record_sql": "SELECT p.id, p.person_uuid, p.first_name, p.last_name, p.relationship, i.name AS institution_name FROM people p LEFT JOIN institutions i ON p.institution_id = i.id WHERE p.status = 'active' AND p.relationship NOT IN ('Alumni', 'Community Member', 'Faculty', 'Staff') AND (i.institution_type IS NULL OR i.institution_type != 'community') AND (p.academic_year IS NULL OR p.academic_year = '' OR p.academic_year = 'Not Applicable') ORDER BY p.last_name ASC, p.first_name ASC;",
+			"completion_sql": "UPDATE people SET updated_at = datetime('now') WHERE id = ?;",
+			"primary_button": "Assign Year",
+			"queue_mode_supported": true
+		},
+		"approaching_graduation": {
+			"queue_id": "approaching_graduation",
+			"title": "Approaching Graduation",
+			"description": "Higher-ed students approaching expected graduation date or review threshold",
+			"target_view": "administration",
+			"required_permission": "people.manage",
+			"urgency": "urgent",
+			"count_sql": "SELECT COUNT(*) AS cnt FROM people p LEFT JOIN institutions i ON p.institution_id = i.id WHERE p.status = 'active' AND p.relationship NOT IN ('Alumni', 'Community Member', 'Faculty', 'Staff') AND (i.institution_type IS NULL OR i.institution_type = 'college_university') AND p.expected_grad_year IS NOT NULL AND p.expected_grad_year <= CAST(strftime('%Y', 'now') AS INTEGER);",
+			"record_sql": "SELECT p.id, p.person_uuid, p.first_name, p.last_name, p.academic_year, p.expected_grad_term, p.expected_grad_year, i.short_name AS inst_short FROM people p LEFT JOIN institutions i ON p.institution_id = i.id WHERE p.status = 'active' AND p.relationship NOT IN ('Alumni', 'Community Member', 'Faculty', 'Staff') AND (i.institution_type IS NULL OR i.institution_type = 'college_university') AND p.expected_grad_year IS NOT NULL AND p.expected_grad_year <= CAST(strftime('%Y', 'now') AS INTEGER) ORDER BY p.expected_grad_year ASC, p.last_name ASC;",
+			"completion_sql": "UPDATE people SET updated_at = datetime('now') WHERE id = ?;",
+			"primary_button": "Review Advancement",
+			"queue_mode_supported": true
+		},
+		"failed_outbound_messages": {
+			"queue_id": "failed_outbound_messages",
+			"title": "Failed Outbound Messages",
+			"description": "SMS or email dispatches that failed due to network or carrier errors",
+			"target_view": "communications",
+			"required_permission": "communications.manage",
+			"urgency": "urgent",
+			"count_sql": "SELECT COUNT(*) AS cnt FROM communications_log WHERE delivery_status = 'failed';",
+			"record_sql": "SELECT id, message_uuid, recipient_name, recipient_contact, channel, message_body, delivery_status, error_code, created_at FROM communications_log WHERE delivery_status = 'failed' ORDER BY created_at ASC;",
+			"completion_sql": "UPDATE communications_log SET delivery_status = 'delivered', status_detail = 'Manually retried' WHERE id = ?;",
+			"primary_button": "Retry Messages",
+			"queue_mode_supported": true
+		},
+		"unresolved_inbound_sms": {
+			"queue_id": "unresolved_inbound_sms",
+			"title": "Unread Inbound Texts",
+			"description": "Unhandled inbound SMS text messages requiring staff response",
+			"target_view": "communications",
+			"required_permission": "communications.view",
+			"urgency": "urgent",
+			"count_sql": "SELECT COUNT(*) AS cnt FROM inbound_sms_log WHERE is_read = 0 OR follow_up_status = 'Unassigned';",
+			"record_sql": "SELECT id, message_sid, from_phone_e164, raw_body, follow_up_status, received_at FROM inbound_sms_log WHERE is_read = 0 OR follow_up_status = 'Unassigned' ORDER BY received_at ASC;",
+			"completion_sql": "UPDATE inbound_sms_log SET is_read = 1, follow_up_status = 'Completed', follow_up_completed_at = datetime('now') WHERE id = ?;",
+			"primary_button": "Reply to Texts",
+			"queue_mode_supported": true
+		},
+		"unclaimed_scheduled_broadcasts": {
+			"queue_id": "unclaimed_scheduled_broadcasts",
+			"title": "Stalled Scheduled Broadcasts",
+			"description": "Scheduled group broadcasts whose send time has passed without dispatch",
+			"target_view": "communications",
+			"required_permission": "communications.manage",
+			"urgency": "critical",
+			"count_sql": "SELECT COUNT(*) AS cnt FROM scheduled_communications WHERE status = 'scheduled' AND scheduled_time_local <= datetime('now', 'localtime');",
+			"record_sql": "SELECT id, schedule_uuid, audience, channel, subject, message_body, scheduled_time_local, status FROM scheduled_communications WHERE status = 'scheduled' AND scheduled_time_local <= datetime('now', 'localtime') ORDER BY scheduled_time_local ASC;",
+			"completion_sql": "UPDATE scheduled_communications SET status = 'cancelled' WHERE id = ?;",
+			"primary_button": "Dispatch Broadcasts",
+			"queue_mode_supported": true
+		},
+		"failed_inbound_events": {
+			"queue_id": "failed_inbound_events",
+			"title": "Failed Event Inbox Items",
+			"description": "Background sync domain event processor items that failed execution",
+			"target_view": "administration",
+			"required_permission": "system.manage",
+			"urgency": "critical",
+			"count_sql": "SELECT COUNT(*) AS cnt FROM event_inbox WHERE status = 'failed';",
+			"record_sql": "SELECT id, event_uuid, event_type, sequence_num, retry_count, error_message, processed_at FROM event_inbox WHERE status = 'failed' ORDER BY processed_at ASC;",
+			"completion_sql": "UPDATE event_inbox SET status = 'processed', processed_at = datetime('now') WHERE id = ?;",
+			"primary_button": "Re-process Events",
+			"queue_mode_supported": true
 		}
 	}
 

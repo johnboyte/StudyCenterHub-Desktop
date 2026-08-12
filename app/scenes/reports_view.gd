@@ -140,37 +140,66 @@ func _render_breakdown() -> void:
 	for child in breakdown_card.get_children(): child.free()
 
 	var vbox = VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 12)
+	vbox.add_theme_constant_override("separation", 16)
 
 	var title_lbl = Label.new()
 	var v_label = _get_vocab_grade_label()
-	title_lbl.text = v_label + " & Demographic Distribution"
-	title_lbl.add_theme_font_size_override("font_size", 16)
+	title_lbl.text = v_label + " & Campus Community Demographics"
+	title_lbl.add_theme_font_size_override("font_size", 18)
 	title_lbl.add_theme_color_override("font_color", Color(0.12, 0.16, 0.22, 1.0))
 	vbox.add_child(title_lbl)
 
-	var list = rep_service.get_grade_distribution()
-	if list.size() > 0:
-		for g in list:
-			var gr = str(g.get("grade")) if g.get("grade") != null else "Unassigned"
-			var cnt = str(g.get("count", 0))
+	# 1. Campus vs Community Breakdown
+	var cvs = rep_service.get_campus_vs_community_stats()
+	var cvs_lbl = Label.new()
+	cvs_lbl.text = "🏛️ Campus Students: %s  •  🏡 Community Members: %s  •  ❓ Unassigned: %s" % [str(cvs.get("campus_count", 0)), str(cvs.get("community_count", 0)), str(cvs.get("unassigned_count", 0))]
+	cvs_lbl.add_theme_font_size_override("font_size", 14)
+	cvs_lbl.add_theme_color_override("font_color", Color(0.18, 0.45, 0.85, 1.0))
+	vbox.add_child(cvs_lbl)
 
+	# 2. Institutional Distribution
+	var inst_lbl = Label.new()
+	inst_lbl.text = "📍 Institutional Distribution:"
+	inst_lbl.add_theme_font_size_override("font_size", 15)
+	inst_lbl.add_theme_color_override("font_color", Color(0.12, 0.16, 0.24, 1.0))
+	vbox.add_child(inst_lbl)
+
+	var inst_list = rep_service.get_participants_by_institution()
+	if inst_list.size() > 0:
+		for item in inst_list:
+			var iname = str(item.get("institution_name", "Unspecified"))
+			var cnt = str(item.get("count", 0))
 			var row = Label.new()
-			row.text = "  📊 " + v_label + " / Role: " + gr + " — " + cnt + " constituent(s)"
+			row.text = "    • " + iname + ": " + cnt + " constituent(s)"
 			row.add_theme_font_size_override("font_size", 14)
-			row.add_theme_color_override("font_color", Color(0.22, 0.28, 0.36, 1.0))
+			row.add_theme_color_override("font_color", Color(0.25, 0.32, 0.42, 1.0))
 			vbox.add_child(row)
-	else:
-		var empty_lbl = Label.new()
-		empty_lbl.text = "No demographic records available."
-		empty_lbl.add_theme_font_size_override("font_size", 13)
-		empty_lbl.add_theme_color_override("font_color", Color(0.60, 0.68, 0.78, 1.0))
-		vbox.add_child(empty_lbl)
+
+	# 3. Academic Year & Major Progress
+	var ay_lbl = Label.new()
+	ay_lbl.text = "🎓 Academic Year Breakdown:"
+	ay_lbl.add_theme_font_size_override("font_size", 15)
+	ay_lbl.add_theme_color_override("font_color", Color(0.12, 0.16, 0.24, 1.0))
+	vbox.add_child(ay_lbl)
+
+	var ay_list = rep_service.get_participants_by_academic_year()
+	if ay_list.size() > 0:
+		for item in ay_list:
+			var ay_name = str(item.get("ay_name", "Unspecified"))
+			var cnt = str(item.get("count", 0))
+			var row = Label.new()
+			row.text = "    • " + ay_name + ": " + cnt + " constituent(s)"
+			row.add_theme_font_size_override("font_size", 14)
+			row.add_theme_color_override("font_color", Color(0.25, 0.32, 0.42, 1.0))
+			vbox.add_child(row)
 
 	breakdown_card.add_child(vbox)
 
+var chk_include_cc: CheckBox = null
+
 func _on_export_csv() -> void:
-	var csv = rep_service.generate_csv_report()
+	var include_cc = chk_include_cc.button_pressed if chk_include_cc else true
+	var csv = rep_service.generate_csv_report(include_cc)
 	var file_path = ProjectSettings.globalize_path("user://constituent_roster_report.csv")
 	var file = FileAccess.open(file_path, FileAccess.WRITE)
 	if file:

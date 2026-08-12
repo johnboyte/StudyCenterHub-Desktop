@@ -197,7 +197,7 @@ func run_tests() -> void:
 	# 4b. Test Time-Span Coverage Engine Rules (Examples A - E)
 	print("[Test 4b] Testing full time-span coverage engine rules (Examples A-E)...")
 	# Seed test session: 4:00 PM - 5:00 PM on future date
-	db.execute("INSERT OR REPLACE INTO sessions (id, session_uuid, title, date_text, start_time, end_time, room_location, is_active) VALUES (999, 'sess-999', 'Test Session A-E', date('now', '+3 days'), '04:00 PM', '05:00 PM', 'Study Room #99', 1);")
+	db.execute("INSERT OR REPLACE INTO sessions (id, session_uuid, title, date_text, start_time, end_time, room_location, is_active, staffing_requirement) VALUES (999, 'sess-999', 'Test Session A-E', date('now', '+3 days'), '04:00 PM', '05:00 PM', 'Study Room #99', 1, 'COVERED_BY_STUDY_CENTER_STAFF');")
 	var test_date = str(db.execute("SELECT date('now', '+3 days') as d;")["data"][0]["d"])
 
 	# Example A: Shift 3:00 - 6:00 PM (Full coverage, shift starts before and ends after) -> COVERED
@@ -362,8 +362,8 @@ func run_tests() -> void:
 	await process_frame
 
 	var cards = _get_action_cards(home)
-	if cards.size() != 5:
-		print("FAIL: Expected 5 ActionCenterCard instances when show_all_queues is true, got: ", cards.size())
+	if cards.size() != 13:
+		print("FAIL: Expected 13 ActionCenterCard instances when show_all_queues is true, got: ", cards.size())
 		quit(1)
 		return
 

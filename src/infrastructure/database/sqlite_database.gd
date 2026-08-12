@@ -13,13 +13,20 @@ func _init(path: String = "") -> void:
 		print("[Database] Explicit override path used: ", db_path)
 	else:
 		var env = OS.get_environment("STUDYCENTERHUB_ENV").to_lower().strip_edges()
+		if env == "":
+			var exec_path = OS.get_executable_path().to_lower()
+			if exec_path.contains("rc1") or exec_path.contains("staging"):
+				env = "staging"
+			else:
+				env = "development"
+		
 		var db_name = "studycenterhub_development.db"
 		if env == "production":
 			db_name = "studycenterhub_production.db"
 		elif env == "staging":
 			db_name = "studycenterhub_staging.db"
 		else:
-			env = "development" # default
+			env = "development" # fallback/default
 		
 		db_path = ProjectSettings.globalize_path("user://" + db_name)
 		print("[Database] Active Environment: ", env.to_upper())
@@ -101,17 +108,19 @@ func _format_sql(sql: String, args: Array) -> String:
 	if args.size() == 0:
 		return sql
 	var formatted = sql
+	var curr_pos = 0
 	for arg in args:
 		var val_str = ""
 		if arg == null:
 			val_str = "NULL"
 		elif arg is String:
-			val_str = "'" + arg.replace("'", "''") + "'"
+			val_str = "'" + arg.replace("'", "''").replace("\n", "\\n").replace("\r", "\\r") + "'"
 		elif arg is bool:
 			val_str = "1" if arg else "0"
 		else:
 			val_str = str(arg)
-		var pos = formatted.find("?")
+		var pos = formatted.find("?", curr_pos)
 		if pos != -1:
 			formatted = formatted.left(pos) + val_str + formatted.substr(pos + 1)
+			curr_pos = pos + val_str.length()
 	return formatted

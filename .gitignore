@@ -15,3 +15,8 @@ gateway/config.php
 gateway/tunnel-config.yml
 gateway/*.log
 gateway/*.err
+
+*.db
+
+temp_pass_new.zip
+assets/print/

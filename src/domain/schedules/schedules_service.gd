@@ -592,8 +592,9 @@ func update_full_session_atomic(session_id: int, title: String, session_type_id_
 
 	if str(curr["title"]) != clean_title:
 		changed_fields.append("title"); changes_dict["title"] = {"old": str(curr["title"]), "new": clean_title}
-	if int(curr["session_type_id"]) != type_id:
-		changed_fields.append("session_type_id"); changes_dict["session_type_id"] = {"old": int(curr["session_type_id"]), "new": type_id}
+	var old_type_id = int(curr.get("session_type_id", 0)) if curr.get("session_type_id") != null else 0
+	if old_type_id != type_id:
+		changed_fields.append("session_type_id"); changes_dict["session_type_id"] = {"old": old_type_id, "new": type_id}
 	if str(curr["date_text"]) != date_text:
 		changed_fields.append("date_text"); changes_dict["date_text"] = {"old": str(curr["date_text"]), "new": date_text}
 	if str(curr["start_time"]) != start_time:

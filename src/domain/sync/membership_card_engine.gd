@@ -197,23 +197,48 @@ static func render_membership_card(person_data: Dictionary, raw_credential_token
 
 	return img
 
-static func render_public_qr_sign(size_mode: String = "letter") -> Image:
-	var width_px = 850
-	var height_px = 1100
-	if size_mode.to_lower() == "half_page":
-		width_px = 850
-		height_px = 550
+# Centralized QR Placement Configuration for Official Artwork
+const REMOTE_SIGN_CONFIG = {
+	"artwork_path": "res://assets/print/real_life_remote_check_in_poster.png",
+	"qr_target_url": "https://checkin.reallife-studycenter.org/public",
+	"center_x": 1879,
+	"center_y": 2117,
+	"qr_size_px": 740
+}
 
-	var img = Image.create(width_px, height_px, false, Image.FORMAT_RGBA8)
-	img.fill(Color(1.0, 1.0, 1.0, 1.0))
+static func render_remote_qr_sign() -> Image:
+	const QrGenerator = preload("res://src/domain/sync/qr_code_generator.gd")
+	var art_path = ProjectSettings.globalize_path(REMOTE_SIGN_CONFIG["artwork_path"])
+	var img = Image.new()
 
-	# Header Banner
-	var banner_h = 140 if size_mode == "letter" else 80
-	for y in range(banner_h):
-		for x in range(width_px):
-			img.set_pixel(x, y, Color(0.12, 0.16, 0.24, 1.0))
+	if FileAccess.file_exists(art_path):
+		var loaded_img = Image.load_from_file(art_path)
+		if loaded_img and not loaded_img.is_empty():
+			img = loaded_img
+
+	if img.is_empty():
+		img = Image.create(792, 1024, false, Image.FORMAT_RGBA8)
+		img.fill(Color(0.08, 0.10, 0.15, 1.0))
+
+	var qr_url = REMOTE_SIGN_CONFIG["qr_target_url"]
+	var qr_size = REMOTE_SIGN_CONFIG["qr_size_px"]
+	var qr_img = QrGenerator.generate_qr_image(qr_url, qr_size)
+
+	var qr_x = int(REMOTE_SIGN_CONFIG["center_x"] - (qr_size / 2.0))
+	var qr_y = int(REMOTE_SIGN_CONFIG["center_y"] - (qr_size / 2.0))
+
+	if qr_img and not qr_img.is_empty():
+		for py in range(qr_size):
+			for px in range(qr_size):
+				var target_x = qr_x + px
+				var target_y = qr_y + py
+				if target_x >= 0 and target_x < img.get_width() and target_y >= 0 and target_y < img.get_height():
+					img.set_pixel(target_x, target_y, qr_img.get_pixel(px, py))
 
 	return img
+
+static func render_public_qr_sign(_size_mode: String = "") -> Image:
+	return render_remote_qr_sign()
 
 static func export_image_to_png(img: Image, file_path: String) -> Error:
 	if not img or img.is_empty():

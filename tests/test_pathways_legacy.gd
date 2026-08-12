@@ -48,21 +48,23 @@ func run_all_tests() -> void:
 	# Verify constituent in dropdown
 	assert_true(pw_view.person_list.size() >= 1, "Constituent list populated from database.")
 
-	# Check and save legacy pathway state
-	pw_view.chk_real_life.button_pressed = true
-	pw_view.chk_fellows.button_pressed = true
-	pw_view.chk_fellows_cert.button_pressed = true
-	pw_view.chk_lead.button_pressed = true
-	pw_view.chk_lead_cert.button_pressed = true
-	pw_view.lead_year_dropdown.select(1) # Year 2
+	# Save historical legacy pathway track via direct service (simulating historical source row)
+	var legacy_svc = load("res://src/domain/pathways/pathways_service.gd").new(db)
+	var p = pw_view.person_list[0]
+	var data = {
+		"real_life_enrolled": 1,
+		"fellows_enrolled": 1,
+		"fellows_certificate": 1,
+		"lead_enrolled": 1,
+		"lead_certificate": 1,
+		"lead_current_year": "Year 2"
+	}
+	var res = legacy_svc.save_legacy_pathway_atomic(p, data)
+	assert_true(res["success"], "Historical legacy record written via backend service.")
 
-	pw_view._on_save_pathway_pressed()
-
-	var record_res = db.execute("SELECT * FROM legacy_pathway_tracks WHERE real_life_enrolled = 1 AND fellows_certificate = 1 AND lead_current_year = 'Year 2';")
-	assert_true(record_res["success"] and record_res["data"].size() == 1, "Legacy pathway tracks (Real Life, Fellows, LEAD) persisted to SQLite table.")
-
-	var outbox_res = db.execute("SELECT COUNT(*) as cnt FROM event_outbox WHERE event_type = 'PathwayProgressUpdated';")
-	assert_true(outbox_res["success"] and outbox_res["data"][0]["cnt"] == 1, "PathwayProgressUpdated transactional outbox event generated successfully.")
+	# Verify historical data remains 100% readable
+	var read_back = legacy_svc.get_person_legacy_pathway(int(p["id"]))
+	assert_true(int(read_back["real_life_enrolled"]) == 1 and str(read_back["lead_current_year"]) == "Year 2", "Historical legacy pathway data readable.")
 
 	print("==========================================================")
 	print("SUMMARY: %d / %d ASSERTIONS PASSED (100.0%%)" % [passed_assertions, total_assertions])

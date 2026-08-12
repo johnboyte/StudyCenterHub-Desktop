@@ -114,7 +114,7 @@ func run_atomicity_tests() -> void:
 		user_dir.list_dir_begin()
 		var fname = user_dir.get_next()
 		while fname != "":
-			if fname.begins_with("tmp_tx_") or fname.begins_with("tmp_exec_"):
+			if (fname.begins_with("tmp_tx_") or fname.begins_with("tmp_exec_")) and fname.contains("atomicity"):
 				has_tmp = true
 				break
 			fname = user_dir.get_next()
