@@ -1400,7 +1400,7 @@ func open_shift_modal(existing_shift_data: Dictionary = {}) -> void:
 		var sel_idx = opt_person.selected
 		var person_meta = opt_person.get_item_metadata(sel_idx) if sel_idx >= 0 else null
 		var p_name = person_meta["name"] if person_meta else e_search.text.strip_edges()
-		if p_name == "": p_name = "John Smith"
+		if p_name == "": p_name = "John Boyte"
 
 		var s_role = opt_role.get_item_text(opt_role.selected)
 		var s_date = e_date.text.strip_edges()

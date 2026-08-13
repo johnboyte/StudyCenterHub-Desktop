@@ -782,7 +782,16 @@ func _on_send_message_pressed() -> void:
 
 	if body == "": return
 
-	var res = com_service.send_message_atomic(recipient, channel, body, "John Smith")
+func _get_active_sender_name() -> String:
+	if db:
+		var q_sup = db.execute("SELECT setting_value FROM app_settings WHERE setting_key = 'ACTIVE_SUPERVISOR' LIMIT 1;")
+		if q_sup["success"] and q_sup["data"].size() > 0:
+			var val = str(q_sup["data"][0].get("setting_value", "")).strip_edges()
+			if val != "":
+				return val
+	return "John Boyte"
+
+	var res = com_service.send_message_atomic(recipient, channel, body, _get_active_sender_name())
 	if res["success"]:
 		print("Message sent successfully: ", res["message_uuid"])
 		message_body_edit.text = ""
@@ -852,7 +861,7 @@ func _initiate_call_dialog(recipient: Dictionary, notes: String) -> void:
 		backdrop.queue_free()
 		if _target_phone != "" and _target_phone != "No phone on file":
 			OS.shell_open("tel:" + _target_phone)
-		com_service.send_message_atomic(recipient, "Phone Call (Computer)", notes if notes != "" else "Initiated outbound call from Mac computer", "John Smith")
+		com_service.send_message_atomic(recipient, "Phone Call (Computer)", notes if notes != "" else "Initiated outbound call from Mac computer", _get_active_sender_name())
 		_refresh_all_feeds()
 	)
 	vbox.add_child(btn_mac)
@@ -890,7 +899,7 @@ func _initiate_call_dialog(recipient: Dictionary, notes: String) -> void:
 					OS.shell_open("tel:" + _target_phone)
 			, CONNECT_ONE_SHOT)
 			http.request(url, headers, HTTPClient.METHOD_POST, body)
-		com_service.send_message_atomic(recipient, "Phone Call (Twilio)", notes if notes != "" else "Bridged outbound call via Twilio Relay", "John Smith")
+		com_service.send_message_atomic(recipient, "Phone Call (Twilio)", notes if notes != "" else "Bridged outbound call via Twilio Relay", _get_active_sender_name())
 		_refresh_all_feeds()
 	)
 	vbox.add_child(btn_twilio)

@@ -67,7 +67,7 @@ func show_dialog() -> void:
 	main_vbox.add_child(header_hbox)
 
 	status_lbl = Label.new()
-	status_lbl.text = "Target URL: https://checkin.reallife-studycenter.org/public"
+	status_lbl.text = "Target URL: https://app.reallife-studycenter.org/public"
 	status_lbl.add_theme_color_override("font_color", Color(0.7, 0.75, 0.8, 1.0))
 	status_lbl.add_theme_font_size_override("font_size", 14)
 	main_vbox.add_child(status_lbl)

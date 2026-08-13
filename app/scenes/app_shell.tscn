@@ -129,43 +129,32 @@ theme_override_font_sizes/font_size = 16
 text = "  🛠️   Settings"
 alignment = 0
 
-[node name="ProfileCard" type="PanelContainer" parent="SidebarPanel/SidebarMargin/SidebarVBox"]
+[node name="ScriptureCard" type="PanelContainer" parent="SidebarPanel/SidebarMargin/SidebarVBox"]
 layout_mode = 2
 
-[node name="ProfileMargin" type="MarginContainer" parent="SidebarPanel/SidebarMargin/SidebarVBox/ProfileCard"]
+[node name="ScriptureMargin" type="MarginContainer" parent="SidebarPanel/SidebarMargin/SidebarVBox/ScriptureCard"]
 layout_mode = 2
-theme_override_constants/margin_left = 10
-theme_override_constants/margin_top = 10
-theme_override_constants/margin_right = 10
-theme_override_constants/margin_bottom = 10
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 12
 
-[node name="ProfileHBox" type="HBoxContainer" parent="SidebarPanel/SidebarMargin/SidebarVBox/ProfileCard/ProfileMargin"]
+[node name="ScriptureVBox" type="VBoxContainer" parent="SidebarPanel/SidebarMargin/SidebarVBox/ScriptureCard/ScriptureMargin"]
 layout_mode = 2
-theme_override_constants/separation = 10
+theme_override_constants/separation = 6
 
-[node name="ProfileAvatar" type="Label" parent="SidebarPanel/SidebarMargin/SidebarVBox/ProfileCard/ProfileMargin/ProfileHBox"]
-custom_minimum_size = Vector2(36, 36)
+[node name="VerseTextLabel" type="Label" parent="SidebarPanel/SidebarMargin/SidebarVBox/ScriptureCard/ScriptureMargin/ScriptureVBox"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 14
-text = "JS"
-horizontal_alignment = 1
-vertical_alignment = 1
+theme_override_colors/font_color = Color(0.92, 0.95, 0.98, 1)
+theme_override_font_sizes/font_size = 12
+text = "“Trust in the LORD with all your heart...”"
+autowrap_mode = 3
 
-[node name="ProfileVBox" type="VBoxContainer" parent="SidebarPanel/SidebarMargin/SidebarVBox/ProfileCard/ProfileMargin/ProfileHBox"]
+[node name="VerseRefLabel" type="Label" parent="SidebarPanel/SidebarMargin/SidebarVBox/ScriptureCard/ScriptureMargin/ScriptureVBox"]
 layout_mode = 2
-size_flags_horizontal = 3
-
-[node name="ProfileName" type="Label" parent="SidebarPanel/SidebarMargin/SidebarVBox/ProfileCard/ProfileMargin/ProfileHBox/ProfileVBox"]
-layout_mode = 2
-theme_override_colors/font_color = Color(0.95, 0.97, 1, 1)
-theme_override_font_sizes/font_size = 15
-text = "John Smith"
-
-[node name="ProfileRole" type="Label" parent="SidebarPanel/SidebarMargin/SidebarVBox/ProfileCard/ProfileMargin/ProfileHBox/ProfileVBox"]
-layout_mode = 2
-theme_override_colors/font_color = Color(0.75, 0.82, 0.9, 1)
-theme_override_font_sizes/font_size = 13
-text = "Executive Director"
+theme_override_colors/font_color = Color(0.88, 0.55, 0.11, 1)
+theme_override_font_sizes/font_size = 11
+text = "— Proverbs 3:5"
 
 [node name="ContentArea" type="PanelContainer" parent="."]
 layout_mode = 1
@@ -249,7 +238,7 @@ theme_override_font_sizes/font_size = 14
 text = "Team Leader:"
 
 [node name="TeamLeaderDropdown" type="OptionButton" parent="TopHeaderBar/TopMargin/TopHBox/TeamLeaderHBox"]
-custom_minimum_size = Vector2(250, 32)
+custom_minimum_size = Vector2(160, 32)
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_font_sizes/font_size = 14

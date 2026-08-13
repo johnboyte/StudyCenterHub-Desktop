@@ -26,7 +26,7 @@ theme_override_constants/separation = 22
 
 [node name="TopBarHBox" type="HBoxContainer" parent="MarginContainer/MainVBox"]
 layout_mode = 2
-theme_override_constants/separation = 16
+theme_override_constants/separation = 10
 
 [node name="HeaderVBox" type="VBoxContainer" parent="MarginContainer/MainVBox/TopBarHBox"]
 layout_mode = 2
@@ -36,29 +36,29 @@ theme_override_constants/separation = 4
 [node name="TitleLabel" type="Label" parent="MarginContainer/MainVBox/TopBarHBox/HeaderVBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.12, 0.16, 0.22, 1)
-theme_override_font_sizes/font_size = 24
+theme_override_font_sizes/font_size = 22
 text = "Check In Assistant"
 
 [node name="ShiftLeadHBox" type="HBoxContainer" parent="MarginContainer/MainVBox/TopBarHBox"]
 layout_mode = 2
-theme_override_constants/separation = 10
+theme_override_constants/separation = 8
 
 [node name="ShiftLeadLabel" type="Label" parent="MarginContainer/MainVBox/TopBarHBox/ShiftLeadHBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.35, 0.42, 0.52, 1)
-theme_override_font_sizes/font_size = 16
+theme_override_font_sizes/font_size = 14
 text = "🛡️ SHIFT LEAD:"
 
 [node name="ShiftLeadDropdown" type="OptionButton" parent="MarginContainer/MainVBox/TopBarHBox/ShiftLeadHBox"]
-custom_minimum_size = Vector2(180, 42)
+custom_minimum_size = Vector2(150, 36)
 layout_mode = 2
-theme_override_font_sizes/font_size = 16
+theme_override_font_sizes/font_size = 14
 
 [node name="BtnSignInStatus" type="Button" parent="MarginContainer/MainVBox/TopBarHBox/ShiftLeadHBox"]
-custom_minimum_size = Vector2(100, 42)
+custom_minimum_size = Vector2(85, 36)
 layout_mode = 2
 theme_override_colors/font_color = Color(1, 1, 1, 1)
-theme_override_font_sizes/font_size = 16
+theme_override_font_sizes/font_size = 14
 text = "Sign In"
 
 [node name="HeroTerminalCard" type="PanelContainer" parent="MarginContainer/MainVBox"]

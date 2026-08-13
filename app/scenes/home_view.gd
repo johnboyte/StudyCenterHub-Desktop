@@ -460,54 +460,72 @@ func _build_today_center_content() -> Control:
 					"color": Color(0.85, 0.35, 0.65, 1.0)
 				})
 
-	# Smart Fallback if database has no records specifically tagged for today's exact date
 	if items.size() == 0:
-		items = [
-			{"time": "9:00 AM", "type": "📚 SESSION TODAY", "title": "Bible Study - Adults", "sub": "Fellowship Hall", "color": Color(0.12, 0.45, 0.85, 1.0)},
-			{"time": "11:00 AM", "type": "📚 SESSION TODAY", "title": "Youth Group", "sub": "Youth Room", "color": Color(0.12, 0.45, 0.85, 1.0)},
-			{"time": "3:00 PM", "type": "👤 WORKING TODAY", "title": "John Smith (Team Leader)", "sub": "Assigned to: Study Center", "color": Color(0.15, 0.65, 0.35, 1.0)},
-			{"time": "3:30 PM", "type": "👤 WORKING TODAY", "title": "Sarah Jenkins (Study Tutor)", "sub": "Assigned to: Study Room #1", "color": Color(0.15, 0.65, 0.35, 1.0)},
-			{"time": "🎂 Today", "type": "🎉 BIRTHDAY TODAY", "title": "Emily Watson's Birthday", "sub": "Constituent Role: Volunteer", "color": Color(0.85, 0.35, 0.65, 1.0)}
-		]
+		var empty_panel = PanelContainer.new()
+		var empty_style = StyleBoxFlat.new()
+		empty_style.bg_color = Color(0.975, 0.985, 0.995, 1.0)
+		empty_style.border_width_left = 1; empty_style.border_width_top = 1; empty_style.border_width_right = 1; empty_style.border_width_bottom = 1
+		empty_style.border_color = Color(0.88, 0.91, 0.95, 1.0)
+		empty_style.corner_radius_top_left = 8; empty_style.corner_radius_top_right = 8; empty_style.corner_radius_bottom_left = 8; empty_style.corner_radius_bottom_right = 8
+		empty_style.content_margin_left = 16; empty_style.content_margin_top = 18; empty_style.content_margin_right = 16; empty_style.content_margin_bottom = 18
+		empty_panel.add_theme_stylebox_override("panel", empty_style)
 
-	for item in items:
-		var hbox = HBoxContainer.new()
-		hbox.add_theme_constant_override("separation", 14)
+		var empty_vbox = VBoxContainer.new()
+		empty_vbox.add_theme_constant_override("separation", 4)
+		empty_panel.add_child(empty_vbox)
 
-		var time_lbl = Label.new()
-		time_lbl.text = item["time"]
-		time_lbl.custom_minimum_size = Vector2(70, 0)
-		time_lbl.add_theme_font_size_override("font_size", 13)
-		time_lbl.add_theme_color_override("font_color", Color(0.18, 0.24, 0.34, 1.0))
-		hbox.add_child(time_lbl)
+		var h_lbl = Label.new()
+		h_lbl.text = "Nothing scheduled yet today"
+		h_lbl.add_theme_font_size_override("font_size", 15)
+		h_lbl.add_theme_color_override("font_color", Color(0.18, 0.24, 0.32, 1.0))
+		empty_vbox.add_child(h_lbl)
 
-		var info_vbox = VBoxContainer.new()
-		info_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		info_vbox.add_theme_constant_override("separation", 2)
+		var s_lbl = Label.new()
+		s_lbl.text = "There are no sessions, staff shifts, or birthdays scheduled for today."
+		s_lbl.add_theme_font_size_override("font_size", 13)
+		s_lbl.add_theme_color_override("font_color", Color(0.42, 0.48, 0.56, 1.0))
+		empty_vbox.add_child(s_lbl)
 
-		var tag_lbl = Label.new()
-		tag_lbl.text = item["type"]
-		tag_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		tag_lbl.add_theme_font_size_override("font_size", 11)
-		tag_lbl.add_theme_color_override("font_color", item["color"])
-		info_vbox.add_child(tag_lbl)
+		vbox.add_child(empty_panel)
+	else:
+		for item in items:
+			var hbox = HBoxContainer.new()
+			hbox.add_theme_constant_override("separation", 14)
 
-		var t_lbl = Label.new()
-		t_lbl.text = item["title"]
-		t_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		t_lbl.add_theme_font_size_override("font_size", 14)
-		t_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
-		info_vbox.add_child(t_lbl)
+			var time_lbl = Label.new()
+			time_lbl.text = item["time"]
+			time_lbl.custom_minimum_size = Vector2(70, 0)
+			time_lbl.add_theme_font_size_override("font_size", 13)
+			time_lbl.add_theme_color_override("font_color", Color(0.18, 0.24, 0.34, 1.0))
+			hbox.add_child(time_lbl)
 
-		var r_lbl = Label.new()
-		r_lbl.text = item["sub"]
-		r_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		r_lbl.add_theme_font_size_override("font_size", 12)
-		r_lbl.add_theme_color_override("font_color", Color(0.40, 0.46, 0.54, 1.0))
-		info_vbox.add_child(r_lbl)
+			var info_vbox = VBoxContainer.new()
+			info_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			info_vbox.add_theme_constant_override("separation", 2)
 
-		hbox.add_child(info_vbox)
-		vbox.add_child(hbox)
+			var tag_lbl = Label.new()
+			tag_lbl.text = item["type"]
+			tag_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			tag_lbl.add_theme_font_size_override("font_size", 11)
+			tag_lbl.add_theme_color_override("font_color", item["color"])
+			info_vbox.add_child(tag_lbl)
+
+			var t_lbl = Label.new()
+			t_lbl.text = item["title"]
+			t_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			t_lbl.add_theme_font_size_override("font_size", 14)
+			t_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
+			info_vbox.add_child(t_lbl)
+
+			var r_lbl = Label.new()
+			r_lbl.text = item["sub"]
+			r_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			r_lbl.add_theme_font_size_override("font_size", 12)
+			r_lbl.add_theme_color_override("font_color", Color(0.40, 0.46, 0.54, 1.0))
+			info_vbox.add_child(r_lbl)
+
+			hbox.add_child(info_vbox)
+			vbox.add_child(hbox)
 
 	var link_btn = Button.new()
 	link_btn.text = "View Full Calendar →"
@@ -564,7 +582,7 @@ func _build_ai_assistant_card(card: PanelContainer) -> void:
 			var s_time = str(q2["data"][0].get("start_time", ""))
 			bullets.append("• \"" + s_title + "\" begins today at " + s_time)
 		else:
-			bullets.append("• Center sessions operating on standard schedule")
+			bullets.append("• No center sessions scheduled for today")
 
 		# 3. Unassigned work items
 		var q3 = db.execute("SELECT COUNT(*) AS c FROM voicemails WHERE status = 'new' AND (assigned_person_id IS NULL OR assigned_person_id = 0);")
@@ -580,15 +598,18 @@ func _build_ai_assistant_card(card: PanelContainer) -> void:
 		var c4 = int(q4["data"][0]["c"]) if (q4["success"] and q4["data"].size() > 0) else 0
 		bullets.append("• " + active_sup + " has " + str(c4) + " open follow-up items")
 
-		# 5. Check-ins today
-		var q5 = db.execute("SELECT COUNT(*) AS c FROM attendance WHERE date(timestamp) = date('now');")
+		# 5. Check-ins today / yesterday
+		var q5 = db.execute("SELECT COUNT(*) AS c FROM attendance_log WHERE date(check_in_date) = date('now');")
 		var c5 = int(q5["data"][0]["c"]) if (q5["success"] and q5["data"].size() > 0) else 0
 		if c5 > 0:
 			bullets.append("• " + str(c5) + " total check-ins recorded today at center")
 		else:
-			var q5_y = db.execute("SELECT COUNT(*) AS c FROM attendance WHERE date(timestamp) = date('now', '-1 day');")
+			var q5_y = db.execute("SELECT COUNT(*) AS c FROM attendance_log WHERE date(check_in_date) = date('now', '-1 day');")
 			var c5_y = int(q5_y["data"][0]["c"]) if (q5_y["success"] and q5_y["data"].size() > 0) else 0
-			bullets.append("• " + str(max(c5_y, 12)) + " people checked in yesterday")
+			if c5_y > 0:
+				bullets.append("• " + str(c5_y) + " people checked in yesterday")
+			else:
+				bullets.append("• 0 check-ins recorded yesterday at center")
 
 	for b in bullets:
 		var l = Label.new()
@@ -639,6 +660,53 @@ func _build_ai_assistant_card(card: PanelContainer) -> void:
 	vbox.add_child(btn_hbox)
 	card.add_child(vbox)
 
+const SHORT_MONTHS: Array = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+func _format_relative_activity_timestamp(datetime_raw: String) -> String:
+	if datetime_raw.is_empty():
+		return ""
+
+	var parts = datetime_raw.strip_edges().split(" ")
+	var date_part = parts[0]
+	var time_part = parts[1] if parts.size() > 1 else "00:00:00"
+
+	var time_tokens = time_part.split(":")
+	var hour_24 = time_tokens[0].to_int() if time_tokens.size() > 0 else 0
+	var min_val = time_tokens[1].to_int() if time_tokens.size() > 1 else 0
+
+	var am_pm = "AM"
+	var hour_12 = hour_24
+	if hour_24 >= 12:
+		am_pm = "PM"
+		if hour_24 > 12:
+			hour_12 = hour_24 - 12
+	elif hour_24 == 0:
+		hour_12 = 12
+
+	var time_12_str = "%d:%02d %s" % [hour_12, min_val, am_pm]
+
+	var today_dict = Time.get_date_dict_from_system()
+	var d_parts = date_part.split("-")
+	if d_parts.size() < 3:
+		return time_12_str
+
+	var yr = d_parts[0].to_int()
+	var mo = d_parts[1].to_int()
+	var dy = d_parts[2].to_int()
+
+	var target_unix = Time.get_unix_time_from_datetime_dict({"year": yr, "month": mo, "day": dy, "hour": 0, "minute": 0, "second": 0})
+	var today_unix = Time.get_unix_time_from_datetime_dict({"year": today_dict.year, "month": today_dict.month, "day": today_dict.day, "hour": 0, "minute": 0, "second": 0})
+
+	var diff_days = int(round((today_unix - target_unix) / 86400.0))
+
+	if diff_days == 0:
+		return time_12_str
+	elif diff_days == 1:
+		return "Yesterday • " + time_12_str
+	else:
+		var month_abbr = SHORT_MONTHS[mo] if (mo >= 1 and mo < SHORT_MONTHS.size()) else str(mo)
+		return "%s %d • %s" % [month_abbr, dy, time_12_str]
+
 func _setup_recent_activity_card() -> void:
 	if not card_recent_activity: return
 	for child in card_recent_activity.get_children(): child.free()
@@ -660,57 +728,116 @@ func _setup_recent_activity_card() -> void:
 	title_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
 	vbox.add_child(title_lbl)
 
-	var feed_hbox = HBoxContainer.new()
-	feed_hbox.add_theme_constant_override("separation", 16)
+	var activities = []
+	var db = app_shell.db if (app_shell and "db" in app_shell and app_shell.db) else null
+	if db:
+		# Query recent checkins (last 14 days)
+		var q_att = db.execute("SELECT p.first_name, p.last_name, a.method, a.check_in_date, a.check_in_time, COALESCE(a.timestamp, a.check_in_date || ' ' || a.check_in_time) as full_ts FROM attendance_log a JOIN people p ON a.person_id = p.id WHERE a.check_in_date >= date('now', '-14 days') ORDER BY a.id DESC LIMIT 4;")
+		if q_att["success"] and q_att["data"].size() > 0:
+			for r in q_att["data"]:
+				var name = (str(r.get("first_name", "")) + " " + str(r.get("last_name", ""))).strip_edges()
+				var d_str = str(r.get("check_in_date", ""))
+				var t_str = str(r.get("check_in_time", ""))
+				var raw_dt = str(r.get("full_ts", d_str + " " + t_str))
+				activities.append({
+					"icon": "👤",
+					"title": name,
+					"sub": "Checked in via " + str(r.get("method", "Scanner")),
+					"raw_datetime": raw_dt
+				})
 
-	var activities = [
-		{"icon": "👤", "title": "Sarah Johnson", "sub": "Checked in Bible Study", "time": "9:02 AM"},
-		{"icon": "📝", "title": "New Registration", "sub": "Michael Brown", "time": "8:47 AM"},
-		{"icon": "💬", "title": "Text Message Sent", "sub": "to 12 constituents", "time": "8:32 AM"},
-		{"icon": "🤝", "title": "Volunteer Assigned", "sub": "James Wilson", "time": "8:15 AM"}
-	]
+		# Query recent messages (last 14 days)
+		var q_msg = db.execute("SELECT recipient_name, channel, created_at FROM communications_log WHERE created_at >= datetime('now', '-14 days') ORDER BY id DESC LIMIT 4;")
+		if q_msg["success"] and q_msg["data"].size() > 0:
+			for r in q_msg["data"]:
+				var raw_dt = str(r.get("created_at", ""))
+				activities.append({
+					"icon": "💬",
+					"title": str(r.get("channel", "Message")) + " Sent",
+					"sub": "To " + str(r.get("recipient_name", "Constituent")),
+					"raw_datetime": raw_dt
+				})
 
-	for act in activities:
-		var item_card = PanelContainer.new()
-		item_card.size_flags_horizontal = SIZE_EXPAND_FILL
+		# Sort combined activities by raw_datetime DESC
+		activities.sort_custom(func(a, b): return str(a["raw_datetime"]) > str(b["raw_datetime"]))
+		if activities.size() > 4:
+			activities = activities.slice(0, 4)
 
-		var ic_style = StyleBoxFlat.new()
-		ic_style.bg_color = Color(0.97, 0.98, 0.99, 1.0)
-		ic_style.border_width_left = 1; ic_style.border_width_top = 1; ic_style.border_width_right = 1; ic_style.border_width_bottom = 1
-		ic_style.border_color = Color(0.90, 0.93, 0.96, 1.0)
-		ic_style.corner_radius_top_left = 8; ic_style.corner_radius_top_right = 8; ic_style.corner_radius_bottom_left = 8; ic_style.corner_radius_bottom_right = 8
-		ic_style.content_margin_left = 12; ic_style.content_margin_top = 10; ic_style.content_margin_right = 12; ic_style.content_margin_bottom = 10
-		item_card.add_theme_stylebox_override("panel", ic_style)
+	if activities.size() == 0:
+		var empty_panel = PanelContainer.new()
+		var empty_style = StyleBoxFlat.new()
+		empty_style.bg_color = Color(0.975, 0.985, 0.995, 1.0)
+		empty_style.border_width_left = 1; empty_style.border_width_top = 1; empty_style.border_width_right = 1; empty_style.border_width_bottom = 1
+		empty_style.border_color = Color(0.88, 0.91, 0.95, 1.0)
+		empty_style.corner_radius_top_left = 8; empty_style.corner_radius_top_right = 8; empty_style.corner_radius_bottom_left = 8; empty_style.corner_radius_bottom_right = 8
+		empty_style.content_margin_left = 16; empty_style.content_margin_top = 18; empty_style.content_margin_right = 16; empty_style.content_margin_bottom = 18
+		empty_panel.add_theme_stylebox_override("panel", empty_style)
 
-		var ihbox = HBoxContainer.new()
-		ihbox.add_theme_constant_override("separation", 10)
+		var empty_vbox = VBoxContainer.new()
+		empty_vbox.add_theme_constant_override("separation", 4)
+		empty_panel.add_child(empty_vbox)
 
-		var icon_lbl = Label.new()
-		icon_lbl.text = act["icon"]
-		icon_lbl.add_theme_font_size_override("font_size", 18)
-		ihbox.add_child(icon_lbl)
+		var h_lbl = Label.new()
+		h_lbl.text = "No recent activity"
+		h_lbl.add_theme_font_size_override("font_size", 15)
+		h_lbl.add_theme_color_override("font_color", Color(0.18, 0.24, 0.32, 1.0))
+		empty_vbox.add_child(h_lbl)
 
-		var ivbox = VBoxContainer.new()
-		ivbox.size_flags_horizontal = SIZE_EXPAND_FILL
-		ivbox.add_theme_constant_override("separation", 2)
+		var s_lbl = Label.new()
+		s_lbl.text = "No recent check-ins, registrations, or communications recorded yet."
+		s_lbl.add_theme_font_size_override("font_size", 13)
+		s_lbl.add_theme_color_override("font_color", Color(0.42, 0.48, 0.56, 1.0))
+		empty_vbox.add_child(s_lbl)
 
-		var t_l = Label.new()
-		t_l.text = act["title"]
-		t_l.add_theme_font_size_override("font_size", 15)
-		t_l.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
-		ivbox.add_child(t_l)
+		vbox.add_child(empty_panel)
+	else:
+		var feed_hbox = HBoxContainer.new()
+		feed_hbox.add_theme_constant_override("separation", 16)
 
-		var s_l = Label.new()
-		s_l.text = act["sub"] + " • " + act["time"]
-		s_l.add_theme_font_size_override("font_size", 13)
-		s_l.add_theme_color_override("font_color", Color(0.30, 0.36, 0.46, 1.0))
-		ivbox.add_child(s_l)
+		for act in activities:
+			var item_card = PanelContainer.new()
+			item_card.size_flags_horizontal = SIZE_EXPAND_FILL
 
-		ihbox.add_child(ivbox)
-		item_card.add_child(ihbox)
-		feed_hbox.add_child(item_card)
+			var ic_style = StyleBoxFlat.new()
+			ic_style.bg_color = Color(0.97, 0.98, 0.99, 1.0)
+			ic_style.border_width_left = 1; ic_style.border_width_top = 1; ic_style.border_width_right = 1; ic_style.border_width_bottom = 1
+			ic_style.border_color = Color(0.90, 0.93, 0.96, 1.0)
+			ic_style.corner_radius_top_left = 8; ic_style.corner_radius_top_right = 8; ic_style.corner_radius_bottom_left = 8; ic_style.corner_radius_bottom_right = 8
+			ic_style.content_margin_left = 12; ic_style.content_margin_top = 10; ic_style.content_margin_right = 12; ic_style.content_margin_bottom = 10
+			item_card.add_theme_stylebox_override("panel", ic_style)
 
-	vbox.add_child(feed_hbox)
+			var ihbox = HBoxContainer.new()
+			ihbox.add_theme_constant_override("separation", 10)
+
+			var icon_lbl = Label.new()
+			icon_lbl.text = act["icon"]
+			icon_lbl.add_theme_font_size_override("font_size", 18)
+			ihbox.add_child(icon_lbl)
+
+			var ivbox = VBoxContainer.new()
+			ivbox.size_flags_horizontal = SIZE_EXPAND_FILL
+			ivbox.add_theme_constant_override("separation", 2)
+
+			var t_l = Label.new()
+			t_l.text = act["title"]
+			t_l.add_theme_font_size_override("font_size", 15)
+			t_l.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
+			ivbox.add_child(t_l)
+
+			var time_fmt = _format_relative_activity_timestamp(str(act.get("raw_datetime", "")))
+
+			var s_l = Label.new()
+			s_l.text = act["sub"] + (" • " + time_fmt if time_fmt != "" else "")
+			s_l.add_theme_font_size_override("font_size", 13)
+			s_l.add_theme_color_override("font_color", Color(0.30, 0.36, 0.46, 1.0))
+			ivbox.add_child(s_l)
+
+			ihbox.add_child(ivbox)
+			item_card.add_child(ihbox)
+			feed_hbox.add_child(item_card)
+
+		vbox.add_child(feed_hbox)
+
 	card_recent_activity.add_child(vbox)
 
 func _style_input_control(ctrl: Control) -> void:

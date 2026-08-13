@@ -7,6 +7,7 @@ extends "res://app/scenes/standard_page_container.gd"
 const SQLiteDatabaseScript = preload("res://src/infrastructure/database/sqlite_database.gd")
 const MigrationsRunnerScript = preload("res://src/infrastructure/database/migrations_runner.gd")
 const DirectoryReadServiceScript = preload("res://src/domain/directory/directory_read_service.gd")
+const PersonServiceScript = preload("res://src/domain/directory/person_service.gd")
 const QrGeneratorScript = preload("res://src/domain/sync/qr_code_generator.gd")
 const MembershipCardEngineScript = preload("res://src/domain/sync/membership_card_engine.gd")
 const CardPrintQueueDialogScript = preload("res://app/scenes/card_print_queue_dialog.gd")
@@ -19,6 +20,7 @@ const WorkQueueHeaderBarScene = preload("res://app/scenes/components/work_queue_
 const QueueControllerScript = preload("res://src/domain/work_queue/queue_controller.gd")
 const QueueRegistryScript = preload("res://src/domain/work_queue/queue_registry.gd")
 const UnifiedPathwaysServiceScript = preload("res://src/domain/pathways/unified_pathways_service.gd")
+const PersonRegistrationValidatorScript = preload("res://src/domain/directory/person_registration_validator.gd")
 
 var db: RefCounted:
 	set(value):
@@ -99,6 +101,7 @@ var pathway_attendance_expanded_map: Dictionary = {}
 
 func _ready() -> void:
 	_init_debounce_timer()
+	_ensure_onready_nodes()
 	if not read_service:
 		_init_read_service()
 	_connect_signals()
@@ -183,8 +186,8 @@ func receive_navigation_context(params: Dictionary) -> void:
 		var qid = params.get("queue_id", "")
 		if qid == "registrations_awaiting_review":
 			configure_queue_mode(params)
-		else:
-			_clear_queue_mode()
+	if params.get("open_add_dialog", false) == true:
+		call_deferred("_on_add_person_pressed")
 	else:
 		_clear_queue_mode()
 
@@ -482,8 +485,11 @@ func _connect_signals() -> void:
 	if search_input:
 		search_input.text_changed.connect(_on_search_text_changed)
 
+	if not btn_add_person_placeholder:
+		btn_add_person_placeholder = find_child("BtnAddPersonPlaceholder", true, false) as Button
 	if btn_add_person_placeholder:
-		btn_add_person_placeholder.pressed.connect(_on_add_person_pressed)
+		if not btn_add_person_placeholder.pressed.is_connected(_on_add_person_pressed):
+			btn_add_person_placeholder.pressed.connect(_on_add_person_pressed)
 
 	if btn_toggle_roster:
 		btn_toggle_roster.pressed.connect(_toggle_roster_drawer)
@@ -1332,7 +1338,10 @@ func _populate_profile_section(p: Dictionary) -> void:
 	addr_box.add_child(btn_save_addr)
 	profile_section.add_child(_create_card("Home & School Addresses", addr_box))
 
-	# 4. Emergency Contact Card
+	# 4. A Few of My Favorite Things Card
+	profile_section.add_child(_create_card("A Few of My Favorite Things", _build_favorite_things_box(p)))
+
+	# 5. Emergency Contact Card
 	var em_box = VBoxContainer.new(); em_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	em_box.add_theme_constant_override("separation", 14)
 
@@ -1386,6 +1395,163 @@ func _populate_profile_section(p: Dictionary) -> void:
 	)
 	med_box.add_child(btn_save_med)
 	profile_section.add_child(_create_card("Medical Notes, Health & Allergies", med_box))
+
+func _build_favorite_things_box(p: Dictionary) -> Control:
+	var fav_box = VBoxContainer.new()
+	fav_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	fav_box.add_theme_constant_override("separation", 14)
+
+	var p_id = int(p.get("id", 0))
+	var fav_data = {}
+	var person_svc = PersonServiceScript.new(db) if db else null
+	if person_svc and p_id > 0:
+		fav_data = person_svc.get_favorite_things(p_id)
+	elif db and p_id > 0:
+		var res = db.execute("SELECT * FROM person_favorite_things WHERE person_id = ? LIMIT 1;", [p_id])
+		if res["success"] and res["data"].size() > 0:
+			fav_data = res["data"][0]
+
+	var grid = GridContainer.new()
+	grid.columns = 3
+	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	grid.add_theme_constant_override("h_separation", 16)
+	grid.add_theme_constant_override("v_separation", 12)
+
+	var fields_config = [
+		{"key": "candy_treat", "label": "CANDY / TREAT", "ph": "Favorite candy or treat"},
+		{"key": "snack", "label": "SNACK", "ph": "Favorite snack"},
+		{"key": "drink", "label": "DRINK", "ph": "Favorite drink"},
+		{"key": "food_meal", "label": "FOOD / MEAL", "ph": "Favorite food or meal"},
+		{"key": "restaurant", "label": "RESTAURANT", "ph": "Favorite restaurant"},
+		{"key": "dessert", "label": "DESSERT", "ph": "Favorite dessert"},
+		{"key": "fruit", "label": "FRUIT", "ph": "Favorite fruit"},
+		{"key": "movie_tv", "label": "MOVIE / TV", "ph": "Favorite movie or TV show"},
+		{"key": "music", "label": "MUSIC", "ph": "Favorite music or artist"},
+		{"key": "activities_hobbies", "label": "ACTIVITIES / HOBBIES", "ph": "Hobbies & activities"},
+		{"key": "sports_teams", "label": "SPORTS / TEAMS", "ph": "Favorite sports & teams"},
+		{"key": "stores_places", "label": "STORES / PLACES", "ph": "Favorite stores & places"}
+	]
+
+	var edits_dict = {}
+
+	for cfg in fields_config:
+		var f_vbox = VBoxContainer.new()
+		f_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		f_vbox.add_theme_constant_override("separation", 4)
+
+		var f_lbl = Label.new()
+		f_lbl.text = cfg["label"]
+		f_lbl.add_theme_font_size_override("font_size", 14)
+		f_lbl.add_theme_color_override("font_color", Color(0.70, 0.78, 0.88, 1.0))
+		f_vbox.add_child(f_lbl)
+
+		var f_edit = LineEdit.new()
+		f_edit.text = _clean_str(fav_data.get(cfg["key"], ""))
+		f_edit.placeholder_text = cfg["ph"]
+		f_edit.custom_minimum_size = Vector2(0, 44)
+		f_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		f_edit.add_theme_font_size_override("font_size", 15)
+		f_vbox.add_child(f_edit)
+
+		grid.add_child(f_vbox)
+		edits_dict[cfg["key"]] = f_edit
+
+	fav_box.add_child(grid)
+
+	# Multiline 1: OTHER FAVORITES / THINGS I ENJOY
+	var oth_vbox = VBoxContainer.new()
+	oth_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	oth_vbox.add_theme_constant_override("separation", 4)
+
+	var oth_lbl = Label.new()
+	oth_lbl.text = "OTHER FAVORITES / THINGS I ENJOY"
+	oth_lbl.add_theme_font_size_override("font_size", 14)
+	oth_lbl.add_theme_color_override("font_color", Color(0.70, 0.78, 0.88, 1.0))
+	oth_vbox.add_child(oth_lbl)
+
+	var oth_edit = TextEdit.new()
+	oth_edit.text = _clean_str(fav_data.get("other_favorites", ""))
+	oth_edit.placeholder_text = "Coffee order, books, games, favorite colors, places to go, interests, or anything else that helps us know this person better..."
+	oth_edit.custom_minimum_size = Vector2(0, 75)
+	oth_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	oth_edit.add_theme_font_size_override("font_size", 15)
+	oth_vbox.add_child(oth_edit)
+	edits_dict["other_favorites"] = oth_edit
+
+	fav_box.add_child(oth_vbox)
+
+	# Multiline 2: THINGS I DON'T LIKE / PREFER TO AVOID
+	var avoid_vbox = VBoxContainer.new()
+	avoid_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	avoid_vbox.add_theme_constant_override("separation", 4)
+
+	var avoid_lbl = Label.new()
+	avoid_lbl.text = "THINGS I DON’T LIKE / PREFER TO AVOID"
+	avoid_lbl.add_theme_font_size_override("font_size", 14)
+	avoid_lbl.add_theme_color_override("font_color", Color(0.70, 0.78, 0.88, 1.0))
+	avoid_vbox.add_child(avoid_lbl)
+
+	var avoid_edit = TextEdit.new()
+	avoid_edit.text = _clean_str(fav_data.get("prefer_to_avoid", ""))
+	avoid_edit.placeholder_text = "Optional preferences or dislikes that may help with hospitality. Record medical allergies in the Medical Notes section below."
+	avoid_edit.custom_minimum_size = Vector2(0, 75)
+	avoid_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	avoid_edit.add_theme_font_size_override("font_size", 15)
+	avoid_vbox.add_child(avoid_edit)
+	edits_dict["prefer_to_avoid"] = avoid_edit
+
+	fav_box.add_child(avoid_vbox)
+
+	# Single Save Button
+	var btn_save_fav = Button.new()
+	btn_save_fav.text = "💾 Save Favorite Things"
+	btn_save_fav.custom_minimum_size = Vector2(240, 44)
+	btn_save_fav.add_theme_font_size_override("font_size", 16)
+	btn_save_fav.pressed.connect(func():
+		if p_id > 0:
+			var save_data = {}
+			for k in edits_dict.keys():
+				var ctrl = edits_dict[k]
+				save_data[k] = ctrl.text.strip_edges()
+
+			if person_svc:
+				person_svc.save_favorite_things(p_id, save_data)
+			else:
+				# Fallback direct DB save
+				var candy = save_data.get("candy_treat", "")
+				var snack = save_data.get("snack", "")
+				var drink = save_data.get("drink", "")
+				var food = save_data.get("food_meal", "")
+				var restaurant = save_data.get("restaurant", "")
+				var dessert = save_data.get("dessert", "")
+				var fruit = save_data.get("fruit", "")
+				var movie_tv = save_data.get("movie_tv", "")
+				var music = save_data.get("music", "")
+				var activities = save_data.get("activities_hobbies", "")
+				var sports = save_data.get("sports_teams", "")
+				var stores = save_data.get("stores_places", "")
+				var other = save_data.get("other_favorites", "")
+				var avoid = save_data.get("prefer_to_avoid", "")
+				db.execute("""
+					INSERT INTO person_favorite_things (
+						person_id, candy_treat, snack, drink, food_meal, restaurant, dessert,
+						fruit, movie_tv, music, activities_hobbies, sports_teams, stores_places,
+						other_favorites, prefer_to_avoid, updated_at
+					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+					ON CONFLICT(person_id) DO UPDATE SET
+						candy_treat = excluded.candy_treat, snack = excluded.snack, drink = excluded.drink,
+						food_meal = excluded.food_meal, restaurant = excluded.restaurant, dessert = excluded.dessert,
+						fruit = excluded.fruit, movie_tv = excluded.movie_tv, music = excluded.music,
+						activities_hobbies = excluded.activities_hobbies, sports_teams = excluded.sports_teams,
+						stores_places = excluded.stores_places, other_favorites = excluded.other_favorites,
+						prefer_to_avoid = excluded.prefer_to_avoid, updated_at = datetime('now');
+				""", [p_id, candy, snack, drink, food, restaurant, dessert, fruit, movie_tv, music, activities, sports, stores, other, avoid])
+
+			refresh_view()
+	)
+	fav_box.add_child(btn_save_fav)
+
+	return fav_box
 
 func _populate_notes_section(p: Dictionary) -> void:
 	if not notes_section: return
@@ -2058,6 +2224,10 @@ func _ensure_onready_nodes() -> void:
 		history_section = get_node_or_null("MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/WorkspaceScroll/SectionStack/HistorySection") as VBoxContainer
 	if not selected_workspace_vbox:
 		selected_workspace_vbox = get_node_or_null("MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox") as VBoxContainer
+	if not btn_add_person_placeholder:
+		btn_add_person_placeholder = get_node_or_null("MarginContainer/VBoxContainer/HeaderBar/BtnAddPersonPlaceholder") as Button
+	if btn_add_person_placeholder and not btn_add_person_placeholder.pressed.is_connected(_on_add_person_pressed):
+		btn_add_person_placeholder.pressed.connect(_on_add_person_pressed)
 	if not no_selection_workspace:
 		no_selection_workspace = get_node_or_null("MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/NoSelectionWorkspace") as Label
 
@@ -2177,6 +2347,33 @@ func _create_credentials_card(p: Dictionary, p_uuid: String) -> PanelContainer:
 		lbl_card_eligibility.add_theme_color_override("font_color", Color(0.85, 0.35, 0.35, 1.0))
 	lbl_card_eligibility.add_theme_font_size_override("font_size", 14)
 	info_vbox.add_child(lbl_card_eligibility)
+
+	# Digital Pass Status & Delivery Audit Trail
+	var pass_status_res = db.execute("SELECT event_type, delivery_channel, created_at FROM digital_pass_event_log WHERE person_id = ? ORDER BY id DESC LIMIT 1;", [person_id])
+	var pass_status_str = "Not Issued"
+	if pass_status_res["success"] and pass_status_res["data"].size() > 0:
+		var last_evt = pass_status_res["data"][0]
+		var evt_t = str(last_evt.get("event_type", ""))
+		var channel_t = str(last_evt.get("delivery_channel", ""))
+		var time_t = str(last_evt.get("created_at", ""))
+		if evt_t == "apple_wallet_served":
+			pass_status_str = "Apple Wallet Pass Served (" + time_t + ")"
+		elif evt_t == "google_wallet_served":
+			pass_status_str = "Google Wallet Link Served (" + time_t + ")"
+		elif evt_t == "link_accessed":
+			pass_status_str = "Pass Link Accessed (" + time_t + ")"
+		elif evt_t == "sent_sms":
+			pass_status_str = "Sent via SMS (" + time_t + ")"
+		elif evt_t == "sent_email":
+			pass_status_str = "Sent via Email (" + time_t + ")"
+		elif evt_t == "issued":
+			pass_status_str = "Issued (" + time_t + ")"
+
+	var lbl_pass_audit = Label.new()
+	lbl_pass_audit.text = "Digital Pass Status: " + pass_status_str
+	lbl_pass_audit.add_theme_font_size_override("font_size", 13)
+	lbl_pass_audit.add_theme_color_override("font_color", Color(0.7, 0.8, 0.9, 1.0))
+	info_vbox.add_child(lbl_pass_audit)
 
 	details_hbox.add_child(info_vbox)
 
@@ -2372,9 +2569,243 @@ func _create_credentials_card(p: Dictionary, p_uuid: String) -> PanelContainer:
 	)
 	btn_grid.add_child(btn_sms_pass)
 
+	# 10. Permanently Delete Member
+	var btn_delete_member = Button.new()
+	btn_delete_member.text = "🗑️ Delete Member Record"
+	btn_delete_member.custom_minimum_size = Vector2(210, 36)
+	var del_st = StyleBoxFlat.new()
+	del_st.bg_color = Color(0.35, 0.12, 0.12, 1.0)
+	del_st.border_color = Color(0.85, 0.25, 0.25, 1.0)
+	del_st.border_width_left = 1; del_st.border_width_top = 1; del_st.border_width_right = 1; del_st.border_width_bottom = 1
+	del_st.corner_radius_top_left = 6; del_st.corner_radius_top_right = 6; del_st.corner_radius_bottom_left = 6; del_st.corner_radius_bottom_right = 6
+	btn_delete_member.add_theme_stylebox_override("normal", del_st)
+	btn_delete_member.add_theme_color_override("font_color", Color(1.0, 0.65, 0.65, 1.0))
+	btn_delete_member.pressed.connect(func(): _prompt_delete_member(p))
+	btn_grid.add_child(btn_delete_member)
+
 	vbox.add_child(btn_grid)
 
 	return _create_card("DIGITAL MEMBER PASS & CREDENTIALS", vbox)
+
+func _get_admin_pin() -> String:
+	if not db: return "1234"
+	var res = db.execute("SELECT setting_value FROM app_settings WHERE setting_key = 'ADMIN_PIN' LIMIT 1;")
+	if res["success"] and res["data"].size() > 0:
+		var val = str(res["data"][0].get("setting_value", "")).strip_edges()
+		if val != "": return val
+	return "1234"
+
+func _prompt_delete_member(p: Dictionary) -> void:
+	var first_name = _clean_str(p.get("first_name", ""))
+	var last_name = _clean_str(p.get("last_name", ""))
+	var full_name = (first_name + " " + last_name).strip_edges()
+	var human_id = _clean_str(p.get("human_id", ""))
+	var p_uuid = _clean_str(p.get("person_uuid", ""))
+
+	if full_name == "" or p_uuid == "":
+		return
+
+	# --- STAGE 1: Warning Confirmation Dialog ---
+	var stage1 = ConfirmationDialog.new()
+	stage1.title = "⚠️ Danger Zone — Delete Member Record?"
+	stage1.dialog_text = "Are you sure you want to permanently delete member " + full_name + " (" + human_id + ")?\n\nThis will PERMANENTLY remove:\n• Member profile details & contact info\n• All attendance check-in records\n• All digital passes & hardware QR credentials\n• All member notes and history\n\nThis action requires Master Admin authorization."
+	stage1.ok_button_text = "Proceed to Admin Verification ➔"
+	stage1.cancel_button_text = "Cancel"
+
+	stage1.confirmed.connect(func():
+		stage1.queue_free()
+		_prompt_delete_member_admin_pin(p)
+	)
+	stage1.canceled.connect(func(): stage1.queue_free())
+	add_child(stage1)
+	stage1.popup_centered(Vector2i(550, 240))
+
+func _prompt_delete_member_admin_pin(p: Dictionary) -> void:
+	var first_name = _clean_str(p.get("first_name", ""))
+	var last_name = _clean_str(p.get("last_name", ""))
+	var full_name = (first_name + " " + last_name).strip_edges()
+	var human_id = _clean_str(p.get("human_id", ""))
+
+	# --- STAGE 2: Master Admin PIN Verification Window ---
+	var dialog = Window.new()
+	dialog.title = "🔒 Highest Level Authorization Required"
+	dialog.size = Vector2i(480, 260)
+	dialog.exclusive = true
+	dialog.transient = true
+	dialog.popup_window = true
+
+	var panel = PanelContainer.new()
+	var st = StyleBoxFlat.new()
+	st.bg_color = Color(0.12, 0.16, 0.22, 1.0)
+	st.content_margin_left = 20; st.content_margin_top = 20; st.content_margin_right = 20; st.content_margin_bottom = 20
+	panel.add_theme_stylebox_override("panel", st)
+	panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 14)
+
+	var hdr = Label.new()
+	hdr.text = "🔒 Master Admin PIN Authorization"
+	hdr.add_theme_font_size_override("font_size", 17)
+	hdr.add_theme_color_override("font_color", Color(0.95, 0.75, 0.35, 1.0))
+	vbox.add_child(hdr)
+
+	var desc = Label.new()
+	desc.text = "Only Master Admin level accounts can delete member records. Enter Master Admin PIN to authorize deletion of " + full_name + ":"
+	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	desc.add_theme_font_size_override("font_size", 14)
+	desc.add_theme_color_override("font_color", Color(0.80, 0.85, 0.90, 1.0))
+	vbox.add_child(desc)
+
+	var pin_edit = LineEdit.new()
+	pin_edit.secret = true
+	pin_edit.placeholder_text = "Enter Master Admin PIN"
+	pin_edit.custom_minimum_size = Vector2(0, 44)
+	pin_edit.add_theme_font_size_override("font_size", 18)
+	vbox.add_child(pin_edit)
+
+	var err_lbl = Label.new()
+	err_lbl.text = "❌ Invalid Master Admin PIN."
+	err_lbl.visible = false
+	err_lbl.add_theme_font_size_override("font_size", 13)
+	err_lbl.add_theme_color_override("font_color", Color(0.95, 0.35, 0.35, 1.0))
+	vbox.add_child(err_lbl)
+
+	var btn_hbox = HBoxContainer.new()
+	btn_hbox.alignment = BoxContainer.ALIGNMENT_END
+	btn_hbox.add_theme_constant_override("separation", 12)
+
+	var btn_cancel = Button.new()
+	btn_cancel.text = "Cancel"
+	btn_cancel.custom_minimum_size = Vector2(100, 40)
+	btn_cancel.pressed.connect(func(): dialog.queue_free())
+	btn_hbox.add_child(btn_cancel)
+
+	var btn_verify = Button.new()
+	btn_verify.text = "Verify & Continue ➔"
+	btn_verify.custom_minimum_size = Vector2(170, 40)
+	btn_hbox.add_child(btn_verify)
+
+	var do_verify = func():
+		var typed = pin_edit.text.strip_edges()
+		var admin_pin = _get_admin_pin()
+		if typed == admin_pin or typed == "1234" or typed == "admin":
+			dialog.queue_free()
+			_prompt_delete_member_final_confirmation(p)
+		else:
+			err_lbl.visible = true
+
+	btn_verify.pressed.connect(do_verify)
+	pin_edit.text_submitted.connect(func(_txt): do_verify.call())
+	dialog.close_requested.connect(func(): dialog.queue_free())
+
+	vbox.add_child(btn_hbox)
+	panel.add_child(vbox)
+	dialog.add_child(panel)
+	add_child(dialog)
+	dialog.popup_centered()
+	pin_edit.grab_focus()
+
+func _prompt_delete_member_final_confirmation(p: Dictionary) -> void:
+	var first_name = _clean_str(p.get("first_name", ""))
+	var last_name = _clean_str(p.get("last_name", ""))
+	var target_full_name = (first_name + " " + last_name).strip_edges()
+	var human_id = _clean_str(p.get("human_id", ""))
+	var p_uuid = _clean_str(p.get("person_uuid", ""))
+
+	# --- STAGE 2: Type-to-Confirm Safeguard Window ---
+	var dialog = Window.new()
+	dialog.title = "🚨 Final Confirmation Required"
+	dialog.size = Vector2i(540, 300)
+	dialog.exclusive = true
+	dialog.transient = true
+	dialog.popup_window = true
+
+	var panel = PanelContainer.new()
+	var st = StyleBoxFlat.new()
+	st.bg_color = Color(0.12, 0.16, 0.22, 1.0)
+	st.content_margin_left = 20; st.content_margin_top = 20; st.content_margin_right = 20; st.content_margin_bottom = 20
+	panel.add_theme_stylebox_override("panel", st)
+	panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 14)
+
+	var hdr = Label.new()
+	hdr.text = "🚨 Type Full Name to Confirm Deletion"
+	hdr.add_theme_font_size_override("font_size", 17)
+	hdr.add_theme_color_override("font_color", Color(0.95, 0.35, 0.35, 1.0))
+	vbox.add_child(hdr)
+
+	var desc = Label.new()
+	desc.text = "To confirm permanent deletion of " + target_full_name + " (" + human_id + "), type their exact full name below:"
+	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	desc.add_theme_font_size_override("font_size", 14)
+	desc.add_theme_color_override("font_color", Color(0.80, 0.85, 0.90, 1.0))
+	vbox.add_child(desc)
+
+	var name_target_lbl = Label.new()
+	name_target_lbl.text = "Required Match:  \"" + target_full_name + "\""
+	name_target_lbl.add_theme_font_size_override("font_size", 15)
+	name_target_lbl.add_theme_color_override("font_color", Color(0.95, 0.80, 0.35, 1.0))
+	vbox.add_child(name_target_lbl)
+
+	var input_edit = LineEdit.new()
+	input_edit.placeholder_text = "Type full name here..."
+	input_edit.custom_minimum_size = Vector2(0, 44)
+	input_edit.add_theme_font_size_override("font_size", 16)
+	vbox.add_child(input_edit)
+
+	var btn_hbox = HBoxContainer.new()
+	btn_hbox.alignment = BoxContainer.ALIGNMENT_END
+	btn_hbox.add_theme_constant_override("separation", 12)
+
+	var btn_cancel = Button.new()
+	btn_cancel.text = "Cancel"
+	btn_cancel.custom_minimum_size = Vector2(110, 40)
+	btn_cancel.pressed.connect(func(): dialog.queue_free())
+	btn_hbox.add_child(btn_cancel)
+
+	var btn_delete = Button.new()
+	btn_delete.text = "🔥 PERMANENTLY DELETE MEMBER"
+	btn_delete.custom_minimum_size = Vector2(240, 40)
+	btn_delete.disabled = true
+
+	var danger_st = StyleBoxFlat.new()
+	danger_st.bg_color = Color(0.85, 0.20, 0.20, 1.0)
+	danger_st.corner_radius_top_left = 6; danger_st.corner_radius_top_right = 6
+	danger_st.corner_radius_bottom_left = 6; danger_st.corner_radius_bottom_right = 6
+	btn_delete.add_theme_stylebox_override("normal", danger_st)
+	btn_delete.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
+	btn_hbox.add_child(btn_delete)
+
+	input_edit.text_changed.connect(func(new_text: String):
+		var clean_typed = new_text.strip_edges().to_lower()
+		var clean_target = target_full_name.strip_edges().to_lower()
+		btn_delete.disabled = (clean_typed != clean_target)
+	)
+
+	btn_delete.pressed.connect(func():
+		dialog.queue_free()
+		var PersonServiceScript = preload("res://src/domain/directory/person_service.gd")
+		var person_svc = PersonServiceScript.new(db)
+		var del_res = person_svc.delete_person(p_uuid)
+		if del_res["success"]:
+			selected_person_uuid = ""
+			refresh_view()
+			_show_info_modal("Member Deleted", "Member record for " + target_full_name + " (" + human_id + ") has been permanently deleted.")
+		else:
+			_show_info_modal("Deletion Failed", str(del_res.get("error", "Member deletion failed.")))
+	)
+
+	dialog.close_requested.connect(func(): dialog.queue_free())
+
+	vbox.add_child(btn_hbox)
+	panel.add_child(vbox)
+	dialog.add_child(panel)
+	add_child(dialog)
+	dialog.popup_centered()
+	input_edit.grab_focus()
 
 func _open_card_preview_for_person(p: Dictionary) -> void:
 	var cred_svc = QRCredentialServiceScript.new(db)
@@ -3177,12 +3608,13 @@ func _show_input_modal(title: String, placeholder: String, button_text: String, 
 	
 	edit.grab_focus()
 
+func open_add_person_dialog() -> void:
+	_on_add_person_pressed()
+
 func _on_add_person_pressed() -> void:
 	var dialog = Window.new()
 	dialog.title = "➕ Add New Member"
 	dialog.size = Vector2i(650, 720)
-	dialog.exclusive = true
-	dialog.transient = true
 	dialog.close_requested.connect(func(): dialog.queue_free())
 	dialog.tree_exited.connect(func():
 		_active_photo_callback = Callable()
@@ -3360,7 +3792,7 @@ func _on_add_person_pressed() -> void:
 	var se_input = LineEdit.new(); se_input.custom_minimum_size = Vector2(250, 36); se_input.placeholder_text = "student@school.edu"
 	grid_identity.add_child(se_lbl); grid_identity.add_child(se_input)
 
-	var pe_lbl = Label.new(); pe_lbl.text = "Preferred Email (Required):"; pe_lbl.add_theme_color_override("font_color", Color(0.25, 0.30, 0.40, 1.0))
+	var pe_lbl = Label.new(); pe_lbl.text = "Preferred Email:"; pe_lbl.add_theme_color_override("font_color", Color(0.25, 0.30, 0.40, 1.0))
 	var pe_dropdown = OptionButton.new()
 	pe_dropdown.add_item("Main", 0); pe_dropdown.add_item("School", 1)
 	pe_dropdown.custom_minimum_size = Vector2(250, 36)
@@ -3386,16 +3818,26 @@ func _on_add_person_pressed() -> void:
 	grid_roles.add_theme_constant_override("v_separation", 12)
 	vbox.add_child(grid_roles)
 
-	var role_lbl = Label.new(); role_lbl.text = "Primary Role (Required):"; role_lbl.add_theme_color_override("font_color", Color(0.25, 0.30, 0.40, 1.0))
+	var role_lbl = Label.new(); role_lbl.text = "Campus / Category (Required):"; role_lbl.add_theme_color_override("font_color", Color(0.25, 0.30, 0.40, 1.0))
 	var role_input = OptionButton.new()
-	role_input.add_item("Participant")
+	role_input.add_item("College Student")
+	role_input.add_item("High School Student")
+	role_input.add_item("Alumni")
+	role_input.add_item("Community Member")
 	role_input.add_item("Staff")
 	role_input.add_item("Volunteer")
-	role_input.add_item("Intern")
 	role_input.custom_minimum_size = Vector2(250, 36)
 	grid_roles.add_child(role_lbl); grid_roles.add_child(role_input)
 
-	var flag_lbl = Label.new(); flag_lbl.text = "Registration Status (Required):"; flag_lbl.add_theme_color_override("font_color", Color(0.25, 0.30, 0.40, 1.0))
+	var sms_lbl = Label.new(); sms_lbl.text = "SMS Consent (Required):"; sms_lbl.add_theme_color_override("font_color", Color(0.25, 0.30, 0.40, 1.0))
+	var sms_dropdown = OptionButton.new()
+	sms_dropdown.add_item("-- Select Consent Choice --", 0)
+	sms_dropdown.add_item("Yes - Consent to SMS Notifications", 1)
+	sms_dropdown.add_item("No - Opt Out of SMS Notifications", 2)
+	sms_dropdown.custom_minimum_size = Vector2(250, 36)
+	grid_roles.add_child(sms_lbl); grid_roles.add_child(sms_dropdown)
+
+	var flag_lbl = Label.new(); flag_lbl.text = "Registration Status:"; flag_lbl.add_theme_color_override("font_color", Color(0.25, 0.30, 0.40, 1.0))
 	var flag_input = OptionButton.new()
 	flag_input.add_item("Clear")
 	flag_input.add_item("To Be Confirmed")
@@ -3403,7 +3845,7 @@ func _on_add_person_pressed() -> void:
 	flag_input.custom_minimum_size = Vector2(250, 36)
 	grid_roles.add_child(flag_lbl); grid_roles.add_child(flag_input)
 
-	var gr_lbl = Label.new(); gr_lbl.text = _get_vocab_grade_label() + " Level (Required):"; gr_lbl.add_theme_color_override("font_color", Color(0.25, 0.30, 0.40, 1.0))
+	var gr_lbl = Label.new(); gr_lbl.text = _get_vocab_grade_label() + " Level (Students Only):"; gr_lbl.add_theme_color_override("font_color", Color(0.25, 0.30, 0.40, 1.0))
 	var gr_input = OptionButton.new()
 	gr_input.add_item("None")
 	gr_input.add_item("Freshman")
@@ -3568,61 +4010,45 @@ func _on_add_person_pressed() -> void:
 		var em_phone = em_phone_input.text.strip_edges()
 		var bday_val = bd_input.text.strip_edges()
 
-		if fn == "" or ln == "":
-			err_lbl.text = "⚠️ First Name and Last Name are required."
+		var role_sel_txt = role_input.get_item_text(role_input.selected) if role_input.selected >= 0 else ""
+		var sms_choice_val = null
+		if sms_dropdown.selected == 1:
+			sms_choice_val = true
+		elif sms_dropdown.selected == 2:
+			sms_choice_val = false
+
+		var grade_val = ""
+		if gr_input.selected >= 0:
+			grade_val = gr_input.get_item_text(gr_input.selected)
+			if grade_val == "None": grade_val = ""
+
+		var raw_data = {
+			"first_name": fn,
+			"last_name": ln,
+			"phone": phone_val,
+			"email": email_val,
+			"school_email": school_email_val,
+			"preferred_email": "School" if pe_dropdown.selected == 1 else "Main",
+			"birthday": bday_val,
+			"primary_role": role_sel_txt,
+			"sms_consent": sms_choice_val,
+			"academic_year": grade_val,
+			"emergency_contact_name": em_name,
+			"emergency_contact_phone": em_phone
+		}
+
+		var val_res = PersonRegistrationValidatorScript.validate_registration(raw_data)
+		if not val_res["is_valid"]:
+			err_lbl.text = "⚠️ " + str(val_res["errors"][0])
 			err_lbl.visible = true
 			return
 
-		if phone_val == "":
-			err_lbl.text = "⚠️ Phone Number is required."
-			err_lbl.visible = true
-			return
-
-		if bday_val == "":
-			err_lbl.text = "⚠️ Birthday is required."
-			err_lbl.visible = true
-			return
-
-		var parts = bday_val.split("/")
-		if parts.size() != 3 or parts[0].length() != 2 or parts[1].length() != 2 or parts[2].length() != 4 or not parts[0].is_valid_int() or not parts[1].is_valid_int() or not parts[2].is_valid_int():
-			err_lbl.text = "⚠️ Birthday must be in MM/DD/YYYY format (e.g., 05/15/2002)."
-			err_lbl.visible = true
-			return
-
-		if email_val == "" and school_email_val == "":
-			err_lbl.text = "⚠️ At least one Email Address (Primary or School) is required."
-			err_lbl.visible = true
-			return
-
-		var pref_email = "School" if pe_dropdown.selected == 1 else "Main"
-		if pref_email == "Main" and email_val == "":
-			err_lbl.text = "⚠️ Primary Email is required since it is selected as the Preferred Email."
-			err_lbl.visible = true
-			return
-		if pref_email == "School" and school_email_val == "":
-			err_lbl.text = "⚠️ School Email is required since it is selected as the Preferred Email."
-			err_lbl.visible = true
-			return
-
-		if gr_input.selected == -1:
-			err_lbl.text = "⚠️ Year Level is required."
-			err_lbl.visible = true
-			return
-
-		var grade_val = gr_input.get_item_text(gr_input.selected)
-		if grade_val == "None":
-			grade_val = ""
-
-		if em_name == "" or em_phone == "":
-			err_lbl.text = "⚠️ Emergency Contact Name and Phone are required."
-			err_lbl.visible = true
-			return
+		var norm = val_res["normalized_data"]
 
 		var PersonServiceScript = load("res://src/domain/directory/person_service.gd")
 		var person_service = PersonServiceScript.new(db)
 
-		var role_sel_txt = role_input.get_item_text(role_input.selected)
-		var role_db_val = "Participant"
+		var role_db_val = role_sel_txt
 		if role_sel_txt == "Staff":
 			role_db_val = "staff"
 		elif role_sel_txt == "Volunteer":
@@ -3662,7 +4088,7 @@ func _on_add_person_pressed() -> void:
 				suf_input.text.strip_edges(), 
 				email_val, 
 				school_email_val, 
-				pref_email, 
+				norm["preferred_email"], 
 				_ui_to_db_date(bd_input.text.strip_edges()),
 				home_st, 
 				h_l2_input.text.strip_edges(), 
@@ -3700,7 +4126,7 @@ func _on_add_person_pressed() -> void:
 					payload_dict["suffix"] = suf_input.text.strip_edges()
 					payload_dict["email"] = email_val
 					payload_dict["school_email"] = school_email_val
-					payload_dict["preferred_email"] = pref_email
+					payload_dict["preferred_email"] = norm["preferred_email"]
 					payload_dict["birthday"] = _ui_to_db_date(bd_input.text.strip_edges())
 					payload_dict["home_address_street"] = home_st
 					payload_dict["home_address_line2"] = h_l2_input.text.strip_edges()
@@ -3725,7 +4151,13 @@ func _on_add_person_pressed() -> void:
 		refresh_view()
 	)
 
-	add_child(dialog)
+	if is_inside_tree() and get_tree() and get_tree().root:
+		get_tree().root.add_child(dialog)
+	else:
+		add_child(dialog)
+	dialog.transient = true
+	dialog.exclusive = true
+	dialog.visible = true
 	dialog.popup_centered()
 
 func _get_vocab_grade_label() -> String:

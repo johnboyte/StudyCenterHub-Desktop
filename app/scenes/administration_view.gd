@@ -139,6 +139,14 @@ func _ready() -> void:
 		tab_hbox.add_child(btn_cc)
 		btn_cc.pressed.connect(func(): switch_tab("campus_community"))
 
+		var btn_scripture = Button.new()
+		btn_scripture.name = "BtnTabScripture"
+		btn_scripture.text = "  📖 Scripture & Sidebar Messages  "
+		btn_scripture.custom_minimum_size = Vector2(0, 36)
+		btn_scripture.add_theme_font_size_override("font_size", 14)
+		tab_hbox.add_child(btn_scripture)
+		btn_scripture.pressed.connect(func(): switch_tab("scripture"))
+
 	# Initialize Sticky Bar
 	sticky_bar = PanelContainer.new()
 	sticky_bar.name = "StickyBar"
@@ -259,6 +267,8 @@ func switch_tab(tab_name: String) -> void:
 		_render_campus_community_tab()
 	elif active_tab == "sync_engine":
 		_render_sync_engine_tab()
+	elif active_tab == "scripture":
+		_render_scripture_verses_tab()
 		
 	_setup_scroll_handling()
 
@@ -277,6 +287,9 @@ func _update_tab_button_styles() -> void:
 	var btn_sync = get_node_or_null("MarginContainer/MainVBox/TabHBox/BtnTabSyncEngine") as Button
 	if btn_sync:
 		_style_tab_btn(btn_sync, active_tab == "sync_engine")
+	var btn_scripture = get_node_or_null("MarginContainer/MainVBox/TabHBox/BtnTabScripture") as Button
+	if btn_scripture:
+		_style_tab_btn(btn_scripture, active_tab == "scripture")
 
 func _get_active_theme_color() -> Color:
 	var idx = int(_get_setting_string("ORG_ACCENT_INDEX", "0"))
@@ -4066,3 +4079,287 @@ func _open_staff_dialog(staff_uuid: String = "") -> void:
 			backdrop.queue_free()
 			_render_ivr_tab()
 	)
+
+func _render_scripture_verses_tab() -> void:
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 18)
+
+	var title_lbl = Label.new()
+	title_lbl.text = "Scripture Verses & Sidebar Message Control"
+	title_lbl.add_theme_font_size_override("font_size", 20)
+	title_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
+	vbox.add_child(title_lbl)
+
+	var sub_lbl = Label.new()
+	sub_lbl.text = "Manage rotating Scripture verses displayed at the bottom left of the application, or configure a single custom announcement override message."
+	sub_lbl.add_theme_font_size_override("font_size", 13)
+	sub_lbl.add_theme_color_override("font_color", Color(0.40, 0.46, 0.54, 1.0))
+	vbox.add_child(sub_lbl)
+
+	# --- 1. SINGLE MESSAGE OVERRIDE CARD ---
+	var ov_card = PanelContainer.new()
+	var ov_st = StyleBoxFlat.new()
+	ov_st.bg_color = Color(0.975, 0.985, 0.995, 1.0)
+	ov_st.border_width_left = 1; ov_st.border_width_top = 1; ov_st.border_width_right = 1; ov_st.border_width_bottom = 1
+	ov_st.border_color = Color(0.88, 0.91, 0.95, 1.0)
+	ov_st.corner_radius_top_left = 8; ov_st.corner_radius_top_right = 8; ov_st.corner_radius_bottom_left = 8; ov_st.corner_radius_bottom_right = 8
+	ov_st.content_margin_left = 16; ov_st.content_margin_top = 14; ov_st.content_margin_right = 16; ov_st.content_margin_bottom = 14
+	ov_card.add_theme_stylebox_override("panel", ov_st)
+
+	var ov_vbox = VBoxContainer.new()
+	ov_vbox.add_theme_constant_override("separation", 10)
+	ov_card.add_child(ov_vbox)
+
+	var ov_title = Label.new()
+	ov_title.text = "📌 Single Message Area Override"
+	ov_title.add_theme_font_size_override("font_size", 16)
+	ov_title.add_theme_color_override("font_color", Color(0.12, 0.16, 0.24, 1.0))
+	ov_vbox.add_child(ov_title)
+
+	var ov_enabled = false
+	var ov_text = ""
+	var ov_ref = ""
+	var q_ov = db.execute("SELECT setting_key, setting_value FROM app_settings WHERE setting_key IN ('SCRIPTURE_OVERRIDE_ENABLED', 'SCRIPTURE_OVERRIDE_TEXT', 'SCRIPTURE_OVERRIDE_REF');")
+	if q_ov["success"] and q_ov["data"].size() > 0:
+		for r in q_ov["data"]:
+			var k = str(r.get("setting_key", ""))
+			var v = str(r.get("setting_value", ""))
+			if k == "SCRIPTURE_OVERRIDE_ENABLED" and v == "1":
+				ov_enabled = true
+			elif k == "SCRIPTURE_OVERRIDE_TEXT":
+				ov_text = v
+			elif k == "SCRIPTURE_OVERRIDE_REF":
+				ov_ref = v
+
+	var chk_override = CheckBox.new()
+	chk_override.text = "Enable Single Custom Message Area Override (Disables Scripture rotation)"
+	chk_override.button_pressed = ov_enabled
+	chk_override.add_theme_font_size_override("font_size", 14)
+	ov_vbox.add_child(chk_override)
+
+	var txt_ov_body = TextEdit.new()
+	txt_ov_body.custom_minimum_size = Vector2(0, 70)
+	txt_ov_body.text = ov_text
+	txt_ov_body.placeholder_text = "Enter custom announcement message to pin at bottom left of sidebar..."
+	txt_ov_body.add_theme_font_size_override("font_size", 13)
+	ov_vbox.add_child(txt_ov_body)
+
+	var txt_ov_ref = LineEdit.new()
+	txt_ov_ref.text = ov_ref
+	txt_ov_ref.placeholder_text = "Subtitle / Reference (e.g. Center Announcement)"
+	txt_ov_ref.add_theme_font_size_override("font_size", 13)
+	ov_vbox.add_child(txt_ov_ref)
+
+	var btn_save_ov = Button.new()
+	btn_save_ov.text = "Save Message Override Settings"
+	btn_save_ov.custom_minimum_size = Vector2(220, 36)
+	btn_save_ov.add_theme_font_size_override("font_size", 13)
+	var st_btn = StyleBoxFlat.new()
+	st_btn.bg_color = _get_active_theme_color()
+	st_btn.corner_radius_top_left = 6; st_btn.corner_radius_top_right = 6; st_btn.corner_radius_bottom_left = 6; st_btn.corner_radius_bottom_right = 6
+	btn_save_ov.add_theme_stylebox_override("normal", st_btn)
+	btn_save_ov.add_theme_color_override("font_color", Color(1, 1, 1, 1))
+
+	btn_save_ov.pressed.connect(func():
+		var is_en = "1" if chk_override.button_pressed else "0"
+		var b_val = txt_ov_body.text.strip_edges()
+		var r_val = txt_ov_ref.text.strip_edges()
+
+		db.execute("INSERT OR REPLACE INTO app_settings (setting_key, setting_value) VALUES ('SCRIPTURE_OVERRIDE_ENABLED', ?);", [is_en])
+		db.execute("INSERT OR REPLACE INTO app_settings (setting_key, setting_value) VALUES ('SCRIPTURE_OVERRIDE_TEXT', ?);", [b_val])
+		db.execute("INSERT OR REPLACE INTO app_settings (setting_key, setting_value) VALUES ('SCRIPTURE_OVERRIDE_REF', ?);", [r_val])
+
+		var app_shell = get_tree().get_first_node_in_group("app_shell")
+		if app_shell and app_shell.has_method("_update_sidebar_scripture_card"):
+			app_shell._update_sidebar_scripture_card()
+		_show_toast("Message Override settings saved successfully!")
+	)
+	ov_vbox.add_child(btn_save_ov)
+	vbox.add_child(ov_card)
+
+	# --- 2. ROTATING SCRIPTURE VERSES LIST ---
+	var list_hdr = HBoxContainer.new()
+	list_hdr.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+	var list_title = Label.new()
+	list_title.text = "📖 Rotating Scripture Verses"
+	list_title.add_theme_font_size_override("font_size", 18)
+	list_title.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
+	list_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	list_hdr.add_child(list_title)
+
+	var btn_add = Button.new()
+	btn_add.text = "+ Add New Scripture Verse"
+	btn_add.custom_minimum_size = Vector2(180, 34)
+	btn_add.add_theme_font_size_override("font_size", 13)
+	btn_add.pressed.connect(func(): _open_scripture_verse_modal())
+	list_hdr.add_child(btn_add)
+	vbox.add_child(list_hdr)
+
+	var q_v = db.execute("SELECT id, verse_uuid, verse_text, reference, is_active FROM scripture_verses ORDER BY sort_order ASC, id ASC;")
+	if q_v["success"] and q_v["data"].size() > 0:
+		for v_row in q_v["data"]:
+			var v_id = int(v_row.get("id", 0))
+			var v_text = str(v_row.get("verse_text", ""))
+			var v_ref = str(v_row.get("reference", ""))
+			var v_act = int(v_row.get("is_active", 1)) == 1
+
+			var item_panel = PanelContainer.new()
+			item_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			var i_st = StyleBoxFlat.new()
+			i_st.bg_color = Color(1.0, 1.0, 1.0, 1.0)
+			i_st.border_width_left = 1; i_st.border_width_top = 1; i_st.border_width_right = 1; i_st.border_width_bottom = 1
+			i_st.border_color = Color(0.90, 0.92, 0.95, 1.0)
+			i_st.corner_radius_top_left = 6; i_st.corner_radius_top_right = 6; i_st.corner_radius_bottom_left = 6; i_st.corner_radius_bottom_right = 6
+			i_st.content_margin_left = 14; i_st.content_margin_top = 10; i_st.content_margin_right = 14; i_st.content_margin_bottom = 10
+			item_panel.add_theme_stylebox_override("panel", i_st)
+
+			var ihbox = HBoxContainer.new()
+			ihbox.add_theme_constant_override("separation", 12)
+			item_panel.add_child(ihbox)
+
+			var ivbox = VBoxContainer.new()
+			ivbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			ivbox.add_theme_constant_override("separation", 3)
+
+			var txt_l = Label.new()
+			txt_l.text = "“" + v_text + "”"
+			txt_l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			txt_l.add_theme_font_size_override("font_size", 14)
+			txt_l.add_theme_color_override("font_color", Color(0.12, 0.16, 0.24, 1.0))
+			ivbox.add_child(txt_l)
+
+			var ref_l = Label.new()
+			ref_l.text = "— " + v_ref + ("  (Active)" if v_act else "  (Disabled)")
+			ref_l.add_theme_font_size_override("font_size", 12)
+			ref_l.add_theme_color_override("font_color", Color(0.88, 0.55, 0.11, 1.0) if v_act else Color(0.5, 0.5, 0.5, 1.0))
+			ivbox.add_child(ref_l)
+
+			ihbox.add_child(ivbox)
+
+			var btn_toggle = Button.new()
+			btn_toggle.text = "Disable" if v_act else "Enable"
+			btn_toggle.custom_minimum_size = Vector2(70, 30)
+			btn_toggle.add_theme_font_size_override("font_size", 12)
+			btn_toggle.pressed.connect(func():
+				var n_val = 0 if v_act else 1
+				db.execute("UPDATE scripture_verses SET is_active = ? WHERE id = ?;", [n_val, v_id])
+				var app_shell = get_tree().get_first_node_in_group("app_shell")
+				if app_shell and app_shell.has_method("_update_sidebar_scripture_card"):
+					app_shell._update_sidebar_scripture_card()
+				_render_scripture_verses_tab()
+			)
+			ihbox.add_child(btn_toggle)
+
+			var btn_edit = Button.new()
+			btn_edit.text = "Edit"
+			btn_edit.custom_minimum_size = Vector2(60, 30)
+			btn_edit.add_theme_font_size_override("font_size", 12)
+			btn_edit.pressed.connect(func(): _open_scripture_verse_modal(v_id, v_text, v_ref))
+			ihbox.add_child(btn_edit)
+
+			var btn_del = Button.new()
+			btn_del.text = "Delete"
+			btn_del.custom_minimum_size = Vector2(65, 30)
+			btn_del.add_theme_font_size_override("font_size", 12)
+			btn_del.pressed.connect(func():
+				db.execute("DELETE FROM scripture_verses WHERE id = ?;", [v_id])
+				var app_shell = get_tree().get_first_node_in_group("app_shell")
+				if app_shell and app_shell.has_method("_update_sidebar_scripture_card"):
+					app_shell._update_sidebar_scripture_card()
+				_render_scripture_verses_tab()
+			)
+			ihbox.add_child(btn_del)
+
+			vbox.add_child(item_panel)
+
+	content_card.add_child(vbox)
+
+func _open_scripture_verse_modal(v_id: int = 0, existing_text: String = "", existing_ref: String = "") -> void:
+	var backdrop = ColorRect.new()
+	backdrop.color = Color(0, 0, 0, 0.55)
+	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	backdrop.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(backdrop)
+
+	var modal = PanelContainer.new()
+	modal.custom_minimum_size = Vector2(520, 320)
+	modal.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	modal.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	modal.grow_vertical = Control.GROW_DIRECTION_BOTH
+
+	var m_st = StyleBoxFlat.new()
+	m_st.bg_color = Color(1.0, 1.0, 1.0, 1.0)
+	m_st.border_width_left = 1; m_st.border_width_top = 1; m_st.border_width_right = 1; m_st.border_width_bottom = 1
+	m_st.border_color = Color(0.85, 0.88, 0.92, 1.0)
+	m_st.corner_radius_top_left = 12; m_st.corner_radius_top_right = 12; m_st.corner_radius_bottom_left = 12; m_st.corner_radius_bottom_right = 12
+	m_st.content_margin_left = 24; m_st.content_margin_top = 20; m_st.content_margin_right = 24; m_st.content_margin_bottom = 20
+	modal.add_theme_stylebox_override("panel", m_st)
+
+	var mvbox = VBoxContainer.new()
+	mvbox.add_theme_constant_override("separation", 14)
+	modal.add_child(mvbox)
+
+	var title_lbl = Label.new()
+	title_lbl.text = "Edit Scripture Verse" if v_id > 0 else "Add New Scripture Verse"
+	title_lbl.add_theme_font_size_override("font_size", 18)
+	title_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
+	mvbox.add_child(title_lbl)
+
+	var txt_body = TextEdit.new()
+	txt_body.custom_minimum_size = Vector2(0, 90)
+	txt_body.text = existing_text
+	txt_body.placeholder_text = "Enter Scripture text (e.g. Trust in the LORD with all your heart...)"
+	txt_body.add_theme_font_size_override("font_size", 13)
+	mvbox.add_child(txt_body)
+
+	var txt_ref = LineEdit.new()
+	txt_ref.text = existing_ref
+	txt_ref.placeholder_text = "Biblical reference (e.g. Proverbs 3:5-6)"
+	txt_ref.add_theme_font_size_override("font_size", 13)
+	mvbox.add_child(txt_ref)
+
+	var btn_hbox = HBoxContainer.new()
+	btn_hbox.add_theme_constant_override("separation", 10)
+
+	var btn_save = Button.new()
+	btn_save.text = "Save Verse"
+	btn_save.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	btn_save.custom_minimum_size = Vector2(0, 36)
+	btn_save.add_theme_font_size_override("font_size", 14)
+	var s_btn = StyleBoxFlat.new()
+	s_btn.bg_color = _get_active_theme_color()
+	s_btn.corner_radius_top_left = 6; s_btn.corner_radius_top_right = 6; s_btn.corner_radius_bottom_left = 6; s_btn.corner_radius_bottom_right = 6
+	btn_save.add_theme_stylebox_override("normal", s_btn)
+	btn_save.add_theme_color_override("font_color", Color(1, 1, 1, 1))
+
+	btn_save.pressed.connect(func():
+		var b_val = txt_body.text.strip_edges()
+		var r_val = txt_ref.text.strip_edges()
+		if b_val == "": return
+
+		if v_id > 0:
+			db.execute("UPDATE scripture_verses SET verse_text = ?, reference = ?, updated_at = datetime('now') WHERE id = ?;", [b_val, r_val, v_id])
+		else:
+			var new_uuid = "vrs-" + str(Time.get_ticks_usec())
+			db.execute("INSERT INTO scripture_verses (verse_uuid, verse_text, reference) VALUES (?, ?, ?);", [new_uuid, b_val, r_val])
+
+		var app_shell = get_tree().get_first_node_in_group("app_shell")
+		if app_shell and app_shell.has_method("_update_sidebar_scripture_card"):
+			app_shell._update_sidebar_scripture_card()
+
+		backdrop.queue_free()
+		_render_scripture_verses_tab()
+	)
+	btn_hbox.add_child(btn_save)
+
+	var btn_cancel = Button.new()
+	btn_cancel.text = "Cancel"
+	btn_cancel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	btn_cancel.custom_minimum_size = Vector2(0, 36)
+	btn_cancel.add_theme_font_size_override("font_size", 14)
+	btn_cancel.pressed.connect(func(): backdrop.queue_free())
+	btn_hbox.add_child(btn_cancel)
+
+	mvbox.add_child(btn_hbox)
+	backdrop.add_child(modal)

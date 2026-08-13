@@ -43,6 +43,25 @@ func get_latest_person() -> Dictionary:
 		return res["data"][0]
 	return {}
 
+static func generate_canonical_human_id(p_db: RefCounted = null) -> String:
+	var date_str = Time.get_date_string_from_system().replace("-", "")
+	var max_attempts = 100
+
+	for attempt in range(max_attempts):
+		var rand_val = randi() % 65536
+		var rand_hex = "%04X" % rand_val
+		var candidate = "P-" + date_str + "-" + rand_hex
+
+		if not p_db:
+			return candidate
+
+		var check_res = p_db.execute("SELECT id FROM people WHERE human_id = ? LIMIT 1;", [candidate])
+		if check_res["success"] and check_res["data"].size() == 0:
+			return candidate
+
+	push_error("Failed to generate unique human_id after " + str(max_attempts) + " attempts.")
+	return ""
+
 # --- DOMAIN METHODS FOR DIR-SPR1-001B ---
 
 func create_person(person_data: Dictionary, device_uuid: String = "dev_macbook_primary_node") -> Dictionary:
@@ -51,11 +70,9 @@ func create_person(person_data: Dictionary, device_uuid: String = "dev_macbook_p
 	if first_name == "" or last_name == "":
 		return {"success": false, "error": "First name and last name are required.", "person": {}}
 
-	var date_str = Time.get_date_string_from_system().replace("-", "")
-	var rand_hex = "%04X" % (randi() % 65536)
-	var human_id = String(person_data.get("human_id", ""))
+	var human_id = String(person_data.get("human_id", "")).strip_edges()
 	if human_id == "":
-		human_id = "P-" + date_str + "-" + rand_hex
+		human_id = generate_canonical_human_id(db)
 
 	var person_uuid = String(person_data.get("person_uuid", ""))
 	if person_uuid == "":
@@ -267,12 +284,127 @@ func approve_person(person_uuid: String, device_uuid: String = "dev_macbook_prim
 
 	return check_res
 
-func inactivate_person(person_uuid: String, device_uuid: String = "dev_macbook_primary_node") -> Dictionary:
-	var existing_res = get_person_by_uuid(person_uuid)
-	if not existing_res["success"]:
-		return {"success": false, "error": "Person not found.", "person": {}}
+func get_favorite_things(person_id: int) -> Dictionary:
+	if not db or person_id <= 0:
+		return {}
+	var res = db.execute("SELECT * FROM person_favorite_things WHERE person_id = ? LIMIT 1;", [person_id])
+	if res["success"] and res["data"].size() > 0:
+		return res["data"][0]
+	return {}
 
-	return update_person_profile(person_uuid, {"status": STATUS_INACTIVE}, device_uuid)
+func save_favorite_things(person_id: int, fav_data: Dictionary) -> Dictionary:
+	if not db or person_id <= 0:
+		return {"success": false, "error": "Invalid person ID"}
+
+	var candy = String(fav_data.get("candy_treat", "")).strip_edges()
+	var snack = String(fav_data.get("snack", "")).strip_edges()
+	var drink = String(fav_data.get("drink", "")).strip_edges()
+	var food = String(fav_data.get("food_meal", "")).strip_edges()
+	var restaurant = String(fav_data.get("restaurant", "")).strip_edges()
+	var dessert = String(fav_data.get("dessert", "")).strip_edges()
+	var fruit = String(fav_data.get("fruit", "")).strip_edges()
+	var movie_tv = String(fav_data.get("movie_tv", "")).strip_edges()
+	var music = String(fav_data.get("music", "")).strip_edges()
+	var activities = String(fav_data.get("activities_hobbies", "")).strip_edges()
+	var sports = String(fav_data.get("sports_teams", "")).strip_edges()
+	var stores = String(fav_data.get("stores_places", "")).strip_edges()
+	var other = String(fav_data.get("other_favorites", "")).strip_edges()
+	var avoid = String(fav_data.get("prefer_to_avoid", "")).strip_edges()
+
+	var sql = """
+		INSERT INTO person_favorite_things (
+			person_id, candy_treat, snack, drink, food_meal, restaurant, dessert,
+			fruit, movie_tv, music, activities_hobbies, sports_teams, stores_places,
+			other_favorites, prefer_to_avoid, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+		ON CONFLICT(person_id) DO UPDATE SET
+			candy_treat = excluded.candy_treat,
+			snack = excluded.snack,
+			drink = excluded.drink,
+			food_meal = excluded.food_meal,
+			restaurant = excluded.restaurant,
+			dessert = excluded.dessert,
+			fruit = excluded.fruit,
+			movie_tv = excluded.movie_tv,
+			music = excluded.music,
+			activities_hobbies = excluded.activities_hobbies,
+			sports_teams = excluded.sports_teams,
+			stores_places = excluded.stores_places,
+			other_favorites = excluded.other_favorites,
+			prefer_to_avoid = excluded.prefer_to_avoid,
+			updated_at = datetime('now');
+	"""
+	var res = db.execute(sql, [
+		person_id, candy, snack, drink, food, restaurant, dessert,
+		fruit, movie_tv, music, activities, sports, stores, other, avoid
+	])
+	return res
+
+func delete_person(person_uuid: String, device_uuid: String = "dev_macbook_primary_node") -> Dictionary:
+	if not db:
+		return {"success": false, "error": "Database unavailable."}
+
+	var p_res = get_person_by_uuid(person_uuid)
+	if not p_res["success"] or p_res["person"].is_empty():
+		return {"success": false, "error": "Person not found."}
+
+	var person = p_res["person"]
+	var person_id = int(person.get("id", 0))
+	var human_id = str(person.get("human_id", ""))
+	var first_name = str(person.get("first_name", ""))
+	var last_name = str(person.get("last_name", ""))
+
+	var event_uuid = "evt_" + _generate_uuid()
+	var outbox_payload = {
+		"event_uuid": event_uuid,
+		"event_type": "PersonDeleted",
+		"person_uuid": person_uuid,
+		"human_id": human_id,
+		"first_name": first_name,
+		"last_name": last_name,
+		"device_uuid": device_uuid,
+		"timestamp": Time.get_datetime_string_from_system()
+	}
+
+	var statements = []
+
+	if person_id > 0:
+		statements.append({"sql": "DELETE FROM attendance_log WHERE person_id = ?;", "args": [person_id]})
+		statements.append({"sql": "DELETE FROM person_notes WHERE person_id = ?;", "args": [person_id]})
+		statements.append({"sql": "DELETE FROM person_pathways WHERE person_id = ?;", "args": [person_id]})
+		statements.append({"sql": "DELETE FROM person_sessions WHERE person_id = ?;", "args": [person_id]})
+		statements.append({"sql": "DELETE FROM communications_log WHERE recipient_person_id = ?;", "args": [person_id]})
+		statements.append({"sql": "DELETE FROM volunteer_profiles WHERE person_id = ?;", "args": [person_id]})
+		statements.append({"sql": "DELETE FROM volunteer_shifts WHERE person_id = ?;", "args": [person_id]})
+		statements.append({"sql": "DELETE FROM pastoral_notes WHERE person_id = ?;", "args": [person_id]})
+		statements.append({"sql": "DELETE FROM session_signups WHERE person_id = ?;", "args": [person_id]})
+		statements.append({"sql": "DELETE FROM participant_qr_credentials WHERE person_id = ?;", "args": [person_id]})
+		statements.append({"sql": "DELETE FROM participant_pin_credentials WHERE person_id = ?;", "args": [person_id]})
+		statements.append({"sql": "DELETE FROM participant_verification_sessions WHERE person_id = ?;", "args": [person_id]})
+		statements.append({"sql": "DELETE FROM participant_verification_audit WHERE person_id = ?;", "args": [person_id]})
+		statements.append({"sql": "DELETE FROM card_print_queue WHERE person_id = ?;", "args": [person_id]})
+		statements.append({"sql": "DELETE FROM person_favorite_things WHERE person_id = ?;", "args": [person_id]})
+		statements.append({"sql": "DELETE FROM digital_pass_event_log WHERE person_id = ?;", "args": [person_id]})
+
+	statements.append({"sql": "DELETE FROM people WHERE person_uuid = ?;", "args": [person_uuid]})
+
+	statements.append({
+		"sql": "INSERT INTO event_outbox (event_uuid, event_type, aggregate_type, aggregate_id, payload_json, device_uuid, status) VALUES (?, ?, ?, ?, ?, ?, ?);",
+		"args": [event_uuid, "PersonDeleted", "Person", person_uuid, JSON.stringify(outbox_payload), device_uuid, "pending"]
+	})
+
+	var tx_res = db.execute_transaction(statements)
+	if not tx_res["success"]:
+		return {"success": false, "error": tx_res.get("error", "Transaction failed while deleting person.")}
+
+	return {
+		"success": true,
+		"person_uuid": person_uuid,
+		"human_id": human_id,
+		"first_name": first_name,
+		"last_name": last_name,
+		"message": "Member record deleted successfully."
+	}
 
 func _generate_uuid() -> String:
 	var b1 = "%08X" % (randi() % 4294967295)

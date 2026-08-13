@@ -90,12 +90,7 @@ func email_digital_member_pass(person_id: int, sent_by: String = "Staff Administ
 	var greeting_name = first_name
 	if greeting_name == "": greeting_name = "Valued Member"
 
-	# PRODUCTION SUBJECT:
-	# var subject = "Your Real Life House Digital Member Pass"
-	# TEMPORARY TEST SUBJECT:
-	var dt_dict = Time.get_datetime_dict_from_system()
-	var ts = "%04d-%02d-%02d %02d:%02d" % [dt_dict.year, dt_dict.month, dt_dict.day, dt_dict.hour, dt_dict.minute]
-	var subject = "Your Real Life House Digital Member Pass — Test " + ts
+	var subject = "Your Real Life House Digital Member Pass"
 
 	var plain_text = "Hello " + greeting_name + ",\n\n"
 	plain_text += "Your Real Life House Digital Member Pass is ready.\n\n"
@@ -867,12 +862,9 @@ func create_non_member_profile(first_name: String, last_name: String, phone_str:
 	
 	var p_uuid = "person_" + _generate_uuid()
 	
-	# Generate human ID
-	var count_res = db.execute("SELECT COUNT(*) as cnt FROM people;")
-	var cnt = 101
-	if count_res["success"] and count_res["data"].size() > 0:
-		cnt += int(count_res["data"][0]["cnt"])
-	var human_id = "NMB-" + str(cnt)
+	# Generate canonical Human ID (P-YYYYMMDD-XXXX)
+	const PersonServiceScript = preload("res://src/domain/directory/person_service.gd")
+	var human_id = PersonServiceScript.generate_canonical_human_id(db)
 	
 	var ins = "INSERT INTO people (person_uuid, human_id, first_name, last_name, phone, created_at, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'));"
 	var res = db.execute(ins, [p_uuid, human_id, fn, ln, phone_str])

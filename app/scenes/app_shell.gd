@@ -42,6 +42,9 @@ var btn_nav_kiosk: Button
 @onready var content_container: PanelContainer = $ContentArea/PageScroll/StandardPageContainer/ContentContainer
 @onready var content_area: PanelContainer = $ContentArea
 
+const WEEKDAYS: Array = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+const MONTHS: Array = ["", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+
 const DEFAULT_SUBTITLES: Dictionary = {
 	"home": "Here’s what’s happening at StudyCenter today.",
 	"people": "Find, update, and manage constituent records.",
@@ -57,6 +60,7 @@ const DEFAULT_SUBTITLES: Dictionary = {
 
 var _sync_timer: Timer
 var _is_syncing: bool = false
+var _weather_http_client: HTTPRequest
 
 func _ready() -> void:
 	add_to_group("app_shell")
@@ -73,6 +77,8 @@ func _ready() -> void:
 
 	_apply_pd008_theme_styles()
 	_populate_team_leaders()
+	_init_weather_client()
+	_update_date_and_weather()
 	_connect_nav_signals()
 	top_header_bar.resized.connect(_adjust_content_area_offset)
 	_adjust_content_area_offset()
@@ -90,6 +96,7 @@ func _start_auto_sync() -> void:
 	call_deferred("_on_sync_timer_tick")
 
 func _on_sync_timer_tick() -> void:
+	_update_date_and_weather()
 	if _is_syncing or not db:
 		return
 	_is_syncing = true
@@ -233,12 +240,153 @@ func _on_team_leader_selected(index: int) -> void:
 	db.execute("CREATE TABLE IF NOT EXISTS app_settings (setting_key TEXT PRIMARY KEY, setting_value TEXT NOT NULL);")
 	db.execute("INSERT OR REPLACE INTO app_settings (setting_key, setting_value) VALUES ('ACTIVE_SUPERVISOR', ?);", [name])
 
+func _init_weather_client() -> void:
+	if not _weather_http_client:
+		_weather_http_client = HTTPRequest.new()
+		_weather_http_client.timeout = 5.0
+		add_child(_weather_http_client)
+		_weather_http_client.request_completed.connect(_on_weather_request_completed)
+
+func _fetch_live_weather() -> void:
+	if not _weather_http_client:
+		_init_weather_client()
+	if _weather_http_client.get_http_client_status() != HTTPClient.STATUS_DISCONNECTED:
+		return
+	var url = "https://api.open-meteo.com/v1/forecast?latitude=34.5034&longitude=-82.6501&current_weather=true&temperature_unit=fahrenheit"
+	_weather_http_client.request(url)
+
+func _on_weather_request_completed(_result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
+	if response_code != 200:
+		return
+	var json = JSON.parse_string(body.get_string_from_utf8())
+	if not json or not typeof(json) == TYPE_DICTIONARY:
+		return
+	var cw = json.get("current_weather", {})
+	if not typeof(cw) == TYPE_DICTIONARY or cw.is_empty():
+		return
+	
+	var temp = round(float(cw.get("temperature", 72.0)))
+	var code = int(cw.get("weathercode", 0))
+	var is_day = int(cw.get("is_day", 1))
+	
+	var icon = _get_weather_icon(code, is_day)
+	var weather_str = icon + " " + str(int(temp)) + "°"
+	
+	if weather_pill:
+		weather_pill.text = weather_str
+	
+	if db:
+		db.execute("CREATE TABLE IF NOT EXISTS app_settings (setting_key TEXT PRIMARY KEY, setting_value TEXT NOT NULL);")
+		db.execute("INSERT OR REPLACE INTO app_settings (setting_key, setting_value) VALUES ('WEATHER_INFO', ?);", [weather_str])
+
+func _get_weather_icon(code: int, is_day: int) -> String:
+	if code == 0:
+		return "☀️" if is_day == 1 else "🌙"
+	elif code in [1, 2, 3]:
+		return "⛅" if is_day == 1 else "☁️"
+	elif code in [45, 48]:
+		return "🌫️"
+	elif code in [51, 53, 55, 56, 57, 61, 63, 65, 66, 67]:
+		return "🌧️"
+	elif code in [71, 73, 75, 77]:
+		return "❄️"
+	elif code in [80, 81, 82]:
+		return "🌦️"
+	elif code in [85, 86]:
+		return "🌨️"
+	elif code in [95, 96, 99]:
+		return "⛈️"
+	return "☀️"
+
+func _update_date_and_weather() -> void:
+	if date_pill:
+		var date_dict = Time.get_date_dict_from_system()
+		var w_idx = int(date_dict.get("weekday", 0))
+		var m_idx = int(date_dict.get("month", 1))
+		var day_num = int(date_dict.get("day", 1))
+		var year_num = int(date_dict.get("year", 2026))
+
+		var weekday_str = WEEKDAYS[w_idx] if (w_idx >= 0 and w_idx < WEEKDAYS.size()) else "Monday"
+		var month_str = MONTHS[m_idx] if (m_idx >= 1 and m_idx < MONTHS.size()) else "January"
+
+		date_pill.text = "📅 " + weekday_str + ", " + month_str + " " + str(day_num) + ", " + str(year_num)
+
+	if weather_pill:
+		var weather_str = "☀️ 72°"
+		if db:
+			var w_res = db.execute("SELECT setting_value FROM app_settings WHERE setting_key = 'WEATHER_INFO' LIMIT 1;")
+			if w_res["success"] and w_res["data"].size() > 0:
+				var val = str(w_res["data"][0].get("setting_value", "")).strip_edges()
+				if val != "":
+					weather_str = val
+		weather_pill.text = weather_str
+
+	_fetch_live_weather()
+
+func _update_sidebar_scripture_card() -> void:
+	var verse_lbl = get_node_or_null("SidebarPanel/SidebarMargin/SidebarVBox/ScriptureCard/ScriptureMargin/ScriptureVBox/VerseTextLabel")
+	var ref_lbl = get_node_or_null("SidebarPanel/SidebarMargin/SidebarVBox/ScriptureCard/ScriptureMargin/ScriptureVBox/VerseRefLabel")
+	if not verse_lbl or not ref_lbl:
+		return
+
+	if not db:
+		verse_lbl.text = "“Trust in the LORD with all your heart...”"
+		ref_lbl.text = "— Proverbs 3:5-6"
+		return
+
+	# Check for single message override in app_settings
+	var ov_enabled = false
+	var ov_text = ""
+	var ov_ref = ""
+	var q_ov = db.execute("SELECT setting_key, setting_value FROM app_settings WHERE setting_key IN ('SCRIPTURE_OVERRIDE_ENABLED', 'SCRIPTURE_OVERRIDE_TEXT', 'SCRIPTURE_OVERRIDE_REF');")
+	if q_ov["success"] and q_ov["data"].size() > 0:
+		for r in q_ov["data"]:
+			var k = str(r.get("setting_key", ""))
+			var v = str(r.get("setting_value", ""))
+			if k == "SCRIPTURE_OVERRIDE_ENABLED" and v == "1":
+				ov_enabled = true
+			elif k == "SCRIPTURE_OVERRIDE_TEXT":
+				ov_text = v
+			elif k == "SCRIPTURE_OVERRIDE_REF":
+				ov_ref = v
+
+	if ov_enabled and ov_text.strip_edges() != "":
+		verse_lbl.text = ov_text.strip_edges()
+		ref_lbl.text = ("— " + ov_ref.strip_edges()) if ov_ref.strip_edges() != "" else "— Center Announcement"
+		ref_lbl.visible = true
+		return
+
+	# Rotating Scripture Verses
+	var q_v = db.execute("SELECT verse_text, reference FROM scripture_verses WHERE is_active = 1 ORDER BY sort_order ASC, id ASC;")
+	if q_v["success"] and q_v["data"].size() > 0:
+		var verses = q_v["data"]
+		var date_dict = Time.get_date_dict_from_system()
+		var day_of_year = int(date_dict.get("day", 1)) + int(date_dict.get("month", 1)) * 30
+		var idx = day_of_year % verses.size()
+		var selected_v = verses[idx]
+		
+		var v_text = str(selected_v.get("verse_text", "")).strip_edges()
+		var v_ref = str(selected_v.get("reference", "")).strip_edges()
+		
+		if not v_text.begins_with("“") and not v_text.begins_with("\""):
+			v_text = "“" + v_text + "”"
+		
+		verse_lbl.text = v_text
+		ref_lbl.text = "— " + v_ref
+		ref_lbl.visible = true
+	else:
+		verse_lbl.text = "“Trust in the LORD with all your heart...”"
+		ref_lbl.text = "— Proverbs 3:5-6"
+
 func _update_header_for_current_view(first_name: String = "") -> void:
+	_update_date_and_weather()
 	if first_name == "":
 		if team_leader_dropdown and team_leader_dropdown.selected >= 0:
 			first_name = team_leader_dropdown.get_item_text(team_leader_dropdown.selected).split(" ")[0]
 		else:
 			first_name = "John"
+
+	_update_sidebar_scripture_card()
 
 	var time_dict = Time.get_time_dict_from_system()
 	var hour = int(time_dict.get("hour", 9))

@@ -101,8 +101,9 @@ func _ready() -> void:
 	var top_bar = get_node_or_null("MarginContainer/MainVBox/TopBarHBox")
 	if top_bar:
 		var btn_pub_qr = Button.new()
-		btn_pub_qr.text = "🏛️ REMOTE CHECK-IN QR SIGN"
-		btn_pub_qr.custom_minimum_size = Vector2(210, 36)
+		btn_pub_qr.text = "🏛️ Remote Sign"
+		btn_pub_qr.custom_minimum_size = Vector2(150, 36)
+		btn_pub_qr.add_theme_font_size_override("font_size", 14)
 		btn_pub_qr.pressed.connect(func():
 			var dlg = PublicQrSignDialogScript.new(self)
 			dlg.show_dialog()
@@ -110,17 +111,31 @@ func _ready() -> void:
 		top_bar.add_child(btn_pub_qr)
 
 		var btn_add_member = Button.new()
-		btn_add_member.text = "➕ ADD MEMBER"
-		btn_add_member.custom_minimum_size = Vector2(130, 36)
+		btn_add_member.text = "➕ Add Member"
+		btn_add_member.custom_minimum_size = Vector2(120, 36)
+		btn_add_member.add_theme_font_size_override("font_size", 14)
 		btn_add_member.pressed.connect(func():
-			var dir_scene = load("res://app/scenes/directory_view.tscn")
-			if dir_scene:
-				var dir_inst = dir_scene.instantiate()
-				dir_inst.db = db
-				if dir_inst.has_method("_on_add_person_pressed"):
+			var shell = _find_app_shell()
+			if shell:
+				shell.switch_view("people", {"open_add_dialog": true})
+			else:
+				var dir_scene = load("res://app/scenes/directory_view.tscn")
+				if dir_scene:
+					var dir_inst = dir_scene.instantiate()
+					dir_inst.db = db
+					if get_tree() and get_tree().root:
+						get_tree().root.add_child(dir_inst)
 					dir_inst._on_add_person_pressed()
 		)
 		top_bar.add_child(btn_add_member)
+
+func _find_app_shell() -> Node:
+	var curr: Node = self
+	while curr:
+		if curr.has_method("switch_view"):
+			return curr
+		curr = curr.get_parent()
+	return null
 
 func _init_database() -> void:
 	if not db:
@@ -270,9 +285,19 @@ func _style_option_button(opt: OptionButton, font_size: int = 16) -> void:
 
 func _populate_dropdowns() -> void:
 	shift_lead_dropdown.clear()
-	shift_lead_dropdown.add_item("John Boyte", 0)
-	shift_lead_dropdown.add_item("Sarah Jenkins", 1)
-	shift_lead_dropdown.add_item("Michael Chen", 2)
+	var staff_list = []
+	if db:
+		var s_res = db.execute("SELECT first_name, last_name FROM people ORDER BY last_name ASC, first_name ASC;")
+		if s_res["success"] and s_res["data"].size() > 0:
+			for r in s_res["data"]:
+				var name = (str(r.get("first_name", "")) + " " + str(r.get("last_name", ""))).strip_edges()
+				if name != "" and not name in staff_list:
+					staff_list.append(name)
+	if staff_list.size() == 0:
+		staff_list = ["John Boyte"]
+
+	for i in range(staff_list.size()):
+		shift_lead_dropdown.add_item(staff_list[i], i)
 	shift_lead_dropdown.select(0)
 
 	person_dropdown.clear()
@@ -543,7 +568,7 @@ func _execute_check_in_for_person_id(pid: int, method: String) -> void:
 		if s_idx >= 0 and s_idx < session_list.size():
 			sess_id = int(session_list[s_idx].get("id", 0))
 
-	var lead = shift_lead_dropdown.get_item_text(shift_lead_dropdown.selected) if shift_lead_dropdown.selected >= 0 else "Sarah Jenkins"
+	var lead = shift_lead_dropdown.get_item_text(shift_lead_dropdown.selected) if shift_lead_dropdown.selected >= 0 else "John Boyte"
 
 	# Record main check-in
 	var res = att_service.record_check_in_atomic(person, method, "dev_macbook_primary_node", sess_id, current_mode, lead)

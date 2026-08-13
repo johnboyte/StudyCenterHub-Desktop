@@ -200,7 +200,7 @@ static func render_membership_card(person_data: Dictionary, raw_credential_token
 # Centralized QR Placement Configuration for Official Artwork
 const REMOTE_SIGN_CONFIG = {
 	"artwork_path": "res://assets/print/real_life_remote_check_in_poster.png",
-	"qr_target_url": "https://checkin.reallife-studycenter.org/public",
+	"qr_target_url": "https://app.reallife-studycenter.org/public",
 	"center_x": 1879,
 	"center_y": 2117,
 	"qr_size_px": 740

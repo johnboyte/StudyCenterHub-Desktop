@@ -98,14 +98,25 @@ func _process_inbound_event(evt: Dictionary) -> void:
 
 func _push_acknowledgements(callback: Callable, inserted_count: int) -> void:
 	# Find processed events to acknowledge on relay
-	var ack_res = db.execute("SELECT id FROM inbound_event_queue WHERE processed = 1;")
+	db.execute("ALTER TABLE inbound_event_queue ADD COLUMN status TEXT DEFAULT 'pending';")
+	db.execute("ALTER TABLE inbound_event_queue ADD COLUMN result_json TEXT DEFAULT NULL;")
+	
+	var ack_res = db.execute("SELECT id, status, result_json FROM inbound_event_queue WHERE processed = 1;")
 	if not ack_res["success"] or ack_res["data"].size() == 0:
 		callback.call({"success": true, "inserted_count": inserted_count, "ack_count": 0})
 		return
 		
 	var event_ids = []
+	var event_results = {}
 	for row in ack_res["data"]:
-		event_ids.append(int(row["id"]))
+		var eid = int(row["id"])
+		event_ids.append(eid)
+		if row.get("result_json", null) != null and str(row["result_json"]) != "":
+			var parsed = JSON.parse_string(str(row["result_json"]))
+			if typeof(parsed) == TYPE_DICTIONARY:
+				event_results[str(eid)] = parsed
+			else:
+				event_results[str(eid)] = {"status": str(row.get("status", "processed"))}
 		
 	var gateway_url = get_gateway_url()
 	var api_key = get_sync_api_key()
@@ -115,18 +126,113 @@ func _push_acknowledgements(callback: Callable, inserted_count: int) -> void:
 		"x-sync-api-key: " + api_key
 	]
 	
-	var ack_body = JSON.stringify({ "event_ids": event_ids })
+	var ack_body = JSON.stringify({ "event_ids": event_ids, "event_results": event_results })
 	var err = http_client.request(ack_url, headers, HTTPClient.METHOD_POST, ack_body)
 	if err != OK:
 		callback.call({"success": true, "inserted_count": inserted_count, "error": "Pull complete, ack failed to start."})
 		return
 		
 	http_client.request_completed.connect(func(_result: int, response_code: int, _r_headers: PackedStringArray, _body_bytes: PackedByteArray):
+		publish_directory_index()
 		if response_code == 200:
 			callback.call({"success": true, "inserted_count": inserted_count, "ack_count": event_ids.size()})
 		else:
 			callback.call({"success": true, "inserted_count": inserted_count, "error": "Pull complete, ack response failed: " + str(response_code)})
 	, CONNECT_ONE_SHOT)
+
+func publish_directory_index(callback: Callable = Callable()) -> void:
+	var res = db.execute("SELECT first_name, phone, human_id FROM people WHERE status = 'active';")
+	var members = []
+	if res["success"]:
+		members = res["data"]
+		
+	var gateway_url = get_gateway_url()
+	var api_key = get_sync_api_key()
+	var url = gateway_url + "/api/v1/sync/directory-index"
+	var headers = [
+		"Content-Type: application/json",
+		"x-sync-api-key: " + api_key
+	]
+	var body = JSON.stringify({ "members": members })
+	
+	var req = HTTPRequest.new()
+	if parent_node and parent_node.is_inside_tree():
+		parent_node.add_child(req)
+		req.request_completed.connect(func(_res: int, resp_code: int, _h: PackedStringArray, _b: PackedByteArray):
+			req.queue_free()
+			if callback.is_valid():
+				callback.call({"success": resp_code == 200})
+		, CONNECT_ONE_SHOT)
+		req.request(url, headers, HTTPClient.METHOD_POST, body)
+	else:
+		if callback.is_valid():
+			callback.call({"success": false, "error": "Parent node not in scene tree"})
+
+func publish_session_index(callback: Callable = Callable()) -> void:
+	db.execute("ALTER TABLE sessions ADD COLUMN public_signup_enabled INTEGER NOT NULL DEFAULT 1;")
+	db.execute("ALTER TABLE sessions ADD COLUMN waitlist_enabled INTEGER NOT NULL DEFAULT 1;")
+	db.execute("ALTER TABLE sessions ADD COLUMN max_waitlist INTEGER DEFAULT NULL;")
+	db.execute("ALTER TABLE sessions ADD COLUMN registration_open_at TEXT DEFAULT NULL;")
+	db.execute("ALTER TABLE sessions ADD COLUMN registration_close_at TEXT DEFAULT NULL;")
+
+	var sess_sql = """
+		SELECT 
+			s.id, 
+			s.session_uuid, 
+			s.title, 
+			COALESCE(st.name, s.session_type, 'General Study') as session_type, 
+			s.date_text, 
+			s.start_time, 
+			s.end_time, 
+			COALESCE(sl.name, s.room_location, 'Real Life House') as room_location, 
+			s.max_capacity, 
+			COALESCE(s.signup_required, 1) as signup_required, 
+			COALESCE(s.limit_signups, 1) as limit_signups, 
+			COALESCE(s.public_signup_enabled, 1) as public_signup_enabled, 
+			COALESCE(s.waitlist_enabled, 1) as waitlist_enabled, 
+			s.max_waitlist, 
+			s.registration_open_at, 
+			s.registration_close_at, 
+			s.description,
+			(SELECT COUNT(*) FROM session_signups ss WHERE ss.session_id = s.id AND ss.signup_status = 'confirmed') as confirmed_count,
+			(SELECT COUNT(*) FROM session_signups ss WHERE ss.session_id = s.id AND ss.signup_status = 'waitlist') as waitlist_count
+		FROM sessions s
+		LEFT JOIN session_types st ON st.id = s.session_type_id
+		LEFT JOIN session_location_assignments sla ON sla.session_id = s.id
+		LEFT JOIN session_locations sl ON sl.id = sla.location_id
+		WHERE s.is_active = 1 AND s.public_signup_enabled = 1
+		ORDER BY s.date_text ASC, s.start_time ASC;
+	"""
+	var sess_res = db.execute(sess_sql)
+	var sessions = sess_res["data"] if sess_res["success"] else []
+
+	var sgn_sql = """
+		SELECT ss.session_id, p.human_id, p.phone, ss.signup_status 
+		FROM session_signups ss 
+		JOIN people p ON p.id = ss.person_id 
+		WHERE ss.signup_status IN ('confirmed', 'waitlist');
+	"""
+	var sgn_res = db.execute(sgn_sql)
+	var signups = sgn_res["data"] if sgn_res["success"] else []
+
+	var gateway_url = get_gateway_url()
+	var api_key = get_sync_api_key()
+	var url = gateway_url + "/api/v1/sync/session-index"
+	var headers = [
+		"Content-Type: application/json",
+		"x-sync-api-key: " + api_key
+	]
+	var body = JSON.stringify({ "sessions": sessions, "signups": signups })
+
+	var req = HTTPRequest.new()
+	if parent_node:
+		parent_node.add_child(req)
+	req.request_completed.connect(func(_res: int, resp_code: int, _h: PackedStringArray, _b: PackedByteArray):
+		req.queue_free()
+		if callback.is_valid():
+			callback.call({"success": resp_code == 200})
+	, CONNECT_ONE_SHOT)
+	req.request(url, headers, HTTPClient.METHOD_POST, body)
 
 func push_acknowledgements_now(callback: Callable = Callable()) -> void:
 	_push_acknowledgements(func(res: Dictionary):

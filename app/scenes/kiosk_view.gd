@@ -579,10 +579,9 @@ func _on_registration_submit() -> void:
 		
 	if not db: return
 	
-	# Generate new Student ID (PRT-XXXX)
-	var count_res = db.execute("SELECT COUNT(*) as count FROM people;")
-	var count = int(count_res["data"][0]["count"]) + 1005
-	var new_human_id = "PRT-" + str(count)
+	# Generate canonical Human ID (P-YYYYMMDD-XXXX)
+	const PersonServiceScript = preload("res://src/domain/directory/person_service.gd")
+	var new_human_id = PersonServiceScript.generate_canonical_human_id(db)
 	var new_uuid = "usr_kiosk_" + str(Time.get_ticks_msec())
 	
 	# Insert into people
