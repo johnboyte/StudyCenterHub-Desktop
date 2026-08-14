@@ -98,6 +98,7 @@ var pathway_attendance_expanded_map: Dictionary = {}
 @onready var communications_section: VBoxContainer = $MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/WorkspaceScroll/SectionStack/CommunicationsSection
 @onready var overview_section: VBoxContainer = $MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/WorkspaceScroll/SectionStack/OverviewSection
 @onready var history_section: VBoxContainer = $MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/WorkspaceScroll/SectionStack/HistorySection
+var _photo_cache: Dictionary = {}
 
 func _ready() -> void:
 	_init_debounce_timer()
@@ -551,6 +552,11 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func refresh_view() -> void:
 	_ensure_onready_nodes()
+	var roster_scroll = get_node_or_null("MarginContainer/VBoxContainer/MainSplit/RosterPanel/RosterScroll") as ScrollContainer
+	var workspace_scroll = get_node_or_null("MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/WorkspaceScroll") as ScrollContainer
+	var saved_r_scroll = roster_scroll.scroll_vertical if roster_scroll else 0
+	var saved_w_scroll = workspace_scroll.scroll_vertical if workspace_scroll else 0
+
 	_active_photo_callback = Callable()
 	_style_add_person_button()
 	if not read_service:
@@ -561,6 +567,11 @@ func refresh_view() -> void:
 
 	_update_header_filter_counts()
 	_fetch_roster_data()
+
+	if roster_scroll and saved_r_scroll > 0:
+		roster_scroll.scroll_vertical = saved_r_scroll
+	if workspace_scroll and saved_w_scroll > 0:
+		workspace_scroll.scroll_vertical = saved_w_scroll
 
 func select_filter(filter_name: String) -> void:
 	if not filter_name in ["all", "active", "pending", "inactive"]:
@@ -728,6 +739,24 @@ func _render_roster_list() -> void:
 		var btn = _create_roster_row_button(p, i)
 		r_box.add_child(btn)
 
+func _get_cached_photo_texture(person_uuid: String, photo_b64: String) -> ImageTexture:
+	var clean_b64 = photo_b64.strip_edges()
+	if clean_b64 == "" or clean_b64.to_lower() == "null" or clean_b64.to_lower() == "<null>":
+		return null
+	var b64_hash = clean_b64.hash()
+	var cache_key = person_uuid if person_uuid != "" else str(b64_hash)
+	if _photo_cache.has(cache_key):
+		var entry = _photo_cache[cache_key]
+		if entry.get("hash", 0) == b64_hash and entry.get("texture") != null:
+			return entry.get("texture") as ImageTexture
+	var new_tex = _create_texture_from_base64(clean_b64)
+	_photo_cache[cache_key] = {"hash": b64_hash, "texture": new_tex}
+	return new_tex
+
+func _invalidate_photo_cache(person_uuid: String) -> void:
+	if person_uuid != "" and _photo_cache.has(person_uuid):
+		_photo_cache.erase(person_uuid)
+
 func _create_texture_from_base64(base64_str: String) -> ImageTexture:
 	var b64_data = base64_str.strip_edges()
 	if b64_data == "" or b64_data.to_lower() == "null" or b64_data.to_lower() == "<null>":
@@ -766,7 +795,7 @@ func _create_roster_row_button(p: Dictionary, index: int) -> Button:
 	var last_name = p.get("last_name", "")
 	var initials = (first_name.left(1) + last_name.left(1)).to_upper()
 
-	var photo_tex = _create_texture_from_base64(String(p.get("profile_photo")) if p.get("profile_photo") != null else "")
+	var photo_tex = _get_cached_photo_texture(str(p.get("person_uuid", "")), String(p.get("profile_photo")) if p.get("profile_photo") != null else "")
 	if photo_tex:
 		var avatar_rect = TextureRect.new()
 		avatar_rect.texture = photo_tex
@@ -1065,6 +1094,7 @@ func _populate_profile_section(p: Dictionary) -> void:
 	_active_photo_callback = func(cropped_data_url: String):
 		if db:
 			db.execute("UPDATE people SET profile_photo = ? WHERE person_uuid = ?;", [cropped_data_url, p_uuid])
+		_invalidate_photo_cache(p_uuid)
 		refresh_view()
 
 	# 1. Profile Photo & Dynamic Camera Controls
@@ -1074,7 +1104,7 @@ func _populate_profile_section(p: Dictionary) -> void:
 	p_hbox.add_theme_constant_override("separation", 16)
 
 	var raw_photo_b64 = _clean_str(p.get("profile_photo", ""))
-	var photo_tex = _create_texture_from_base64(raw_photo_b64)
+	var photo_tex = _get_cached_photo_texture(p_uuid, raw_photo_b64)
 	var has_photo = (photo_tex != null)
 
 	if has_photo:
@@ -1246,8 +1276,6 @@ func _populate_profile_section(p: Dictionary) -> void:
 	var cap_vbox = VBoxContainer.new(); cap_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var cap_lbl = Label.new(); cap_lbl.text = "STAFFING & LEADERSHIP CAPABILITIES"; cap_lbl.add_theme_font_size_override("font_size", 14); cap_lbl.add_theme_color_override("font_color", Color(0.70, 0.78, 0.88, 1.0))
 	cap_vbox.add_child(cap_lbl)
-
-	var r_val = _clean_str(p.get("staff_classification", p.get("primary_role", "Participant")))
 
 	var chk_can_cover = CheckBox.new(); chk_can_cover.text = "Can Cover Center Hours"
 	chk_can_cover.button_pressed = (int(p.get("can_cover_hours", 0)) == 1 or r_val == "Staff" or r_val == "Intern")
@@ -3152,7 +3180,7 @@ func _open_wallet_card_preview_for_person(p: Dictionary) -> void:
 
 	content_hbox.add_child(details_vbox)
 
-	var photo_tex = _create_texture_from_base64(String(p.get("profile_photo")) if p.get("profile_photo") != null else "")
+	var photo_tex = _get_cached_photo_texture(str(p.get("person_uuid", "")), String(p.get("profile_photo")) if p.get("profile_photo") != null else "")
 	if photo_tex:
 		var photo_rect = TextureRect.new()
 		photo_rect.texture = photo_tex
