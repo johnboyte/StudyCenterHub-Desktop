@@ -193,7 +193,7 @@ func _load_people() -> void:
 
 	if not db: return
 
-	var res = db.execute("SELECT id, person_uuid, human_id, first_name, last_name, primary_role, COALESCE(staff_classification, 'Staff') as staff_classification, COALESCE(can_cover_hours, 0) as can_cover_hours FROM people WHERE (status IS NULL OR status = 'active' OR status = '') AND (staff_classification = 'Staff' OR primary_role = 'Staff' OR can_cover_hours = 1) ORDER BY last_name ASC, first_name ASC;")
+	var res = db.execute("SELECT id, person_uuid, human_id, first_name, last_name, primary_role, COALESCE(staff_classification, 'Staff') as staff_classification, COALESCE(can_cover_hours, 0) as can_cover_hours FROM people WHERE (status IS NULL OR status = 'active' OR status = '') AND (staff_classification = 'Staff' OR primary_role = 'Staff' OR staff_classification = 'Intern' OR primary_role = 'Intern' OR can_cover_hours = 1) ORDER BY last_name ASC, first_name ASC;")
 	if res.get("success", false):
 		var rows = res.get("data", [])
 		for r in rows:

@@ -1247,8 +1247,10 @@ func _populate_profile_section(p: Dictionary) -> void:
 	var cap_lbl = Label.new(); cap_lbl.text = "STAFFING & LEADERSHIP CAPABILITIES"; cap_lbl.add_theme_font_size_override("font_size", 14); cap_lbl.add_theme_color_override("font_color", Color(0.70, 0.78, 0.88, 1.0))
 	cap_vbox.add_child(cap_lbl)
 
+	var r_val = _clean_str(p.get("staff_classification", p.get("primary_role", "Participant")))
+
 	var chk_can_cover = CheckBox.new(); chk_can_cover.text = "Can Cover Center Hours"
-	chk_can_cover.button_pressed = (int(p.get("can_cover_hours", 0)) == 1)
+	chk_can_cover.button_pressed = (int(p.get("can_cover_hours", 0)) == 1 or r_val == "Staff" or r_val == "Intern")
 	_style_checkbox_on_dark(chk_can_cover)
 	cap_vbox.add_child(chk_can_cover)
 
@@ -1256,6 +1258,12 @@ func _populate_profile_section(p: Dictionary) -> void:
 	chk_is_tl.button_pressed = (int(p.get("is_team_leader_eligible", 0)) == 1)
 	_style_checkbox_on_dark(chk_is_tl)
 	cap_vbox.add_child(chk_is_tl)
+
+	role_dropdown.item_selected.connect(func(idx: int):
+		var selected_role = role_dropdown.get_item_text(idx)
+		if selected_role == "Staff" or selected_role == "Intern":
+			chk_can_cover.button_pressed = true
+	)
 
 	form_grid.add_child(cap_vbox)
 
@@ -1274,7 +1282,7 @@ func _populate_profile_section(p: Dictionary) -> void:
 			var role_db_val = role_sel_txt
 
 			var flag_db_val = flag_dropdown.get_item_text(flag_dropdown.selected)
-			var can_cov_val = 1 if chk_can_cover.button_pressed else 0
+			var can_cov_val = 1 if (chk_can_cover.button_pressed or role_sel_txt == "Staff" or role_sel_txt == "Intern") else 0
 			var is_tl_val = 1 if chk_is_tl.button_pressed else 0
 
 			var old_cls = _clean_str(p.get("staff_classification", p.get("primary_role", "Participant")))
