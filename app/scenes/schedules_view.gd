@@ -468,9 +468,16 @@ func _style_tab_btn(btn: Button, is_active: bool) -> void:
 	st_pressed.bg_color = Color(0.80, 0.30, 0.18, 1.0)
 	btn.add_theme_stylebox_override("pressed", st_pressed)
 
+func _get_current_week_sunday_unix() -> int:
+	var now_dict = Time.get_datetime_dict_from_system()
+	var today_date_str = "%04d-%02d-%02dT12:00:00" % [now_dict["year"], now_dict["month"], now_dict["day"]]
+	var today_unix = Time.get_unix_time_from_datetime_string(today_date_str)
+	var weekday = int(now_dict.get("weekday", 0))
+	return today_unix - (weekday * 86400)
+
 func get_date_string_for_day_index(day_idx: int) -> String:
 	if current_week_base_unix == 0:
-		current_week_base_unix = Time.get_unix_time_from_datetime_string("2026-07-19T12:00:00")
+		current_week_base_unix = _get_current_week_sunday_unix()
 	var target_unix = current_week_base_unix + (day_idx * 86400)
 	var dict = Time.get_datetime_dict_from_unix_time(target_unix)
 	return "%04d-%02d-%02d" % [dict["year"], dict["month"], dict["day"]]
@@ -964,7 +971,7 @@ func _render_shifts_tab() -> void:
 	_style_outline_button(btn_prev)
 	btn_prev.pressed.connect(func():
 		if current_week_base_unix == 0:
-			current_week_base_unix = Time.get_unix_time_from_datetime_string("2026-07-19T12:00:00")
+			current_week_base_unix = _get_current_week_sunday_unix()
 		current_week_base_unix -= 7 * 86400
 		call_deferred("_refresh_tab_content")
 	)
@@ -973,7 +980,7 @@ func _render_shifts_tab() -> void:
 	var btn_today = Button.new(); btn_today.text = "Today"; btn_today.custom_minimum_size = Vector2(75, 34)
 	_style_outline_button(btn_today)
 	btn_today.pressed.connect(func():
-		current_week_base_unix = Time.get_unix_time_from_datetime_string("2026-07-19T12:00:00")
+		current_week_base_unix = _get_current_week_sunday_unix()
 		call_deferred("_refresh_tab_content")
 	)
 	toolbar_hbox.add_child(btn_today)
@@ -982,7 +989,7 @@ func _render_shifts_tab() -> void:
 	_style_outline_button(btn_next)
 	btn_next.pressed.connect(func():
 		if current_week_base_unix == 0:
-			current_week_base_unix = Time.get_unix_time_from_datetime_string("2026-07-19T12:00:00")
+			current_week_base_unix = _get_current_week_sunday_unix()
 		current_week_base_unix += 7 * 86400
 		call_deferred("_refresh_tab_content")
 	)
