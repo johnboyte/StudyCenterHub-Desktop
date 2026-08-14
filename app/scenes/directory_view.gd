@@ -1249,12 +1249,12 @@ func _populate_profile_section(p: Dictionary) -> void:
 
 	var chk_can_cover = CheckBox.new(); chk_can_cover.text = "Can Cover Center Hours"
 	chk_can_cover.button_pressed = (int(p.get("can_cover_hours", 0)) == 1)
-	_style_checkbox_on_light(chk_can_cover)
+	_style_checkbox_on_dark(chk_can_cover)
 	cap_vbox.add_child(chk_can_cover)
 
 	var chk_is_tl = CheckBox.new(); chk_is_tl.text = "Eligible as Team Leader"
 	chk_is_tl.button_pressed = (int(p.get("is_team_leader_eligible", 0)) == 1)
-	_style_checkbox_on_light(chk_is_tl)
+	_style_checkbox_on_dark(chk_is_tl)
 	cap_vbox.add_child(chk_is_tl)
 
 	form_grid.add_child(cap_vbox)
@@ -2145,6 +2145,17 @@ func _style_checkbox_on_light(chk: CheckBox, text_color: Color = Color(0.12, 0.1
 	chk.add_theme_color_override("font_hover_pressed_color", Color(0.08, 0.35, 0.70, 1.0))
 	chk.add_theme_color_override("font_focus_color", text_color)
 	chk.add_theme_color_override("font_disabled_color", Color(0.50, 0.55, 0.65, 1.0))
+
+func _style_checkbox_on_dark(chk: CheckBox) -> void:
+	if not chk: return
+	chk.add_theme_color_override("font_color", Color(0.92, 0.96, 1.0, 1.0))
+	chk.add_theme_color_override("font_hover_color", Color(0.40, 0.78, 1.0, 1.0))
+	chk.add_theme_color_override("font_pressed_color", Color(0.92, 0.96, 1.0, 1.0))
+	chk.add_theme_color_override("font_hover_pressed_color", Color(0.40, 0.78, 1.0, 1.0))
+	chk.add_theme_color_override("font_focus_color", Color(0.92, 0.96, 1.0, 1.0))
+	chk.add_theme_color_override("font_disabled_color", Color(0.55, 0.62, 0.72, 1.0))
+	chk.add_theme_font_size_override("font_size", 15)
+	chk.custom_minimum_size = Vector2(0, 36)
 
 func _style_dark_card_button(btn: Button) -> void:
 	if not btn: return
