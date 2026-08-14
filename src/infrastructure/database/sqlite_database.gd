@@ -12,13 +12,11 @@ func _init(path: String = "") -> void:
 		db_path = ProjectSettings.globalize_path(path) if path.begins_with("user://") else path
 		print("[Database] Explicit override path used: ", db_path)
 	else:
-		var env = OS.get_environment("STUDYCENTERHUB_ENV").to_lower().strip_edges()
-		if env == "":
-			var exec_path = OS.get_executable_path().to_lower()
-			if exec_path.contains("rc1") or exec_path.contains("staging"):
-				env = "staging"
-			else:
-				env = "development"
+		var env = resolve_environment(
+			OS.get_environment("STUDYCENTERHUB_ENV"),
+			OS.get_executable_path(),
+			OS.get_cmdline_args()
+		)
 		
 		var db_name = "studycenterhub_development.db"
 		if env == "production":
@@ -29,9 +27,22 @@ func _init(path: String = "") -> void:
 			env = "development" # fallback/default
 		
 		db_path = ProjectSettings.globalize_path("user://" + db_name)
-		print("[Database] Active Environment: ", env.to_upper())
-		print("[Database] Resolved Database Path: ", db_path)
+		print("StudyCenterHub environment: ", env)
+		print("Database: ", db_path)
 	_ensure_db_dir()
+
+static func resolve_environment(explicit_env: String, exec_path: String, cmdline_args: Array) -> String:
+	var clean_env = explicit_env.to_lower().strip_edges()
+	if clean_env == "production" or clean_env == "staging" or clean_env == "development":
+		return clean_env
+	
+	var full_context = (exec_path + " " + " ".join(cmdline_args)).to_lower()
+	if full_context.contains("production") or full_context.contains("studycenterhub-desktop-production"):
+		return "production"
+	elif full_context.contains("staging") or full_context.contains("rc1"):
+		return "staging"
+	
+	return "development"
 
 func _ensure_db_dir() -> void:
 	var dir = db_path.get_base_dir()

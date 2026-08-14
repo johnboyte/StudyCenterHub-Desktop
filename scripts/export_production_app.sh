@@ -25,6 +25,7 @@ git status --short
 echo "=============================================================================="
 echo "2. RUNNING AUTOMATED TEST SUITES"
 echo "=============================================================================="
+"$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_database_environment_resolution.gd"
 "$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_center_open_hours_persistence.gd"
 "$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_session_staff_assignment_dialog.gd"
 "$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_uncovered_center_hours_calculation.gd"
