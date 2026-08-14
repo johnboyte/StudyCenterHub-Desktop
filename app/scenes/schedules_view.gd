@@ -898,9 +898,11 @@ func _refresh_tab_content() -> void:
 # ==================== TAB 1: STAFFING SCHEDULE ====================
 
 func update_hours_by_day_name(day_name: String, open_time: String, close_time: String, is_closed: int, has_split_shift: int = 0, session2_start: String = "05:00 PM", session2_end: String = "08:00 PM") -> void:
-	if not db: return
-	var sql = "UPDATE center_open_hours SET open_time = ?, close_time = ?, is_closed = ?, has_split_shift = ?, session2_start = ?, session2_end = ? WHERE day_of_week = ?;"
-	db.execute(sql, [open_time, close_time, is_closed, has_split_shift, session2_start, session2_end, day_name])
+	if sch_service:
+		sch_service.update_open_hours_atomic(day_name, open_time, close_time, is_closed, has_split_shift, session2_start, session2_end)
+	elif db:
+		var sql = "UPDATE center_open_hours SET open_time = ?, close_time = ?, is_closed = ?, has_split_shift = ?, session2_start = ?, session2_end = ? WHERE day_of_week = ?;"
+		db.execute(sql, [open_time, close_time, is_closed, has_split_shift, session2_start, session2_end, day_name])
 
 func _render_shifts_tab() -> void:
 	var vbox = VBoxContainer.new(); vbox.add_theme_constant_override("separation", 14)
@@ -3194,6 +3196,7 @@ func _render_hours_tab() -> void:
 
 		var chk_open = CheckBox.new(); chk_open.text = "Open"; chk_open.button_pressed = not is_closed
 		chk_open.add_theme_font_size_override("font_size", 13)
+		_style_checkbox(chk_open)
 		r_hbox.add_child(chk_open)
 
 		var s1_lbl = Label.new(); s1_lbl.text = "Session 1:"; s1_lbl.add_theme_font_size_override("font_size", 12); s1_lbl.add_theme_color_override("font_color", Color(0.40, 0.48, 0.58, 1.0))
@@ -3213,6 +3216,7 @@ func _render_hours_tab() -> void:
 
 		var chk_split = CheckBox.new(); chk_split.text = "Split Shift"; chk_split.button_pressed = has_split
 		chk_split.add_theme_font_size_override("font_size", 12)
+		_style_checkbox(chk_split)
 		r_hbox.add_child(chk_split)
 
 		var s2_lbl = Label.new(); s2_lbl.text = "Session 2:"; s2_lbl.add_theme_font_size_override("font_size", 12); s2_lbl.add_theme_color_override("font_color", Color(0.40, 0.48, 0.58, 1.0))
@@ -3245,6 +3249,7 @@ func _render_hours_tab() -> void:
 
 		refresh_row_states.call()
 
+		var current_day_name = day_name
 		var save_row_changes = func(val = 0):
 			refresh_row_states.call()
 			var closed_val = 0 if chk_open.button_pressed else 1
@@ -3253,7 +3258,7 @@ func _render_hours_tab() -> void:
 			var sel_close = opt_close.get_item_text(opt_close.selected)
 			var sel_s2_open = opt_s2_open.get_item_text(opt_s2_open.selected)
 			var sel_s2_close = opt_s2_close.get_item_text(opt_s2_close.selected)
-			sch_service.update_open_hours_atomic(id_val, sel_open, sel_close, closed_val, split_val, sel_s2_open, sel_s2_close)
+			sch_service.update_open_hours_atomic(current_day_name, sel_open, sel_close, closed_val, split_val, sel_s2_open, sel_s2_close)
 
 		chk_open.toggled.connect(save_row_changes)
 		chk_split.toggled.connect(save_row_changes)

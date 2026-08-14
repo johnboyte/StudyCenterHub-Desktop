@@ -43,14 +43,14 @@ func execute(sql: String, args: Array = []) -> Dictionary:
 	if formatted_sql.to_upper().contains("UPDATE ") and not formatted_sql.to_upper().contains("SELECT "):
 		formatted_sql += ";\nSELECT changes() AS affected_rows;"
 	
-	var tmp_path = ProjectSettings.globalize_path("user://tmp_exec_" + str(Time.get_ticks_usec()) + ".sql")
+	var tmp_path = "/tmp/sch_exec_" + str(Time.get_ticks_usec()) + "_" + str(randi() % 10000) + ".sql"
 	var f = FileAccess.open(tmp_path, FileAccess.WRITE)
 	if f:
 		f.store_string(formatted_sql)
 		f.close()
 
 	var output = []
-	var exit_code = OS.execute(sqlite_binary, ["-json", db_path, ".read '" + tmp_path + "'"], output, true)
+	var exit_code = OS.execute(sqlite_binary, ["-json", db_path, ".read " + tmp_path], output, true)
 	DirAccess.remove_absolute(tmp_path)
 
 	if exit_code != 0:
@@ -82,14 +82,14 @@ func execute_transaction(statements: Array) -> Dictionary:
 
 	var full_script = pragma_block + sql_block
 
-	var tmp_path = ProjectSettings.globalize_path("user://tmp_tx_" + str(Time.get_ticks_usec()) + ".sql")
+	var tmp_path = "/tmp/sch_tx_" + str(Time.get_ticks_usec()) + "_" + str(randi() % 10000) + ".sql"
 	var f = FileAccess.open(tmp_path, FileAccess.WRITE)
 	if f:
 		f.store_string(full_script)
 		f.close()
 
 	var output = []
-	var exit_code = OS.execute(sqlite_binary, ["-json", db_path, ".read '" + tmp_path + "'"], output, true)
+	var exit_code = OS.execute(sqlite_binary, ["-json", db_path, ".read " + tmp_path], output, true)
 	DirAccess.remove_absolute(tmp_path)
 
 	if exit_code != 0:

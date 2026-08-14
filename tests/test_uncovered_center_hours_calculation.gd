@@ -13,7 +13,10 @@ func _init():
 	print("==========================================================")
 	print("STARTING FOCUSED UNCOVERED CENTER HOURS ENGINE TESTS")
 	print("==========================================================")
-	var db = SQLiteDatabaseScript.new("user://test_uncovered_hours_fix.db")
+	var db_path = ProjectSettings.globalize_path("user://test_uncovered_hours_fix.db")
+	if FileAccess.file_exists(db_path):
+		DirAccess.remove_absolute(db_path)
+	var db = SQLiteDatabaseScript.new(db_path)
 	var mig = MigrationsRunnerScript.new(db)
 	mig.run_migrations()
 
@@ -21,14 +24,13 @@ func _init():
 	var sch_svc = SchedulesServiceScript.new(db)
 
 	var today_date = Time.get_date_string_from_system()
-	var dt_dict = Time.get_datetime_dict_from_datetime_string(today_date + "T12:00:00", false)
-	var wday_num = dt_dict.get("weekday", 1)
+	var sys_dict = Time.get_datetime_dict_from_system()
+	var wday_num = sys_dict.get("weekday", 5)
 	var wday_names = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
 	var today_wday_name = wday_names[wday_num]
 
 	# Ensure center_open_hours has 3:00 PM - 8:00 PM open for today
-	db.execute("DELETE FROM center_open_hours WHERE day_of_week = ?;", [today_wday_name])
-	db.execute("INSERT INTO center_open_hours (day_of_week, open_time, close_time, is_closed) VALUES (?, '03:00 PM', '08:00 PM', 0);", [today_wday_name])
+	db.execute("UPDATE center_open_hours SET open_time = '03:00 PM', close_time = '08:00 PM', is_closed = 0 WHERE day_of_week = ?;", [today_wday_name])
 
 	# ----------------------------------------------------
 	# CASE 1: Open 3:00-8:00, No assigned workers

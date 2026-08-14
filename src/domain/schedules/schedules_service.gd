@@ -1539,9 +1539,26 @@ func get_session_audit_log(session_id: int) -> Array:
 
 func get_open_hours() -> Array:
 	if not db: return []
-	var res = db.execute("SELECT day_of_week, open_time, close_time, is_closed, has_split_shift, session2_start, session2_end FROM center_open_hours;")
+	var res = db.execute("SELECT id, day_of_week, open_time, close_time, is_closed, has_split_shift, session2_start, session2_end FROM center_open_hours;")
 	if res["success"]: return res["data"]
 	return []
+
+func update_open_hours_atomic(day_id_or_name, open_time: String, close_time: String, is_closed: int, has_split_shift: int = 0, session2_start: String = "05:00 PM", session2_end: String = "08:00 PM") -> Dictionary:
+	if not db: return {"success": false, "error": "Database engine not initialized."}
+
+	var sql = ""
+	var args = []
+	if day_id_or_name is int or (typeof(day_id_or_name) == TYPE_STRING and (day_id_or_name as String).is_valid_int()):
+		sql = "UPDATE center_open_hours SET open_time = ?, close_time = ?, is_closed = ?, has_split_shift = ?, session2_start = ?, session2_end = ? WHERE id = ?;"
+		args = [open_time, close_time, is_closed, has_split_shift, session2_start, session2_end, int(day_id_or_name)]
+	else:
+		sql = "UPDATE center_open_hours SET open_time = ?, close_time = ?, is_closed = ?, has_split_shift = ?, session2_start = ?, session2_end = ? WHERE day_of_week = ?;"
+		args = [open_time, close_time, is_closed, has_split_shift, session2_start, session2_end, str(day_id_or_name)]
+
+	var res = db.execute(sql, args)
+	if res["success"]:
+		_publish_session_sync()
+	return res
 
 # ==================== HELPER FUNCTIONS ====================
 
