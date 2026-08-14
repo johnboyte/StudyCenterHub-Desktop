@@ -63,8 +63,6 @@ func run_tests() -> void:
 	# 3. Test valid selection for Marcus Vance (Index 2: Vance, Marcus)
 	dlg.person_dropdown.selected = 2
 	dlg.person_dropdown.select(2)
-	dlg.role_dropdown.selected = 0
-	dlg.role_dropdown.select(0)
 	dlg._on_selection_changed(2)
 	if ok_btn.disabled:
 		print("FAIL: Valid worker Marcus Vance should enable Assign Coverage button.")

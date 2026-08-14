@@ -206,7 +206,7 @@ func _populate_team_leaders() -> void:
 
 	var staff_list = ["John Boyte", "Sarah Johnson", "Michael Brown", "Emily Davis"]
 
-	var p_res = db.execute("SELECT first_name, last_name FROM people ORDER BY last_name ASC, first_name ASC;")
+	var p_res = db.execute("SELECT first_name, last_name FROM people WHERE (is_team_leader_eligible = 1 OR staff_classification = 'Team Leader' OR primary_role = 'Team Leader') AND (status IS NULL OR status = 'active' OR status = '') ORDER BY last_name ASC, first_name ASC;")
 	if p_res["success"] and p_res["data"].size() > 0:
 		var db_staff = []
 		for r in p_res["data"]:

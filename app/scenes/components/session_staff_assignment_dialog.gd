@@ -1,7 +1,7 @@
 extends ConfirmationDialog
 
-## Session Staff Assignment Dialog (Stage 10 Reusable Component)
-## Allows selecting real eligible constituents and valid shift roles for uncovered sessions.
+## Session Staff Assignment Dialog (Enhanced for Partial Coverage & Compact Time UI)
+## Allows selecting real eligible constituents and valid shift coverage bounds for uncovered sessions.
 
 signal staff_assigned(assignment_data: Dictionary)
 signal assignment_cancelled()
@@ -11,21 +11,17 @@ var session_data: Dictionary = {}
 var eligible_people: Array = []
 
 var person_dropdown: OptionButton
-var role_dropdown: OptionButton
+var start_time_picker: HBoxContainer
+var end_time_picker: HBoxContainer
 var warning_label: Label
 var assign_button: Button
 
-const VALID_ROLES = [
-	"Volunteer",
-	"Intern",
-	"Staff",
-	"Team Leader"
-]
+var selected_person_idx: int = 0
 
 func _init(database: RefCounted = null) -> void:
 	db = database
 	title = "Assign Session Staffing Coverage"
-	size = Vector2i(520, 340)
+	size = Vector2i(540, 380)
 	exclusive = true
 
 func _ready() -> void:
@@ -77,19 +73,35 @@ func _build_ui() -> void:
 	person_dropdown.item_selected.connect(_on_selection_changed)
 	vbox.add_child(person_dropdown)
 
-	# Classification Selection
-	var r_hdr = Label.new()
-	r_hdr.text = "Select Staff Classification:"
-	r_hdr.add_theme_font_size_override("font_size", 13)
-	vbox.add_child(r_hdr)
+	# Partial Coverage Time Range Selectors
+	var time_grid = HBoxContainer.new()
+	time_grid.add_theme_constant_override("separation", 16)
 
-	role_dropdown = OptionButton.new()
-	role_dropdown.name = "RoleDropdown"
-	role_dropdown.custom_minimum_size = Vector2(0, 36)
-	for r in VALID_ROLES:
-		role_dropdown.add_item(r)
-	role_dropdown.item_selected.connect(_on_selection_changed)
-	vbox.add_child(role_dropdown)
+	var start_vbox = VBoxContainer.new()
+	var lbl_st = Label.new()
+	lbl_st.text = "Coverage Start:"
+	lbl_st.add_theme_font_size_override("font_size", 13)
+	start_vbox.add_child(lbl_st)
+
+	var initial_start = str(session_data.get("start_time", session_data.get("open_time", "03:00 PM")))
+	start_time_picker = _create_compact_time_picker(initial_start)
+	start_time_picker.get_meta("connect_changed").call(func(): _validate_form())
+	start_vbox.add_child(start_time_picker)
+	time_grid.add_child(start_vbox)
+
+	var end_vbox = VBoxContainer.new()
+	var lbl_end = Label.new()
+	lbl_end.text = "Coverage End:"
+	lbl_end.add_theme_font_size_override("font_size", 13)
+	end_vbox.add_child(lbl_end)
+
+	var initial_end = str(session_data.get("end_time", session_data.get("close_time", "08:00 PM")))
+	end_time_picker = _create_compact_time_picker(initial_end)
+	end_time_picker.get_meta("connect_changed").call(func(): _validate_form())
+	end_vbox.add_child(end_time_picker)
+	time_grid.add_child(end_vbox)
+
+	vbox.add_child(time_grid)
 
 	warning_label = Label.new()
 	warning_label.name = "WarningLabel"
@@ -106,6 +118,73 @@ func _build_ui() -> void:
 
 	_update_session_details()
 
+func _create_compact_time_picker(initial_time: String = "03:00 PM") -> HBoxContainer:
+	var hbox = HBoxContainer.new()
+	hbox.add_theme_constant_override("separation", 4)
+
+	var parts = initial_time.strip_edges().split(" ")
+	var time_part = parts[0] if parts.size() > 0 else "03:00"
+	var ampm_part = parts[1].to_upper() if parts.size() > 1 else "PM"
+
+	var sub_parts = time_part.split(":")
+	var raw_h = int(sub_parts[0]) if sub_parts.size() > 0 else 3
+	var raw_m = int(sub_parts[1]) if sub_parts.size() > 1 else 0
+
+	var opt_h = OptionButton.new()
+	opt_h.custom_minimum_size = Vector2(58, 34)
+	for h in range(1, 13):
+		opt_h.add_item("%02d" % h)
+	opt_h.select(clamp(raw_h - 1, 0, 11))
+	hbox.add_child(opt_h)
+
+	var colon_lbl = Label.new()
+	colon_lbl.text = ":"
+	colon_lbl.add_theme_font_size_override("font_size", 14)
+	colon_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	hbox.add_child(colon_lbl)
+
+	var opt_m = OptionButton.new()
+	opt_m.custom_minimum_size = Vector2(58, 34)
+	var standard_mins = [0, 15, 30, 45]
+	if not raw_m in standard_mins:
+		standard_mins.append(raw_m)
+		standard_mins.sort()
+
+	var sel_m_idx = 0
+	for idx in range(standard_mins.size()):
+		var m_val = standard_mins[idx]
+		opt_m.add_item("%02d" % m_val)
+		if m_val == raw_m:
+			sel_m_idx = idx
+	opt_m.select(sel_m_idx)
+	hbox.add_child(opt_m)
+
+	var opt_ampm = OptionButton.new()
+	opt_ampm.custom_minimum_size = Vector2(62, 34)
+	opt_ampm.add_item("AM")
+	opt_ampm.add_item("PM")
+	opt_ampm.select(1 if ampm_part == "PM" else 0)
+	hbox.add_child(opt_ampm)
+
+	hbox.set_meta("get_time_string", func() -> String:
+		var h_str = opt_h.get_item_text(opt_h.selected)
+		var m_str = opt_m.get_item_text(opt_m.selected)
+		var ampm_str = opt_ampm.get_item_text(opt_ampm.selected)
+		return h_str + ":" + m_str + " " + ampm_str
+	)
+	hbox.set_meta("set_disabled", func(dis: bool) -> void:
+		opt_h.disabled = dis
+		opt_m.disabled = dis
+		opt_ampm.disabled = dis
+	)
+	hbox.set_meta("connect_changed", func(callable: Callable) -> void:
+		opt_h.item_selected.connect(func(_idx): callable.call())
+		opt_m.item_selected.connect(func(_idx): callable.call())
+		opt_ampm.item_selected.connect(func(_idx): callable.call())
+	)
+
+	return hbox
+
 func _load_people() -> void:
 	if not person_dropdown: return
 	person_dropdown.clear()
@@ -114,7 +193,7 @@ func _load_people() -> void:
 
 	if not db: return
 
-	var res = db.execute("SELECT id, person_uuid, human_id, first_name, last_name, primary_role, COALESCE(staff_classification, 'Staff') as staff_classification FROM people ORDER BY last_name ASC, first_name ASC;")
+	var res = db.execute("SELECT id, person_uuid, human_id, first_name, last_name, primary_role, COALESCE(staff_classification, 'Staff') as staff_classification, COALESCE(can_cover_hours, 0) as can_cover_hours FROM people WHERE (status IS NULL OR status = 'active' OR status = '') AND (staff_classification = 'Staff' OR primary_role = 'Staff' OR can_cover_hours = 1) ORDER BY last_name ASC, first_name ASC;")
 	if res.get("success", false):
 		var rows = res.get("data", [])
 		for r in rows:
@@ -141,25 +220,31 @@ func _update_session_details() -> void:
 	if det_lbl and not session_data.is_empty():
 		var stitle = str(session_data.get("title", "Session"))
 		var sdate = str(session_data.get("date_text", ""))
-		var stime = str(session_data.get("start_time", ""))
+		var stime = str(session_data.get("start_time", session_data.get("open_time", "03:00 PM")))
+		var etime = str(session_data.get("end_time", session_data.get("close_time", "08:00 PM")))
 		var sloc = str(session_data.get("room_location", ""))
-		det_lbl.text = "Session: " + stitle + "\nDate: " + sdate + " at " + stime + "\nLocation: " + sloc
-	_validate_form()
+		det_lbl.text = "Session: " + stitle + "\nDate: " + sdate + " (" + stime + " - " + etime + ")\nLocation: " + sloc
 
-var selected_person_idx: int = 0
+	_validate_form()
 
 func _on_selection_changed(idx: int) -> void:
 	selected_person_idx = idx
 	if person_dropdown:
 		person_dropdown.selected = idx
-	if idx > 0 and idx <= eligible_people.size():
-		var sel_p = eligible_people[idx - 1]
-		var cls_name = sel_p.get("role", "Staff")
-		for r_idx in range(VALID_ROLES.size()):
-			if VALID_ROLES[r_idx] == cls_name:
-				if role_dropdown: role_dropdown.selected = r_idx
-				break
 	_validate_form()
+
+func _parse_time_to_minutes(time_str: String) -> int:
+	var clean = time_str.strip_edges().to_upper()
+	var parts = clean.split(" ")
+	if parts.size() < 2: return 0
+	var time_parts = parts[0].split(":")
+	if time_parts.size() < 2: return 0
+	var h = int(time_parts[0])
+	var m = int(time_parts[1])
+	var is_pm = parts[1] == "PM"
+	if is_pm and h < 12: h += 12
+	if not is_pm and h == 12: h = 0
+	return h * 60 + m
 
 func _validate_form() -> void:
 	var ok_btn = get_ok_button()
@@ -178,12 +263,32 @@ func _validate_form() -> void:
 	var s_date = str(session_data.get("date_text", ""))
 	var s_loc = str(session_data.get("room_location", ""))
 
+	# Validate Time Boundaries
+	var sel_start_str = start_time_picker.get_meta("get_time_string").call() if start_time_picker else "03:00 PM"
+	var sel_end_str = end_time_picker.get_meta("get_time_string").call() if end_time_picker else "08:00 PM"
+
+	var sel_st_min = _parse_time_to_minutes(sel_start_str)
+	var sel_end_min = _parse_time_to_minutes(sel_end_str)
+
+	var unc_start_min = _parse_time_to_minutes(str(session_data.get("start_time", session_data.get("open_time", "03:00 PM"))))
+	var unc_end_min = _parse_time_to_minutes(str(session_data.get("end_time", session_data.get("close_time", "08:00 PM"))))
+
+	if sel_st_min >= sel_end_min:
+		ok_btn.disabled = true
+		warning_label.text = "⚠️ Coverage End Time must be after Coverage Start Time."
+		return
+
+	if sel_st_min < unc_start_min or sel_end_min > unc_end_min:
+		ok_btn.disabled = true
+		warning_label.text = "⚠️ Selected coverage time must stay within current uncovered interval bounds."
+		return
+
 	# Duplicate Prevention Check
 	if db and s_date != "" and s_loc != "":
-		var dup_chk = db.execute("SELECT COUNT(*) AS cnt FROM schedule_entries WHERE person_name = ? AND shift_date = ? AND area = ?;", [p_name, s_date, s_loc])
+		var dup_chk = db.execute("SELECT COUNT(*) AS cnt FROM schedule_entries WHERE person_name = ? AND shift_date = ? AND area = ? AND NOT (end_time <= ? OR start_time >= ?);", [p_name, s_date, s_loc, sel_start_str, sel_end_str])
 		if dup_chk.get("success", false) and int(dup_chk["data"][0].get("cnt", 0)) > 0:
 			ok_btn.disabled = true
-			warning_label.text = "⚠️ " + p_name + " is already assigned to " + s_loc + " on " + s_date + "."
+			warning_label.text = "⚠️ " + p_name + " is already assigned to " + s_loc + " on " + s_date + " during this time."
 			return
 
 	ok_btn.disabled = false
@@ -194,7 +299,10 @@ func _on_confirmed() -> void:
 		return
 
 	var sel_person = eligible_people[p_idx - 1]
-	var sel_role = VALID_ROLES[role_dropdown.selected] if (role_dropdown and role_dropdown.selected >= 0 and role_dropdown.selected < VALID_ROLES.size()) else "Team Leader"
+	var sel_role = sel_person.get("role", "Staff")
+
+	var sel_start_str = start_time_picker.get_meta("get_time_string").call() if start_time_picker else str(session_data.get("start_time", "03:00 PM"))
+	var sel_end_str = end_time_picker.get_meta("get_time_string").call() if end_time_picker else str(session_data.get("end_time", "08:00 PM"))
 
 	var payload = {
 		"session_id": int(session_data.get("id", 0)),
@@ -203,8 +311,8 @@ func _on_confirmed() -> void:
 		"person_uuid": sel_person["person_uuid"],
 		"shift_role": sel_role,
 		"shift_date": str(session_data.get("date_text", "")),
-		"start_time": str(session_data.get("start_time", "03:00 PM")),
-		"end_time": str(session_data.get("end_time", "08:00 PM")),
+		"start_time": sel_start_str,
+		"end_time": sel_end_str,
 		"area": str(session_data.get("room_location", "Study Center")),
 		"notes": "Assigned via Uncovered Sessions Queue"
 	}

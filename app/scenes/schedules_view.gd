@@ -468,6 +468,73 @@ func _style_tab_btn(btn: Button, is_active: bool) -> void:
 	st_pressed.bg_color = Color(0.80, 0.30, 0.18, 1.0)
 	btn.add_theme_stylebox_override("pressed", st_pressed)
 
+func _create_compact_time_picker(initial_time: String = "03:00 PM") -> HBoxContainer:
+	var hbox = HBoxContainer.new()
+	hbox.add_theme_constant_override("separation", 3)
+
+	var parts = initial_time.strip_edges().split(" ")
+	var time_part = parts[0] if parts.size() > 0 else "03:00"
+	var ampm_part = parts[1].to_upper() if parts.size() > 1 else "PM"
+
+	var sub_parts = time_part.split(":")
+	var raw_h = int(sub_parts[0]) if sub_parts.size() > 0 else 3
+	var raw_m = int(sub_parts[1]) if sub_parts.size() > 1 else 0
+
+	var opt_h = OptionButton.new()
+	opt_h.custom_minimum_size = Vector2(56, 32)
+	for h in range(1, 13):
+		opt_h.add_item("%02d" % h)
+	opt_h.select(clamp(raw_h - 1, 0, 11))
+	hbox.add_child(opt_h)
+
+	var colon_lbl = Label.new()
+	colon_lbl.text = ":"
+	colon_lbl.add_theme_font_size_override("font_size", 13)
+	colon_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	hbox.add_child(colon_lbl)
+
+	var opt_m = OptionButton.new()
+	opt_m.custom_minimum_size = Vector2(56, 32)
+	var standard_mins = [0, 15, 30, 45]
+	if not raw_m in standard_mins:
+		standard_mins.append(raw_m)
+		standard_mins.sort()
+
+	var sel_m_idx = 0
+	for idx in range(standard_mins.size()):
+		var m_val = standard_mins[idx]
+		opt_m.add_item("%02d" % m_val)
+		if m_val == raw_m:
+			sel_m_idx = idx
+	opt_m.select(sel_m_idx)
+	hbox.add_child(opt_m)
+
+	var opt_ampm = OptionButton.new()
+	opt_ampm.custom_minimum_size = Vector2(60, 32)
+	opt_ampm.add_item("AM")
+	opt_ampm.add_item("PM")
+	opt_ampm.select(1 if ampm_part == "PM" else 0)
+	hbox.add_child(opt_ampm)
+
+	hbox.set_meta("get_time_string", func() -> String:
+		var h_str = opt_h.get_item_text(opt_h.selected)
+		var m_str = opt_m.get_item_text(opt_m.selected)
+		var ampm_str = opt_ampm.get_item_text(opt_ampm.selected)
+		return h_str + ":" + m_str + " " + ampm_str
+	)
+	hbox.set_meta("set_disabled", func(dis: bool) -> void:
+		opt_h.disabled = dis
+		opt_m.disabled = dis
+		opt_ampm.disabled = dis
+	)
+	hbox.set_meta("connect_changed", func(callable: Callable) -> void:
+		opt_h.item_selected.connect(func(_idx): callable.call())
+		opt_m.item_selected.connect(func(_idx): callable.call())
+		opt_ampm.item_selected.connect(func(_idx): callable.call())
+	)
+
+	return hbox
+
 func _get_current_week_sunday_unix() -> int:
 	var now_dict = Time.get_datetime_dict_from_system()
 	var today_date_str = "%04d-%02d-%02dT12:00:00" % [now_dict["year"], now_dict["month"], now_dict["day"]]
@@ -3209,16 +3276,13 @@ func _render_hours_tab() -> void:
 		var s1_lbl = Label.new(); s1_lbl.text = "Session 1:"; s1_lbl.add_theme_font_size_override("font_size", 12); s1_lbl.add_theme_color_override("font_color", Color(0.40, 0.48, 0.58, 1.0))
 		r_hbox.add_child(s1_lbl)
 
-		var opt_open = OptionButton.new(); opt_open.custom_minimum_size = Vector2(120, 34)
-		for t in STANDARD_TIME_SLOTS: opt_open.add_item(t)
-		for i in range(STANDARD_TIME_SLOTS.size()):
-			if STANDARD_TIME_SLOTS[i] == open_t: opt_open.select(i)
+		var opt_open = _create_compact_time_picker(open_t)
 		r_hbox.add_child(opt_open)
 
-		var opt_close = OptionButton.new(); opt_close.custom_minimum_size = Vector2(120, 34)
-		for t in STANDARD_TIME_SLOTS: opt_close.add_item(t)
-		for i in range(STANDARD_TIME_SLOTS.size()):
-			if STANDARD_TIME_SLOTS[i] == close_t: opt_close.select(i)
+		var to_lbl = Label.new(); to_lbl.text = "to"; to_lbl.add_theme_font_size_override("font_size", 12); to_lbl.add_theme_color_override("font_color", Color(0.50, 0.58, 0.68, 1.0))
+		r_hbox.add_child(to_lbl)
+
+		var opt_close = _create_compact_time_picker(close_t)
 		r_hbox.add_child(opt_close)
 
 		var chk_split = CheckBox.new(); chk_split.text = "Split Shift"; chk_split.button_pressed = has_split
@@ -3229,29 +3293,27 @@ func _render_hours_tab() -> void:
 		var s2_lbl = Label.new(); s2_lbl.text = "Session 2:"; s2_lbl.add_theme_font_size_override("font_size", 12); s2_lbl.add_theme_color_override("font_color", Color(0.40, 0.48, 0.58, 1.0))
 		r_hbox.add_child(s2_lbl)
 
-		var opt_s2_open = OptionButton.new(); opt_s2_open.custom_minimum_size = Vector2(120, 34)
-		for t in STANDARD_TIME_SLOTS: opt_s2_open.add_item(t)
-		for i in range(STANDARD_TIME_SLOTS.size()):
-			if STANDARD_TIME_SLOTS[i] == s2_start_t: opt_s2_open.select(i)
+		var opt_s2_open = _create_compact_time_picker(s2_start_t)
 		r_hbox.add_child(opt_s2_open)
 
-		var opt_s2_close = OptionButton.new(); opt_s2_close.custom_minimum_size = Vector2(120, 34)
-		for t in STANDARD_TIME_SLOTS: opt_s2_close.add_item(t)
-		for i in range(STANDARD_TIME_SLOTS.size()):
-			if STANDARD_TIME_SLOTS[i] == s2_end_t: opt_s2_close.select(i)
+		var s2_to_lbl = Label.new(); s2_to_lbl.text = "to"; s2_to_lbl.add_theme_font_size_override("font_size", 12); s2_to_lbl.add_theme_color_override("font_color", Color(0.50, 0.58, 0.68, 1.0))
+		r_hbox.add_child(s2_to_lbl)
+
+		var opt_s2_close = _create_compact_time_picker(s2_end_t)
 		r_hbox.add_child(opt_s2_close)
 
 		var refresh_row_states = func():
 			var is_open = chk_open.button_pressed
 			var is_split = chk_split.button_pressed and is_open
 
-			opt_open.disabled = not is_open
-			opt_close.disabled = not is_open
+			opt_open.get_meta("set_disabled").call(not is_open)
+			opt_close.get_meta("set_disabled").call(not is_open)
 			chk_split.disabled = not is_open
 			s2_lbl.visible = is_split
-			opt_s2_open.disabled = not is_split
+			s2_to_lbl.visible = is_split
+			opt_s2_open.get_meta("set_disabled").call(not is_split)
 			opt_s2_open.visible = is_split
-			opt_s2_close.disabled = not is_split
+			opt_s2_close.get_meta("set_disabled").call(not is_split)
 			opt_s2_close.visible = is_split
 
 		refresh_row_states.call()
@@ -3261,18 +3323,18 @@ func _render_hours_tab() -> void:
 			refresh_row_states.call()
 			var closed_val = 0 if chk_open.button_pressed else 1
 			var split_val = 1 if (chk_split.button_pressed and chk_open.button_pressed) else 0
-			var sel_open = opt_open.get_item_text(opt_open.selected)
-			var sel_close = opt_close.get_item_text(opt_close.selected)
-			var sel_s2_open = opt_s2_open.get_item_text(opt_s2_open.selected)
-			var sel_s2_close = opt_s2_close.get_item_text(opt_s2_close.selected)
+			var sel_open = opt_open.get_meta("get_time_string").call()
+			var sel_close = opt_close.get_meta("get_time_string").call()
+			var sel_s2_open = opt_s2_open.get_meta("get_time_string").call()
+			var sel_s2_close = opt_s2_close.get_meta("get_time_string").call()
 			sch_service.update_open_hours_atomic(current_day_name, sel_open, sel_close, closed_val, split_val, sel_s2_open, sel_s2_close)
 
 		chk_open.toggled.connect(save_row_changes)
 		chk_split.toggled.connect(save_row_changes)
-		opt_open.item_selected.connect(save_row_changes)
-		opt_close.item_selected.connect(save_row_changes)
-		opt_s2_open.item_selected.connect(save_row_changes)
-		opt_s2_close.item_selected.connect(save_row_changes)
+		opt_open.get_meta("connect_changed").call(save_row_changes)
+		opt_close.get_meta("connect_changed").call(save_row_changes)
+		opt_s2_open.get_meta("connect_changed").call(save_row_changes)
+		opt_s2_close.get_meta("connect_changed").call(save_row_changes)
 
 		row_card.add_child(r_hbox)
 		list_vbox.add_child(row_card)

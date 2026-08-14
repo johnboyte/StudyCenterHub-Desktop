@@ -1242,6 +1242,23 @@ func _populate_profile_section(p: Dictionary) -> void:
 	flag_dropdown.custom_minimum_size = Vector2(0, 44); flag_dropdown.size_flags_horizontal = Control.SIZE_EXPAND_FILL; flag_dropdown.add_theme_font_size_override("font_size", 16)
 	flag_vbox.add_child(flag_lbl); flag_vbox.add_child(flag_dropdown); form_grid.add_child(flag_vbox)
 
+	# Staffing & Leadership Capabilities
+	var cap_vbox = VBoxContainer.new(); cap_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var cap_lbl = Label.new(); cap_lbl.text = "STAFFING & LEADERSHIP CAPABILITIES"; cap_lbl.add_theme_font_size_override("font_size", 14); cap_lbl.add_theme_color_override("font_color", Color(0.70, 0.78, 0.88, 1.0))
+	cap_vbox.add_child(cap_lbl)
+
+	var chk_can_cover = CheckBox.new(); chk_can_cover.text = "Can Cover Center Hours"
+	chk_can_cover.button_pressed = (int(p.get("can_cover_hours", 0)) == 1)
+	_style_checkbox_on_light(chk_can_cover)
+	cap_vbox.add_child(chk_can_cover)
+
+	var chk_is_tl = CheckBox.new(); chk_is_tl.text = "Eligible as Team Leader"
+	chk_is_tl.button_pressed = (int(p.get("is_team_leader_eligible", 0)) == 1)
+	_style_checkbox_on_light(chk_is_tl)
+	cap_vbox.add_child(chk_is_tl)
+
+	form_grid.add_child(cap_vbox)
+
 	var contact_card_vbox = VBoxContainer.new(); contact_card_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	contact_card_vbox.add_theme_constant_override("separation", 16)
 	contact_card_vbox.add_child(form_grid)
@@ -1257,6 +1274,8 @@ func _populate_profile_section(p: Dictionary) -> void:
 			var role_db_val = role_sel_txt
 
 			var flag_db_val = flag_dropdown.get_item_text(flag_dropdown.selected)
+			var can_cov_val = 1 if chk_can_cover.button_pressed else 0
+			var is_tl_val = 1 if chk_is_tl.button_pressed else 0
 
 			var old_cls = _clean_str(p.get("staff_classification", p.get("primary_role", "Participant")))
 			if old_cls.contains("Supervisor") or old_cls == "Shift Supervisor": old_cls = "Team Leader"
@@ -1265,8 +1284,8 @@ func _populate_profile_section(p: Dictionary) -> void:
 			var pid = int(p.get("id", 0))
 
 			var execute_save = func():
-				db.execute("UPDATE people SET first_name = ?, last_name = ?, suffix = ?, phone = ?, email = ?, preferred_email = ?, birthday = ?, primary_role = ?, staff_classification = ?, flag_status = ? WHERE person_uuid = ?;",
-					[fn_edit.text.strip_edges(), ln_edit.text.strip_edges(), suf_edit.text.strip_edges(), ph_edit.text.strip_edges(), em_edit.text.strip_edges(), pref_email, _ui_to_db_date(bd_edit.text.strip_edges()), role_db_val, role_db_val, flag_db_val, p_uuid])
+				db.execute("UPDATE people SET first_name = ?, last_name = ?, suffix = ?, phone = ?, email = ?, preferred_email = ?, birthday = ?, primary_role = ?, staff_classification = ?, flag_status = ?, can_cover_hours = ?, is_team_leader_eligible = ? WHERE person_uuid = ?;",
+					[fn_edit.text.strip_edges(), ln_edit.text.strip_edges(), suf_edit.text.strip_edges(), ph_edit.text.strip_edges(), em_edit.text.strip_edges(), pref_email, _ui_to_db_date(bd_edit.text.strip_edges()), role_db_val, role_db_val, flag_db_val, can_cov_val, is_tl_val, p_uuid])
 				refresh_view()
 
 			if old_cls != role_sel_txt and role_sel_txt != "Participant":
