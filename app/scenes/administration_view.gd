@@ -1162,7 +1162,7 @@ func _render_birthday_tab() -> void:
 
 	# Test SMS Box
 	var test_hbox = HBoxContainer.new(); test_hbox.add_theme_constant_override("separation", 14)
-	var test_phone = LineEdit.new(); test_phone.text = _get_setting_string("LAST_TEST_BDAY_PHONE", "864 934-4080"); test_phone.placeholder_text = "Recipient Cell Phone (e.g. 864 934-4080)"; test_phone.custom_minimum_size = Vector2(0, 46); _style_input_control(test_phone, 18)
+	var test_phone = LineEdit.new(); test_phone.text = _get_setting_string("LAST_TEST_BDAY_PHONE", "864 934-4080"); test_phone.placeholder_text = "Recipient Cell Phone (e.g. 864 934-4080)"; test_phone.custom_minimum_size = Vector2(240, 46); _style_input_control(test_phone, 18)
 	test_hbox.add_child(test_phone)
 
 	# Status Feedback Label
