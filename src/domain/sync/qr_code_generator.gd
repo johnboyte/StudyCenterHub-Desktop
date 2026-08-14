@@ -66,11 +66,19 @@ static func _rs_encode(data: Array, nsym: int) -> Array:
 static func generate_qr_image(payload: String, size_px: int = 256) -> Image:
 	# 1. High-Precision ISO Spec Python QR Generator
 	var tmp_path = ProjectSettings.globalize_path("user://tmp_qr_gen.png")
-	var script_path = ProjectSettings.globalize_path("res://scripts/generate_qr.py")
-	
-	if FileAccess.file_exists(script_path):
+	var user_script_path = ProjectSettings.globalize_path("user://generate_qr.py")
+
+	if not FileAccess.file_exists(user_script_path):
+		var src_file = FileAccess.open("res://scripts/generate_qr.py", FileAccess.READ)
+		if src_file:
+			var code = src_file.get_as_text()
+			var dest_file = FileAccess.open("user://generate_qr.py", FileAccess.WRITE)
+			if dest_file:
+				dest_file.store_string(code)
+
+	if FileAccess.file_exists(user_script_path):
 		var output = []
-		var exit_code = OS.execute("python3", [script_path, payload, tmp_path, str(size_px)], output, true)
+		var exit_code = OS.execute("python3", [user_script_path, payload, tmp_path, str(size_px)], output, true)
 		if exit_code == 0 and FileAccess.file_exists(tmp_path):
 			var img = Image.load_from_file(tmp_path)
 			if img and not img.is_empty():
@@ -207,9 +215,9 @@ static func generate_qr_image(payload: String, size_px: int = 256) -> Image:
 		right -= 2
 		upward = not upward
 
-	# 4. Place Format Information (EC Level L = 01, Mask 0 = 000 -> 15-bit format: 010001111010110)
-	# Pre-calculated 15-bit format for L + Mask 0 with BCH & XOR mask 0x5412: 0x23D6
-	var format_val = 0x23D6
+	# 4. Place Format Information (EC Level L = 01, Mask 0 = 000 -> ISO Spec 15-bit format: 0x74AA)
+	# Correct 15-bit format for L + Mask 0 with BCH(15,5) & XOR mask 0x5412: 0x74AA
+	var format_val = 0x74AA
 	var fmt_bits = []
 	for i in range(14, -1, -1):
 		fmt_bits.append((format_val >> i) & 1)
@@ -232,23 +240,25 @@ static func generate_qr_image(payload: String, size_px: int = 256) -> Image:
 	matrix[8][dim - 5] = fmt_bits[10]; matrix[8][dim - 4] = fmt_bits[11]; matrix[8][dim - 3] = fmt_bits[12]
 	matrix[8][dim - 2] = fmt_bits[13]; matrix[8][dim - 1] = fmt_bits[14]
 
-	# 5. Render to Godot Image
+	# 5. Render to Godot Image with ISO-Compliant 4-Module Quiet Zone Margin
 	var img = Image.create(size_px, size_px, false, Image.FORMAT_RGBA8)
-	img.fill(Color(1.0, 1.0, 1.0, 1.0)) # Quiet zone background
+	img.fill(Color(1.0, 1.0, 1.0, 1.0)) # White Quiet Zone Background
 
-	var cell_size = float(size_px) / float(dim)
+	var total_dim = dim + 8 # 4 modules margin on left, right, top, bottom
+	var cell_size = float(size_px) / float(total_dim)
+
 	for y in range(dim):
 		for x in range(dim):
 			if matrix[y][x] == 1:
-				var start_x = int(x * cell_size)
-				var start_y = int(y * cell_size)
-				var end_x = int((x + 1) * cell_size)
-				var end_y = int((y + 1) * cell_size)
+				var start_x = int((x + 4) * cell_size)
+				var start_y = int((y + 4) * cell_size)
+				var end_x = int((x + 5) * cell_size)
+				var end_y = int((y + 5) * cell_size)
 
 				for px in range(start_x, end_x):
 					for py in range(start_y, end_y):
 						if px < size_px and py < size_px:
-							img.set_pixel(px, py, Color(0.08, 0.10, 0.15, 1.0)) # Dark QR Modules
+							img.set_pixel(px, py, Color(0.0, 0.0, 0.0, 1.0)) # Solid Black QR Modules
 
 	return img
 

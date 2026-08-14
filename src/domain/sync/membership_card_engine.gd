@@ -200,6 +200,7 @@ static func render_membership_card(person_data: Dictionary, raw_credential_token
 # Centralized QR Placement Configuration for Official Artwork
 const REMOTE_SIGN_CONFIG = {
 	"artwork_path": "res://assets/print/real_life_remote_check_in_poster.png",
+	"static_qr_path": "res://assets/print/remote_functions_public_qr.png",
 	"qr_target_url": "https://app.reallife-studycenter.org/public",
 	"center_x": 1879,
 	"center_y": 2117,
@@ -207,33 +208,78 @@ const REMOTE_SIGN_CONFIG = {
 }
 
 static func render_remote_qr_sign() -> Image:
-	const QrGenerator = preload("res://src/domain/sync/qr_code_generator.gd")
-	var art_path = ProjectSettings.globalize_path(REMOTE_SIGN_CONFIG["artwork_path"])
-	var img = Image.new()
+	var img: Image = null
 
-	if FileAccess.file_exists(art_path):
-		var loaded_img = Image.load_from_file(art_path)
-		if loaded_img and not loaded_img.is_empty():
-			img = loaded_img
+	var art_res_path = REMOTE_SIGN_CONFIG["artwork_path"]
+	if ResourceLoader.exists(art_res_path):
+		var res = load(art_res_path)
+		if res is Texture2D:
+			img = res.get_image()
+		elif res is Image:
+			img = res
 
-	if img.is_empty():
-		img = Image.create(792, 1024, false, Image.FORMAT_RGBA8)
-		img.fill(Color(0.08, 0.10, 0.15, 1.0))
+	if not img or img.is_empty():
+		var art_path = ProjectSettings.globalize_path(art_res_path)
+		if FileAccess.file_exists(art_path):
+			var loaded_img = Image.load_from_file(art_path)
+			if loaded_img and not loaded_img.is_empty():
+				img = loaded_img
 
-	var qr_url = REMOTE_SIGN_CONFIG["qr_target_url"]
+	if not img or img.is_empty():
+		img = Image.create(2550, 3300, false, Image.FORMAT_RGBA8)
+		img.fill(Color(0.96, 0.97, 0.98, 1.0))
+	else:
+		img = img.duplicate()
+		if img.is_compressed():
+			img.decompress()
+
+	# Load pre-generated static standards-compliant QR PNG asset
+	var qr_img: Image = null
+	var qr_asset_path = REMOTE_SIGN_CONFIG["static_qr_path"]
+	if ResourceLoader.exists(qr_asset_path):
+		var qres = load(qr_asset_path)
+		if qres is Texture2D:
+			qr_img = qres.get_image()
+		elif qres is Image:
+			qr_img = qres
+
+	if not qr_img or qr_img.is_empty():
+		var qpath = ProjectSettings.globalize_path(qr_asset_path)
+		if FileAccess.file_exists(qpath):
+			var loaded_qr = Image.load_from_file(qpath)
+			if loaded_qr and not loaded_qr.is_empty():
+				qr_img = loaded_qr
+
 	var qr_size = REMOTE_SIGN_CONFIG["qr_size_px"]
-	var qr_img = QrGenerator.generate_qr_image(qr_url, qr_size)
+	if qr_img and not qr_img.is_empty():
+		qr_img = qr_img.duplicate()
+		if qr_img.is_compressed():
+			qr_img.decompress()
+		if qr_img.get_width() != qr_size or qr_img.get_height() != qr_size:
+			qr_img.resize(qr_size, qr_size, Image.INTERPOLATE_NEAREST)
 
 	var qr_x = int(REMOTE_SIGN_CONFIG["center_x"] - (qr_size / 2.0))
 	var qr_y = int(REMOTE_SIGN_CONFIG["center_y"] - (qr_size / 2.0))
 
 	if qr_img and not qr_img.is_empty():
+		# Fill clean white quiet zone border box behind QR placement area
+		var pad = 40
+		var min_x = int(clamp(qr_x - pad, 0, img.get_width() - 1))
+		var max_x = int(clamp(qr_x + qr_size + pad, 0, img.get_width() - 1))
+		var min_y = int(clamp(qr_y - pad, 0, img.get_height() - 1))
+		var max_y = int(clamp(qr_y + qr_size + pad, 0, img.get_height() - 1))
+		for bx in range(min_x, max_x):
+			for by in range(min_y, max_y):
+				img.set_pixel(bx, by, Color(1.0, 1.0, 1.0, 1.0))
+
 		for py in range(qr_size):
 			for px in range(qr_size):
 				var target_x = qr_x + px
 				var target_y = qr_y + py
 				if target_x >= 0 and target_x < img.get_width() and target_y >= 0 and target_y < img.get_height():
-					img.set_pixel(target_x, target_y, qr_img.get_pixel(px, py))
+					var p_col = qr_img.get_pixel(px, py)
+					if p_col.a > 0.1:
+						img.set_pixel(target_x, target_y, p_col)
 
 	return img
 

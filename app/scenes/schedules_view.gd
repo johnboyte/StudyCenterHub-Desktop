@@ -23,7 +23,7 @@ var db: RefCounted:
 
 var sch_service: RefCounted
 var config_service: RefCounted
-var active_top_tab: String = "shifts"
+var active_top_tab: String = "sessions"
 var active_shift_view_mode: String = "board" # "board" (Week Board View) or "table" (Table View)
 var active_session_horizon: String = "upcoming"
 var selected_filter_type_ids: Array = []
@@ -42,6 +42,10 @@ var active_queue_id: String = ""
 var queue_controller: RefCounted = null
 var header_bar_instance: Control = null
 var queue_card_container: PanelContainer = null
+
+# Session Assistant Active State Tracking
+var is_session_assistant_open: bool = false
+var active_assistant_session_data: Dictionary = {}
 
 # Front-End Editable Lists for Center Areas & Shift Roles
 var available_areas: Array = ["Study Center", "Gathering Room", "Kitchen", "Study Room #1", "Study Room #2", "Study Room #3", "The Study", "The Back Porch", "Whole Center"]
@@ -94,7 +98,12 @@ func _ready() -> void:
 	_style_card()
 	_connect_tab_buttons()
 	_setup_marquee_and_preview_overlay()
-	switch_top_tab("shifts")
+	add_to_group("sync_listeners")
+	switch_top_tab("sessions")
+
+func on_inbound_events_processed(_count: int = 1) -> void:
+	if is_node_ready():
+		call_deferred("_refresh_tab_content")
 
 func receive_navigation_context(params: Dictionary) -> void:
 	if params.get("queue_mode", false) == true:
@@ -385,6 +394,8 @@ func _connect_tab_buttons() -> void:
 
 func switch_top_tab(tab_name: String) -> void:
 	active_top_tab = tab_name
+	is_session_assistant_open = false
+	active_assistant_session_data.clear()
 	_update_top_tab_styles()
 	call_deferred("_refresh_tab_content")
 
@@ -863,6 +874,10 @@ func _refresh_tab_content() -> void:
 	if not db: return
 	if not sch_service: sch_service = SchedulesServiceScript.new(db)
 
+	if is_session_assistant_open and not active_assistant_session_data.is_empty():
+		_render_session_assistant_view(active_assistant_session_data)
+		return
+
 	if is_queue_mode and queue_controller:
 		queue_controller.start_queue(active_queue_id)
 		_refresh_queue_view()
@@ -870,6 +885,7 @@ func _refresh_tab_content() -> void:
 	all_card_nodes.clear()
 	all_day_columns.clear()
 	for child in content_card.get_children():
+		content_card.remove_child(child)
 		child.queue_free()
 
 	if active_top_tab == "shifts":
@@ -1492,7 +1508,62 @@ func _style_checkbox(chk: CheckBox) -> void:
 	chk.add_theme_color_override("font_focus_color", Color(0.12, 0.18, 0.26, 1.0))
 	chk.add_theme_color_override("font_disabled_color", Color(0.55, 0.62, 0.70, 1.0))
 
+func _style_destructive_button(btn: Button) -> void:
+	var st = StyleBoxFlat.new()
+	st.bg_color = Color(0.78, 0.15, 0.15, 1.0)
+	st.corner_radius_top_left = 6; st.corner_radius_top_right = 6; st.corner_radius_bottom_left = 6; st.corner_radius_bottom_right = 6
+	st.content_margin_left = 12; st.content_margin_top = 6; st.content_margin_right = 12; st.content_margin_bottom = 6
+	btn.add_theme_color_override("font_color", Color(1, 1, 1, 1))
+	btn.add_theme_color_override("font_hover_color", Color(1, 1, 1, 1))
+	btn.add_theme_color_override("font_pressed_color", Color(0.95, 0.95, 0.95, 1.0))
+	btn.add_theme_color_override("font_focus_color", Color(1, 1, 1, 1))
+	btn.add_theme_stylebox_override("normal", st)
+
+	var hst = st.duplicate() as StyleBoxFlat
+	hst.bg_color = Color(0.65, 0.10, 0.10, 1.0)
+	btn.add_theme_stylebox_override("hover", hst)
+	btn.add_theme_stylebox_override("pressed", hst)
+
+	var dst = st.duplicate() as StyleBoxFlat
+	dst.bg_color = Color(0.85, 0.60, 0.60, 0.6)
+	btn.add_theme_stylebox_override("disabled", dst)
+	btn.add_theme_color_override("font_disabled_color", Color(0.9, 0.9, 0.9, 0.7))
+
+func _format_full_date(date_str: String) -> String:
+	var clean = date_str.strip_edges()
+	var months = [
+		"", "January", "February", "March", "April", "May", "June",
+		"July", "August", "September", "October", "November", "December"
+	]
+	if "-" in clean:
+		var parts = clean.split("-")
+		if parts.size() == 3:
+			var y = parts[0]
+			var m_int = int(parts[1])
+			var d = int(parts[2])
+			var m_name = months[m_int] if (m_int >= 1 and m_int <= 12) else parts[1]
+			return "%s %d, %s" % [m_name, d, y]
+	elif "/" in clean:
+		var parts = clean.split("/")
+		if parts.size() == 3:
+			var m_int = int(parts[0])
+			var d = int(parts[1])
+			var y = parts[2]
+			var m_name = months[m_int] if (m_int >= 1 and m_int <= 12) else parts[0]
+			return "%s %d, %s" % [m_name, d, y]
+	return clean
+
+func _show_toast(msg: String) -> void:
+	var dlg = AcceptDialog.new()
+	dlg.title = "Notification"
+	dlg.dialog_text = msg
+	dlg.close_requested.connect(func(): dlg.queue_free())
+	dlg.confirmed.connect(func(): dlg.queue_free())
+	add_child(dlg)
+	dlg.popup_centered()
+
 # ==================== CLIPBOARD & SELECTION ENGINE ====================
+
 
 func _get_all_ordered_shifts() -> Array:
 	if not sch_service: return []
@@ -2495,6 +2566,71 @@ func open_session_editor_modal(session_data: Dictionary = {}) -> void:
 	# ---------------- ACTION BUTTONS ----------------
 	var btn_hbox = HBoxContainer.new(); btn_hbox.add_theme_constant_override("separation", 14); btn_hbox.alignment = BoxContainer.ALIGNMENT_END
 
+	if is_edit_mode:
+		var btn_delete = Button.new()
+		btn_delete.text = "🗑 Delete Session"
+		btn_delete.custom_minimum_size = Vector2(140, 40)
+		_style_destructive_button(btn_delete)
+		btn_delete.pressed.connect(func():
+			var confirm_dialog = Window.new()
+			confirm_dialog.title = "Delete Session?"
+			confirm_dialog.size = Vector2i(460, 200)
+			confirm_dialog.exclusive = true
+			confirm_dialog.transient = true
+			confirm_dialog.close_requested.connect(func(): confirm_dialog.queue_free())
+
+			var c_margin = MarginContainer.new()
+			c_margin.set_anchors_preset(PRESET_FULL_RECT)
+			c_margin.add_theme_constant_override("margin_left", 20); c_margin.add_theme_constant_override("margin_top", 16); c_margin.add_theme_constant_override("margin_right", 20); c_margin.add_theme_constant_override("margin_bottom", 16)
+
+			var c_vbox = VBoxContainer.new(); c_vbox.add_theme_constant_override("separation", 16)
+
+			var s_title = input_title.text.strip_edges()
+			if s_title == "": s_title = _clean_str.call(session_data.get("title"), "Session")
+			var raw_date = input_date.text.strip_edges()
+			if raw_date == "": raw_date = _clean_str.call(session_data.get("date_text"), "")
+			var fmt_d = _format_full_date(raw_date)
+			var s_start = opt_start.get_item_text(opt_start.selected)
+
+			var c_lbl = Label.new()
+			c_lbl.text = "Are you sure you want to permanently delete “%s” scheduled for %s at %s?\n\nThis action cannot be undone." % [s_title, fmt_d, s_start]
+			c_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			c_vbox.add_child(c_lbl)
+
+			var c_btn_hbox = HBoxContainer.new(); c_btn_hbox.add_theme_constant_override("separation", 12); c_btn_hbox.alignment = BoxContainer.ALIGNMENT_END
+
+			var btn_conf_cancel = Button.new(); btn_conf_cancel.text = "Cancel"; btn_conf_cancel.custom_minimum_size = Vector2(100, 36)
+			_style_outline_button(btn_conf_cancel)
+			btn_conf_cancel.pressed.connect(func(): confirm_dialog.queue_free())
+			c_btn_hbox.add_child(btn_conf_cancel)
+
+			var btn_conf_delete = Button.new(); btn_conf_delete.text = "Delete Session"; btn_conf_delete.custom_minimum_size = Vector2(140, 36)
+			_style_destructive_button(btn_conf_delete)
+			btn_conf_delete.pressed.connect(func():
+				confirm_dialog.queue_free()
+				var del_res = sch_service.delete_full_session_atomic(target_session_id, "usr_admin_master", "Administrator", "", false)
+				if del_res["success"]:
+					dialog.queue_free()
+					call_deferred("_refresh_tab_content")
+					_show_toast("Session deleted successfully.")
+				else:
+					err_banner.text = "❌ Deletion error: " + str(del_res.get("error", "Failed to delete session."))
+					err_banner.visible = true
+			)
+			c_btn_hbox.add_child(btn_conf_delete)
+
+			c_vbox.add_child(c_btn_hbox)
+			c_margin.add_child(c_vbox)
+			confirm_dialog.add_child(c_margin)
+			dialog.add_child(confirm_dialog)
+			confirm_dialog.popup_centered()
+		)
+		btn_hbox.add_child(btn_delete)
+
+		var spacer = Control.new()
+		spacer.size_flags_horizontal = SIZE_EXPAND_FILL
+		btn_hbox.add_child(spacer)
+
 	var btn_cancel = Button.new(); btn_cancel.text = "❌ Cancel"; btn_cancel.custom_minimum_size = Vector2(100, 40)
 	_style_outline_button(btn_cancel)
 
@@ -3135,8 +3271,25 @@ func _render_hours_tab() -> void:
 func open_session_assistant_placeholder(session_data: Dictionary) -> void:
 	_render_session_assistant_view(session_data)
 
+func _get_participant_display_name(s: Dictionary) -> String:
+	var fn = str(s.get("first_name", "")).strip_edges() if s.get("first_name") != null else ""
+	var ln = str(s.get("last_name", "")).strip_edges() if s.get("last_name") != null else ""
+	if fn == "<null>" or fn == "null": fn = ""
+	if ln == "<null>" or ln == "null": ln = ""
+	var full = (fn + " " + ln).strip_edges()
+	if full != "":
+		return full
+	var h_id = str(s.get("human_id", "")).strip_edges()
+	if h_id != "" and h_id != "<null>" and h_id != "null":
+		return h_id
+	return "Member"
+
 func _render_session_assistant_view(session_data: Dictionary) -> void:
-	content_card.get_children().map(func(c): c.queue_free())
+	is_session_assistant_open = true
+	active_assistant_session_data = session_data
+	for c in content_card.get_children():
+		content_card.remove_child(c)
+		c.queue_free()
 
 	var sess_id = int(session_data.get("id", 0))
 	var signups = sch_service.get_signups_for_session(sess_id) if sch_service else []
@@ -3192,7 +3345,12 @@ func _render_session_assistant_view(session_data: Dictionary) -> void:
 
 	var btn_return = Button.new(); btn_return.text = "⬅️ Return to Sessions"; btn_return.custom_minimum_size = Vector2(160, 34); btn_return.add_theme_font_size_override("font_size", 13)
 	_style_primary_button(btn_return)
-	btn_return.pressed.connect(func(): call_deferred("_refresh_tab_content"))
+	btn_return.pressed.connect(func():
+		is_session_assistant_open = false
+		active_assistant_session_data.clear()
+		call_deferred("_refresh_tab_content")
+	)
+	top_row.add_child(btn_return)
 	top_row.add_child(btn_return)
 
 	h_vbox.add_child(top_row)
@@ -3269,6 +3427,7 @@ func _render_session_assistant_view(session_data: Dictionary) -> void:
 				_style_outline_button(btn_add)
 				btn_add.pressed.connect(func():
 					sch_service.register_participant_atomic(sess_id, p_id)
+					_publish_session_sync()
 					_render_session_assistant_view(session_data)
 				)
 				p_row.add_child(btn_add)
@@ -3307,15 +3466,17 @@ func _render_session_assistant_view(session_data: Dictionary) -> void:
 	if confirmed_list.size() > 0:
 		for s in confirmed_list:
 			var s_id_val = int(s.get("id"))
-			var fn = str(s.get("first_name")) if s.get("first_name") != null else ""
-			var ln = str(s.get("last_name")) if s.get("last_name") != null else ""
-			var p_name = (fn + " " + ln).strip_edges()
-			var p_human = str(s.get("human_id", ""))
+			var p_name = _get_participant_display_name(s)
+			var p_human = str(s.get("human_id", "")).strip_edges()
+			if p_human == "<null>" or p_human == "null": p_human = ""
 			var att_status = str(s.get("attendance_status", "unmarked"))
 			var comm_needed = int(s.get("communication_needed", 0)) == 1
 
 			var crow = HBoxContainer.new(); crow.add_theme_constant_override("separation", 10)
-			var clbl = Label.new(); clbl.text = "👤 " + p_name + " (" + p_human + ")"; clbl.add_theme_font_size_override("font_size", 13); clbl.size_flags_horizontal = SIZE_EXPAND_FILL
+			var label_text = "👤 " + p_name
+			if p_human != "" and p_human != p_name:
+				label_text += " (" + p_human + ")"
+			var clbl = Label.new(); clbl.text = label_text; clbl.add_theme_font_size_override("font_size", 13); clbl.add_theme_color_override("font_color", Color(0.12, 0.16, 0.22, 1.0)); clbl.size_flags_horizontal = SIZE_EXPAND_FILL
 			crow.add_child(clbl)
 
 			if comm_needed:
@@ -3327,6 +3488,7 @@ func _render_session_assistant_view(session_data: Dictionary) -> void:
 			btn_rem.pressed.connect(func():
 				# Trigger removal dialog or default remove + auto-promote
 				sch_service.remove_confirmed_and_autopromote_atomic(sess_id, s_id_val)
+				_publish_session_sync()
 				_render_session_assistant_view(session_data)
 			)
 			crow.add_child(btn_rem)
@@ -3356,19 +3518,22 @@ func _render_session_assistant_view(session_data: Dictionary) -> void:
 			var s_id_val = int(s.get("id"))
 			var s_uuid_val = str(s.get("signup_uuid", ""))
 			var pos_val = int(s.get("position", idx + 1))
-			var fn = str(s.get("first_name")) if s.get("first_name") != null else ""
-			var ln = str(s.get("last_name")) if s.get("last_name") != null else ""
-			var p_name = (fn + " " + ln).strip_edges()
-			var p_human = str(s.get("human_id", ""))
+			var p_name = _get_participant_display_name(s)
+			var p_human = str(s.get("human_id", "")).strip_edges()
+			if p_human == "<null>" or p_human == "null": p_human = ""
 
 			var wrow = HBoxContainer.new(); wrow.add_theme_constant_override("separation", 8)
-			var wlbl = Label.new(); wlbl.text = "#" + str(pos_val) + " ⏳ " + p_name + " (" + p_human + ")"; wlbl.add_theme_font_size_override("font_size", 13); wlbl.size_flags_horizontal = SIZE_EXPAND_FILL
+			var label_text = "#" + str(pos_val) + " ⏳ " + p_name
+			if p_human != "" and p_human != p_name:
+				label_text += " (" + p_human + ")"
+			var wlbl = Label.new(); wlbl.text = label_text; wlbl.add_theme_font_size_override("font_size", 13); wlbl.add_theme_color_override("font_color", Color(0.12, 0.16, 0.22, 1.0)); wlbl.size_flags_horizontal = SIZE_EXPAND_FILL
 			wrow.add_child(wlbl)
 
 			var btn_prom = Button.new(); btn_prom.text = "⚡ Promote"; btn_prom.custom_minimum_size = Vector2(80, 28)
 			_style_outline_button(btn_prom)
 			btn_prom.pressed.connect(func():
 				sch_service.promote_waitlist_atomic(s_uuid_val)
+				_publish_session_sync()
 				_render_session_assistant_view(session_data)
 			)
 			wrow.add_child(btn_prom)
@@ -3393,6 +3558,7 @@ func _render_session_assistant_view(session_data: Dictionary) -> void:
 			_style_outline_button(btn_wrem)
 			btn_wrem.pressed.connect(func():
 				sch_service.remove_waitlist_participant_atomic(sess_id, s_id_val)
+				_publish_session_sync()
 				_render_session_assistant_view(session_data)
 			)
 			wrow.add_child(btn_wrem)
@@ -3437,9 +3603,7 @@ func _render_session_assistant_view(session_data: Dictionary) -> void:
 	if confirmed_list.size() > 0:
 		for s in confirmed_list:
 			var p_id_val = int(s.get("person_id"))
-			var fn = str(s.get("first_name")) if s.get("first_name") != null else ""
-			var ln = str(s.get("last_name")) if s.get("last_name") != null else ""
-			var p_name = (fn + " " + ln).strip_edges()
+			var p_name = _get_participant_display_name(s)
 			var att_st = str(s.get("attendance_status", "unmarked"))
 
 			var arow = HBoxContainer.new(); arow.add_theme_constant_override("separation", 6)
@@ -3447,7 +3611,7 @@ func _render_session_assistant_view(session_data: Dictionary) -> void:
 			var badge_icon = "⚪ "
 			if att_st == "present": badge_icon = "✅ "
 			elif att_st == "no_show": badge_icon = "❌ "
-			albl.text = badge_icon + p_name; albl.add_theme_font_size_override("font_size", 13); albl.size_flags_horizontal = SIZE_EXPAND_FILL
+			albl.text = badge_icon + p_name; albl.add_theme_font_size_override("font_size", 13); albl.add_theme_color_override("font_color", Color(0.12, 0.16, 0.22, 1.0)); albl.size_flags_horizontal = SIZE_EXPAND_FILL
 			arow.add_child(albl)
 
 			var btn_p = Button.new(); btn_p.text = "Present"; btn_p.custom_minimum_size = Vector2(65, 26)
@@ -3615,3 +3779,9 @@ class DayColumnControl extends PanelContainer:
 		st.corner_radius_top_left = 8; st.corner_radius_top_right = 8; st.corner_radius_bottom_left = 8; st.corner_radius_bottom_right = 8
 		st.content_margin_left = 6; st.content_margin_top = 8; st.content_margin_right = 6; st.content_margin_bottom = 8
 		add_theme_stylebox_override("panel", st)
+
+func _publish_session_sync() -> void:
+	if not db: return
+	var GatewaySyncScript = load("res://src/domain/sync/gateway_sync_service.gd")
+	var sync_svc = GatewaySyncScript.new(db, self)
+	sync_svc.publish_session_index()

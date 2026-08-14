@@ -8,6 +8,7 @@ const MigrationsRunnerScript = preload("res://src/infrastructure/database/migrat
 const DirectoryReadServiceScript = preload("res://src/domain/directory/directory_read_service.gd")
 const GatewaySyncScript = preload("res://src/domain/sync/gateway_sync_service.gd")
 const InboundEventProcessorScript = preload("res://src/domain/sync/inbound_event_processor.gd")
+const PublicQrSignDialogScript = preload("res://app/scenes/public_qr_sign_dialog.gd")
 
 const HomeViewScript = preload("res://app/scenes/home_view.gd")
 const DirectoryViewScript = preload("res://app/scenes/directory_view.gd")
@@ -87,7 +88,7 @@ func _ready() -> void:
 
 func _start_auto_sync() -> void:
 	_sync_timer = Timer.new()
-	_sync_timer.wait_time = 30.0
+	_sync_timer.wait_time = 3.0
 	_sync_timer.autostart = true
 	_sync_timer.one_shot = false
 	_sync_timer.timeout.connect(_on_sync_timer_tick)

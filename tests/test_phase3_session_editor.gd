@@ -178,6 +178,21 @@ func run_all_tests() -> void:
 
 	assert_true(target_fresh.size() > 0 and str(target_fresh["title"]) == "Calculus & Linear Algebra Tutoring" and int(target_fresh["session_type_id"]) == 2 and fresh_locs.size() == 3 and str(target_fresh["term_override"]) == "Fall 2026", "Test 10: Genuine application restart: reopened fresh DB and verified title, session_uuid, type_id, location_ids, and term_override across fresh context.")
 
+	# -------------------------------------------------------------
+	# 11. ATOMIC SESSION DELETION & ROLLBACK TEST
+	# -------------------------------------------------------------
+	# Test 11a: Forced rollback failure
+	var roll_del = schedules_service.delete_full_session_atomic(sess_id, "usr_person_admin_101", "Alice Admin", "op_fail_del", true)
+	var check_still_exists = db.execute("SELECT COUNT(*) as cnt FROM sessions WHERE id = ?;", [sess_id])["data"][0]["cnt"]
+	assert_true(not roll_del["success"] and check_still_exists == 1, "Test 11a: Atomic session deletion rollback verified session remained intact upon forced failure.")
+
+	# Test 11b: Successful deletion
+	var del_res = schedules_service.delete_full_session_atomic(sess_id, "usr_person_admin_101", "Alice Admin", "op_del_103")
+	var check_deleted_session = db.execute("SELECT COUNT(*) as cnt FROM sessions WHERE id = ?;", [sess_id])["data"][0]["cnt"]
+	var check_deleted_locs = db.execute("SELECT COUNT(*) as cnt FROM session_location_assignments WHERE session_id = ?;", [sess_id])["data"][0]["cnt"]
+	var check_del_outbox = db.execute("SELECT COUNT(*) as cnt FROM event_outbox WHERE event_type = 'SessionDeleted' AND aggregate_id = ?;", [sess_uuid])["data"][0]["cnt"]
+	assert_true(del_res["success"] and check_deleted_session == 0 and check_deleted_locs == 0 and check_del_outbox == 1, "Test 11b: Atomic session deletion completely removed session, cleaned junction records, and recorded SessionDeleted outbox event.")
+
 	print("==========================================================")
 	print("SUMMARY: %d / %d ASSERTIONS PASSED (100.0%%)" % [passed_assertions, total_assertions])
 	print("==========================================================")

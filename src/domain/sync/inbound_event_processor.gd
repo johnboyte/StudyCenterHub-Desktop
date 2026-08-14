@@ -117,8 +117,16 @@ func _process_portal_registration(event_id: int, payload: Dictionary) -> void:
 
 	var val_res = PersonRegistrationValidatorScript.validate_registration(payload)
 	if not val_res["is_valid"]:
-		print("[Processor] Portal registration validation failed for event ", event_id, ": ", val_res["errors"])
-		db.execute("UPDATE inbound_event_queue SET processed = 1 WHERE id = ?;", [event_id])
+		var err_msg = "Validation failed: " + ", ".join(val_res["errors"])
+		print("[Processor] Portal registration validation failed for event ", event_id, ": ", err_msg)
+		db.execute("ALTER TABLE inbound_event_queue ADD COLUMN status TEXT DEFAULT 'pending';")
+		db.execute("ALTER TABLE inbound_event_queue ADD COLUMN result_json TEXT DEFAULT NULL;")
+		var fail_res = {
+			"status": "registration_failed",
+			"error": err_msg,
+			"message": err_msg
+		}
+		db.execute("UPDATE inbound_event_queue SET processed = 1, status = 'registration_failed', result_json = ? WHERE id = ?;", [JSON.stringify(fail_res), event_id])
 		return
 
 	var norm = val_res["normalized_data"]
@@ -310,7 +318,13 @@ func _process_portal_checkin(event_id: int, payload: Dictionary) -> void:
 			const AttendanceServiceScript = preload("res://src/domain/attendance/attendance_service.gd")
 			var att_svc = AttendanceServiceScript.new(db)
 			var att_res = att_svc.record_check_in_atomic(person, "Public Portal", "web_portal", null, "Study Center Daily")
-			if att_res["success"]:
+			if att_res.get("already_checked_in", false) == true:
+				result = {
+					"status": "already_checked_in",
+					"first_name": first_name,
+					"message": "You're already checked in today. Glad you're here, " + first_name + "!"
+				}
+			elif att_res["success"]:
 				result = {
 					"status": "checked_in",
 					"first_name": first_name,
@@ -400,6 +414,10 @@ func _process_portal_signup(event_id: int, payload: Dictionary) -> void:
 							result = {"status": "waitlisted", "first_name": first_name, "title": title, "position": pos, "message": "You're on the Waitlist for " + title + "."}
 						else:
 							result = {"status": final_st, "first_name": first_name, "title": title}
+						
+						var GatewaySyncScript = load("res://src/domain/sync/gateway_sync_service.gd")
+						var sync_svc = GatewaySyncScript.new(db, parent_node)
+						sync_svc.publish_session_index()
 					else:
 						result = {"status": "registration_failed", "message": "Registration failed: " + str(reg_res.get("error", ""))}
 
@@ -423,6 +441,10 @@ func _process_portal_cancel_signup(event_id: int, payload: Dictionary) -> void:
 			var sched_svc = SchedulesServiceScript.new(db)
 			sched_svc.remove_confirmed_and_autopromote_atomic(session_id, signup_id, "Public Portal", "Self Cancellation")
 			result = {"status": "cancelled", "first_name": first_name, "message": "Your registration has been cancelled."}
+			
+			var GatewaySyncScript = load("res://src/domain/sync/gateway_sync_service.gd")
+			var sync_svc = GatewaySyncScript.new(db, parent_node)
+			sync_svc.publish_session_index()
 		else:
 			result = {"status": "not_registered", "message": "No active registration found to cancel."}
 	else:

@@ -1557,8 +1557,8 @@ if ($uri === '/public' || $uri === '/public/' || $uri === '/public-returning') {
         <section id="screenSuccess" class="card hidden">
             <div class="success-hero">
                 <div class="success-icon">🎉</div>
-                <h2 class="page-title" id="successTitle">Registration Complete!</h2>
-                <p class="page-desc" id="successDesc">Welcome! Your Real Life House member profile has been created.</p>
+                <h2 class="page-title" id="successTitle">You’re Registered and Checked In!</h2>
+                <p class="page-desc" id="successDesc">Welcome to Real Life House! Your registration and today’s check-in are confirmed.</p>
             </div>
 
             <div class="btn-stack">
@@ -1736,8 +1736,7 @@ if ($uri === '/public' || $uri === '/public/' || $uri === '/public-returning') {
                     statusBadgeHtml = '<span style="background:#f1f5f9; color:#64748b; font-size:12px; font-weight:700; padding:4px 8px; border-radius:6px;">Registration Closed</span>';
                     actionBtnHtml = '<button class="btn btn-secondary" disabled style="height:44px; font-size:14px; opacity:0.6;">Closed</button>';
                 } else if (!isFull) {
-                    const spotText = (rem === 1) ? '1 spot remaining' : (rem + ' spots remaining');
-                    statusBadgeHtml = '<span style="background:#dbeafe; color:#1e40af; font-size:12px; font-weight:700; padding:4px 8px; border-radius:6px;">' + spotText + '</span>';
+                    statusBadgeHtml = '<span style="background:#dbeafe; color:#1e40af; font-size:12px; font-weight:700; padding:4px 8px; border-radius:6px;">' + rem + ' spots remaining</span>';
                     actionBtnHtml = '<button class="btn btn-primary" style="height:44px; font-size:14px;" onclick="submitSessionAction(' + sid + ', \'signup\')">Sign Up 🚀</button>';
                 } else if (isFull && waitEnabled) {
                     statusBadgeHtml = '<span style="background:#fef3c7; color:#b45309; font-size:12px; font-weight:700; padding:4px 8px; border-radius:6px;">Full — Waitlist Available</span>';
@@ -2456,11 +2455,11 @@ if ($uri === '/public' || $uri === '/public/' || $uri === '/public-returning') {
             document.getElementById('progressBarContainer').style.display = 'none';
 
             if (isCheckedIn) {
-                document.getElementById('successTitle').textContent = 'Registration Complete & Checked In!';
-                document.getElementById('successDesc').textContent = 'Welcome, ' + firstName + '! Your Real Life House member profile has been created and today’s check-in is confirmed.';
+                document.getElementById('successTitle').textContent = 'You’re Registered and Checked In!';
+                document.getElementById('successDesc').textContent = 'Welcome, ' + firstName + '! Your registration and today’s check-in are confirmed.';
             } else {
-                document.getElementById('successTitle').textContent = 'Registration Complete!';
-                document.getElementById('successDesc').textContent = 'Welcome, ' + firstName + '! Your Real Life House member profile has been created.';
+                document.getElementById('successTitle').textContent = 'You’re Registered!';
+                document.getElementById('successDesc').textContent = 'Welcome, ' + firstName + '! Your registration has been received and added to our system.';
             }
         }
 

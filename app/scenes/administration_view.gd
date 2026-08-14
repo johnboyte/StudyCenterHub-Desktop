@@ -116,7 +116,8 @@ func _ready() -> void:
 		btn_pub_qr.add_theme_font_size_override("font_size", 14)
 		tab_hbox.add_child(btn_pub_qr)
 		btn_pub_qr.pressed.connect(func():
-			var dlg = PublicQrSignDialogScript.new(self)
+			var QrDlgScript = load("res://app/scenes/public_qr_sign_dialog.gd")
+			var dlg = QrDlgScript.new(self)
 			dlg.show_dialog()
 		)
 

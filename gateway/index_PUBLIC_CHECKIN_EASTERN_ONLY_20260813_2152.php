@@ -137,14 +137,7 @@ try {
             masked_phone TEXT NOT NULL,
             human_id TEXT NOT NULL,
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-        );");
-
-    $pdo->exec("CREATE TABLE IF NOT EXISTS today_attendance_index (
-            human_id TEXT PRIMARY KEY,
-            phone_e164 TEXT,
-            attendance_date TEXT NOT NULL,
-            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-        );");
+        )");
     } catch (PDOException $e) {}
 
     try {
@@ -421,7 +414,6 @@ if (($uri === '/api/v1/public/sessions' || $uri === '/public/api/sessions') && (
         // Overlay pending (unprocessed) signup & cancellation events from inbound_event_queue
         $q_stmt = $pdo->prepare("SELECT payload_json, event_type FROM inbound_event_queue WHERE (event_type = 'portal.signup' OR event_type = 'portal.cancel_signup') AND processed = 0 ORDER BY id ASC");
         $q_stmt->execute();
-        $pending_increments = [];
         foreach ($q_stmt->fetchAll(PDO::FETCH_ASSOC) as $q_row) {
             $p_json = json_decode($q_row['payload_json'] ?? '{}', true);
             if (is_array($p_json)) {
@@ -431,14 +423,8 @@ if (($uri === '/api/v1/public/sessions' || $uri === '/public/api/sessions') && (
                     if ($ev_sid) {
                         if ($q_row['event_type'] === 'portal.cancel_signup') {
                             unset($member_signups[$ev_sid]);
-                            if (isset($pending_increments[$ev_sid])) {
-                                unset($pending_increments[$ev_sid]);
-                            }
                         } else if ($q_row['event_type'] === 'portal.signup') {
-                            if (!isset($member_signups[$ev_sid]) || $member_signups[$ev_sid] !== 'confirmed') {
-                                $member_signups[$ev_sid] = 'confirmed';
-                                $pending_increments[$ev_sid] = ($pending_increments[$ev_sid] ?? 0) + 1;
-                            }
+                            $member_signups[$ev_sid] = 'confirmed';
                         }
                     }
                 }
@@ -453,7 +439,7 @@ if (($uri === '/api/v1/public/sessions' || $uri === '/public/api/sessions') && (
     foreach ($sessions as $s) {
         $sid = strval($s['session_id']);
         $cap = intval($s['max_capacity']);
-        $conf = intval($s['confirmed_count']) + intval($pending_increments[$sid] ?? 0);
+        $conf = intval($s['confirmed_count']);
         $rem = max(0, $cap - $conf);
 
         $m_status = $member_signups[$sid] ?? null;
@@ -547,40 +533,6 @@ if ($uri === '/api/v1/sync/directory-index' && $method === 'POST') {
     exit;
 }
 
-// Route: Today Attendance Index Sync (Desktop -> Cloud Relay Snapshot)
-if ($uri === '/api/v1/sync/attendance-index' && $method === 'POST') {
-    header('Content-Type: application/json; charset=utf-8');
-    $req_key = $_SERVER['HTTP_X_SYNC_API_KEY'] ?? $_GET['sync_api_key'] ?? '';
-    if ($req_key !== $sync_api_key) {
-        http_response_code(401);
-        echo json_encode(['success' => false, 'error' => 'Unauthorized']);
-        exit;
-    }
-
-    $raw = file_get_contents('php://input');
-    $input = json_decode($raw, true);
-    $att_date = trim($input['attendance_date'] ?? current_operational_date());
-    $attendance = is_array($input) && isset($input['attendance']) ? $input['attendance'] : [];
-
-    $pdo->beginTransaction();
-    $pdo->exec("DELETE FROM today_attendance_index");
-    $stmt = $pdo->prepare("INSERT OR REPLACE INTO today_attendance_index (human_id, phone_e164, attendance_date, updated_at) VALUES (?, ?, ?, datetime('now'))");
-
-    $count = 0;
-    foreach ($attendance as $item) {
-        $hid = is_array($item) ? trim($item['human_id'] ?? '') : trim($item);
-        $phone = is_array($item) ? normalize_phone_e164_php($item['phone'] ?? $item['phone_e164'] ?? '') : '';
-        if ($hid !== '') {
-            $stmt->execute([$hid, $phone, $att_date]);
-            $count++;
-        }
-    }
-    $pdo->commit();
-
-    echo json_encode(['success' => true, 'synced_count' => $count, 'attendance_date' => $att_date]);
-    exit;
-}
-
 // Route: Public Member Phone Lookup API (Privacy Safe)
 if (($uri === '/api/v1/public/checkin/lookup' || $uri === '/public/api/checkin/lookup') && $method === 'POST') {
     header('Content-Type: application/json; charset=utf-8');
@@ -606,10 +558,17 @@ if (($uri === '/api/v1/public/checkin/lookup' || $uri === '/public/api/checkin/l
         $op_date = current_operational_date();
         $already_checked_in = false;
 
-        $chk_stmt = $pdo->prepare("SELECT 1 FROM today_attendance_index WHERE (human_id = ? OR (phone_e164 = ? AND phone_e164 != '')) AND attendance_date = ? LIMIT 1");
-        $chk_stmt->execute([$human_id, $e164, $op_date]);
-        if ($chk_stmt->fetch()) {
-            $already_checked_in = true;
+        $chk_stmt = $pdo->prepare("SELECT status, received_at FROM inbound_event_queue WHERE (event_type = 'portal.checkin' OR event_type = 'scanner.checkin' OR event_type = 'portal.registration') AND payload_json LIKE ? ORDER BY id DESC LIMIT 20");
+        $chk_stmt->execute(['%' . $human_id . '%']);
+        $chk_rows = $chk_stmt->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($chk_rows as $chk_row) {
+            $ev_date = get_eastern_date_from_utc_string($chk_row['received_at'] ?? '');
+            if ($ev_date === $op_date) {
+                if (in_array($chk_row['status'], ['processed', 'checked_in', 'already_checked_in', 'registered_and_checked_in', 'registered_already_checked_in', 'ok', 'success'])) {
+                    $already_checked_in = true;
+                    break;
+                }
+            }
         }
 
         echo json_encode([
@@ -762,10 +721,17 @@ if (($uri === '/api/v1/public/checkin' || $uri === '/public/api/checkin') && $me
     $already_checked_in = false;
 
     if (!empty($human_id)) {
-        $chk_stmt = $pdo->prepare("SELECT 1 FROM today_attendance_index WHERE (human_id = ? OR (phone_e164 = ? AND phone_e164 != '')) AND attendance_date = ? LIMIT 1");
-        $chk_stmt->execute([$human_id, $e164, $op_date]);
-        if ($chk_stmt->fetch()) {
-            $already_checked_in = true;
+        $chk_stmt = $pdo->prepare("SELECT status, received_at FROM inbound_event_queue WHERE (event_type = 'portal.checkin' OR event_type = 'scanner.checkin') AND payload_json LIKE ? ORDER BY id DESC LIMIT 20");
+        $chk_stmt->execute(['%' . $human_id . '%']);
+        $chk_rows = $chk_stmt->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($chk_rows as $chk_row) {
+            $ev_date = get_eastern_date_from_utc_string($chk_row['received_at'] ?? '');
+            if ($ev_date === $op_date) {
+                if (in_array($chk_row['status'], ['processed', 'checked_in', 'already_checked_in', 'ok', 'success'])) {
+                    $already_checked_in = true;
+                    break;
+                }
+            }
         }
     }
 
@@ -1557,8 +1523,8 @@ if ($uri === '/public' || $uri === '/public/' || $uri === '/public-returning') {
         <section id="screenSuccess" class="card hidden">
             <div class="success-hero">
                 <div class="success-icon">🎉</div>
-                <h2 class="page-title" id="successTitle">Registration Complete!</h2>
-                <p class="page-desc" id="successDesc">Welcome! Your Real Life House member profile has been created.</p>
+                <h2 class="page-title" id="successTitle">You’re Registered and Checked In!</h2>
+                <p class="page-desc" id="successDesc">Welcome to Real Life House! Your registration and today’s check-in are confirmed.</p>
             </div>
 
             <div class="btn-stack">
@@ -1736,8 +1702,7 @@ if ($uri === '/public' || $uri === '/public/' || $uri === '/public-returning') {
                     statusBadgeHtml = '<span style="background:#f1f5f9; color:#64748b; font-size:12px; font-weight:700; padding:4px 8px; border-radius:6px;">Registration Closed</span>';
                     actionBtnHtml = '<button class="btn btn-secondary" disabled style="height:44px; font-size:14px; opacity:0.6;">Closed</button>';
                 } else if (!isFull) {
-                    const spotText = (rem === 1) ? '1 spot remaining' : (rem + ' spots remaining');
-                    statusBadgeHtml = '<span style="background:#dbeafe; color:#1e40af; font-size:12px; font-weight:700; padding:4px 8px; border-radius:6px;">' + spotText + '</span>';
+                    statusBadgeHtml = '<span style="background:#dbeafe; color:#1e40af; font-size:12px; font-weight:700; padding:4px 8px; border-radius:6px;">' + rem + ' spots remaining</span>';
                     actionBtnHtml = '<button class="btn btn-primary" style="height:44px; font-size:14px;" onclick="submitSessionAction(' + sid + ', \'signup\')">Sign Up 🚀</button>';
                 } else if (isFull && waitEnabled) {
                     statusBadgeHtml = '<span style="background:#fef3c7; color:#b45309; font-size:12px; font-weight:700; padding:4px 8px; border-radius:6px;">Full — Waitlist Available</span>';
@@ -2456,11 +2421,11 @@ if ($uri === '/public' || $uri === '/public/' || $uri === '/public-returning') {
             document.getElementById('progressBarContainer').style.display = 'none';
 
             if (isCheckedIn) {
-                document.getElementById('successTitle').textContent = 'Registration Complete & Checked In!';
-                document.getElementById('successDesc').textContent = 'Welcome, ' + firstName + '! Your Real Life House member profile has been created and today’s check-in is confirmed.';
+                document.getElementById('successTitle').textContent = 'You’re Registered and Checked In!';
+                document.getElementById('successDesc').textContent = 'Welcome, ' + firstName + '! Your registration and today’s check-in are confirmed.';
             } else {
-                document.getElementById('successTitle').textContent = 'Registration Complete!';
-                document.getElementById('successDesc').textContent = 'Welcome, ' + firstName + '! Your Real Life House member profile has been created.';
+                document.getElementById('successTitle').textContent = 'You’re Registered!';
+                document.getElementById('successDesc').textContent = 'Welcome, ' + firstName + '! Your registration has been received and added to our system.';
             }
         }
 

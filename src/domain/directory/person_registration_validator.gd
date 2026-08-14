@@ -231,8 +231,8 @@ static func validate_registration(data: Dictionary, relative_date_dict: Dictiona
 		var age = calculate_age(iso_dob, relative_date_dict)
 		normalized["calculated_age"] = age
 		if age >= 0 and age < 18:
-			var em_name = str(data.get("emergency_contact_name", "")).strip_edges()
-			var em_phone = str(data.get("emergency_contact_phone", "")).strip_edges()
+			var em_name = str(data.get("emergency_contact_name", data.get("emergencyContactName", ""))).strip_edges()
+			var em_phone = str(data.get("emergency_contact_phone", data.get("emergencyContactPhone", ""))).strip_edges()
 			
 			if em_name == "":
 				errors.append("Emergency Contact Name is required for minor members under 18.")

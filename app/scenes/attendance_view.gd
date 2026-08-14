@@ -99,13 +99,23 @@ func _ready() -> void:
 	_refresh_dashboard()
 
 	var top_bar = get_node_or_null("MarginContainer/MainVBox/TopBarHBox")
-	if top_bar:
+	if top_bar and not top_bar.has_node("BtnRemoteQrSign"):
 		var btn_pub_qr = Button.new()
-		btn_pub_qr.text = "🏛️ Remote Sign"
-		btn_pub_qr.custom_minimum_size = Vector2(150, 36)
+		btn_pub_qr.name = "BtnRemoteQrSign"
+		btn_pub_qr.text = "🏛️ Remote Functions QR"
+		btn_pub_qr.custom_minimum_size = Vector2(170, 36)
 		btn_pub_qr.add_theme_font_size_override("font_size", 14)
+		var qr_st = StyleBoxFlat.new()
+		qr_st.bg_color = Color(0.18, 0.49, 0.20, 1.0)
+		qr_st.corner_radius_top_left = 6; qr_st.corner_radius_top_right = 6; qr_st.corner_radius_bottom_left = 6; qr_st.corner_radius_bottom_right = 6
+		qr_st.content_margin_left = 12; qr_st.content_margin_right = 12
+		btn_pub_qr.add_theme_stylebox_override("normal", qr_st)
+		btn_pub_qr.add_theme_stylebox_override("hover", qr_st)
+		btn_pub_qr.add_theme_stylebox_override("pressed", qr_st)
+		btn_pub_qr.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
 		btn_pub_qr.pressed.connect(func():
-			var dlg = PublicQrSignDialogScript.new(self)
+			var QrDlgScript = load("res://app/scenes/public_qr_sign_dialog.gd")
+			var dlg = QrDlgScript.new(self)
 			dlg.show_dialog()
 		)
 		top_bar.add_child(btn_pub_qr)

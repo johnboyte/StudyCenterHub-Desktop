@@ -703,6 +703,124 @@ func update_full_session_atomic(session_id: int, title: String, session_type_id_
 
 	return res_dict
 
+func delete_full_session_atomic(session_id: int, actor_id: String = "usr_admin_master", actor_name: String = "Administrator", operation_uuid: String = "", force_fail_step: bool = false) -> Dictionary:
+	var auth = authorize_staff_mutation(actor_id, "CAP_HOURS_EDIT")
+	if not auth["authorized"]: return {"success": false, "error": auth["error"]}
+
+	# Verify target session exists and fetch current metadata
+	var curr_res = db.execute("SELECT session_uuid, title, date_text, start_time FROM sessions WHERE id = ?;", [session_id])
+	if not curr_res["success"] or curr_res["data"].size() == 0:
+		return {"success": false, "error": "Target session ID %d not found." % session_id}
+
+	var curr = curr_res["data"][0]
+	var session_uuid = str(curr["session_uuid"])
+	var session_title = str(curr["title"])
+
+	# Check Operation-Level Idempotency
+	if operation_uuid != "":
+		var idemp_check = db.execute("SELECT result_json FROM operation_idempotency_log WHERE operation_uuid = ?;", [operation_uuid])
+		if idemp_check["success"] and idemp_check["data"].size() > 0:
+			var cached_res = JSON.parse_string(idemp_check["data"][0]["result_json"])
+			if cached_res is Dictionary:
+				cached_res["already_processed"] = true
+				return cached_res
+
+	var stmts = []
+
+	# 1. Unlink schedule_entries that reference this session
+	stmts.append({
+		"sql": "UPDATE schedule_entries SET session_id = NULL WHERE session_id = ?;",
+		"args": [session_id]
+	})
+
+	# 2. Delete location assignments
+	stmts.append({
+		"sql": "DELETE FROM session_location_assignments WHERE session_id = ?;",
+		"args": [session_id]
+	})
+
+	# 3. Delete session signups
+	stmts.append({
+		"sql": "DELETE FROM session_signups WHERE session_id = ?;",
+		"args": [session_id]
+	})
+
+	# 4. Delete pathway program sessions links
+	stmts.append({
+		"sql": "DELETE FROM pathway_program_sessions WHERE session_id = ?;",
+		"args": [session_id]
+	})
+
+	# 5. Delete scheduled communications for session
+	stmts.append({
+		"sql": "DELETE FROM scheduled_communications WHERE session_id = ?;",
+		"args": [session_id]
+	})
+
+	# 6. Delete attendance log entries for session
+	stmts.append({
+		"sql": "DELETE FROM attendance_log WHERE session_id = ?;",
+		"args": [session_id]
+	})
+
+	# 7. Delete session audit log
+	stmts.append({
+		"sql": "DELETE FROM session_audit_log WHERE session_id = ?;",
+		"args": [session_id]
+	})
+
+	# 8. Delete session record itself
+	stmts.append({
+		"sql": "DELETE FROM sessions WHERE id = ?;",
+		"args": [session_id]
+	})
+
+	# 9. Outbox Event (SessionDeleted)
+	var event_uuid = "evt_" + _generate_uuid()
+	var device_uuid = "dev_macbook_primary_node"
+	var timestamp = Time.get_datetime_string_from_system()
+
+	var payload_dict = {
+		"event_uuid": event_uuid,
+		"event_type": "SessionDeleted",
+		"operation_uuid": operation_uuid,
+		"session_uuid": session_uuid,
+		"session_id": session_id,
+		"title": session_title,
+		"actor_id": actor_id,
+		"device_uuid": device_uuid,
+		"timestamp": timestamp
+	}
+	var payload_json = JSON.stringify(payload_dict)
+
+	stmts.append({
+		"sql": "INSERT INTO event_outbox (event_uuid, event_type, aggregate_type, aggregate_id, payload_json, device_uuid, status) VALUES (?, 'SessionDeleted', 'Sessions', ?, ?, ?, 'pending');",
+		"args": [event_uuid, session_uuid, payload_json, device_uuid]
+	})
+
+	var res_dict = {"success": true, "error": "", "session_id": session_id, "session_uuid": session_uuid, "event_uuid": event_uuid}
+
+	if operation_uuid != "":
+		stmts.append({
+			"sql": "INSERT INTO operation_idempotency_log (operation_uuid, operation_type, session_id, result_json) VALUES (?, 'SessionDeleted', ?, ?);",
+			"args": [operation_uuid, session_id, JSON.stringify(res_dict)]
+		})
+
+	# Test Rollback Failure Injection Flag
+	if force_fail_step:
+		stmts.append({
+			"sql": "INSERT INTO non_existent_table_forced_rollback_trigger (id) VALUES (1);",
+			"args": []
+		})
+
+	# Execute ALL statements in ONE atomic local SQLite transaction
+	var tx_res = db.execute_transaction(stmts)
+	if not tx_res["success"]: return {"success": false, "error": tx_res["error"]}
+
+	_publish_session_sync()
+
+	return res_dict
+
 func assign_locations_to_session_atomic(session_id: int, location_ids: Array) -> Dictionary:
 	if config_service and location_ids.size() > 0:
 		var val_res = config_service.validate_location_selection(location_ids)
@@ -997,6 +1115,7 @@ func remove_waitlist_participant_atomic(session_id: int, signup_id_to_remove: in
 			})
 		db.execute_transaction(reindex_stmts)
 
+	_publish_session_sync()
 	return tx_res
 
 func promote_waitlist_atomic(signup_uuid: String, actor_id: String = "usr_admin_master") -> Dictionary:
@@ -1004,7 +1123,10 @@ func promote_waitlist_atomic(signup_uuid: String, actor_id: String = "usr_admin_
 		"sql": "UPDATE session_signups SET signup_status = 'confirmed', promoted_at = datetime('now'), promoted_by = ? WHERE signup_uuid = ?;",
 		"args": [actor_id, signup_uuid]
 	}
-	return db.execute_transaction([stmt1])
+	var res = db.execute_transaction([stmt1])
+	if res["success"]:
+		_publish_session_sync()
+	return res
 
 func register_participant_atomic(session_id: int, person_id: int, actor_id: String = "usr_admin_master") -> Dictionary:
 	var s_res = db.execute("SELECT max_capacity, signup_required, limit_signups FROM sessions WHERE id = ?;", [session_id])
@@ -1026,17 +1148,29 @@ func register_participant_atomic(session_id: int, person_id: int, actor_id: Stri
 		var wait_cnt_res = db.execute("SELECT COUNT(*) as cnt FROM session_signups WHERE session_id = ? AND signup_status = 'waitlist';", [session_id])
 		pos = (wait_cnt_res["data"][0]["cnt"] if wait_cnt_res["success"] else 0) + 1
 
+	var ex_row = db.execute("SELECT id, signup_uuid FROM session_signups WHERE session_id = ? AND person_id = ? AND signup_status NOT IN ('confirmed', 'waitlist') ORDER BY id DESC LIMIT 1;", [session_id, person_id])
 	var signup_uuid = "su_" + _generate_uuid()
-	var stmt = {
-		"sql": "INSERT INTO session_signups (signup_uuid, session_id, person_id, signup_status, position, registered_at) VALUES (?, ?, ?, ?, ?, datetime('now'));",
-		"args": [signup_uuid, session_id, person_id, new_status, pos]
-	}
+	var stmt: Dictionary
+	if ex_row["success"] and ex_row["data"].size() > 0:
+		var existing_id = int(ex_row["data"][0]["id"])
+		if str(ex_row["data"][0]["signup_uuid"]) != "":
+			signup_uuid = str(ex_row["data"][0]["signup_uuid"])
+		stmt = {
+			"sql": "UPDATE session_signups SET signup_status = ?, position = ?, registered_at = datetime('now'), removed_at = NULL, removed_by = NULL, removal_reason = NULL WHERE id = ?;",
+			"args": [new_status, pos, existing_id]
+		}
+	else:
+		stmt = {
+			"sql": "INSERT INTO session_signups (signup_uuid, session_id, person_id, signup_status, position, registered_at) VALUES (?, ?, ?, ?, ?, datetime('now'));",
+			"args": [signup_uuid, session_id, person_id, new_status, pos]
+		}
 	var outbox_stmt = {
 		"sql": "INSERT INTO event_outbox (event_uuid, event_type, aggregate_type, aggregate_id, payload_json, device_uuid, status) VALUES (?, 'ParticipantRegistered', 'Signups', ?, ?, 'dev_macbook_primary_node', 'pending');",
 		"args": ["evt_" + _generate_uuid(), signup_uuid, JSON.stringify({"session_id": session_id, "person_id": person_id, "signup_status": new_status})]
 	}
 	var tx_res = db.execute_transaction([stmt, outbox_stmt])
 	if not tx_res["success"]: return tx_res
+	_publish_session_sync()
 	return {"success": true, "error": "", "signup_uuid": signup_uuid, "status": new_status, "position": pos}
 
 func remove_confirmed_and_autopromote_atomic(session_id: int, signup_id_to_remove: int, actor_id: String = "usr_admin_master", actor_name: String = "", operation_uuid: String = "", force_fail_step: bool = false, custom_timestamp: String = "") -> Dictionary:
@@ -1061,6 +1195,8 @@ func remove_confirmed_and_autopromote_atomic(session_id: int, signup_id_to_remov
 
 	var tx_res = db.execute_transaction(stmts)
 	tx_res["auto_promoted"] = auto_promoted
+	if tx_res["success"]:
+		_publish_session_sync()
 	return tx_res
 
 func remove_multiple_confirmed_and_autopromote_atomic(session_id: int, signup_ids_to_remove: Array, actor_id: String = "usr_admin_master", actor_name: String = "", force_fail_step: bool = false, custom_timestamp: String = "", operation_uuid: String = "") -> Dictionary:
@@ -1108,9 +1244,15 @@ func remove_multiple_confirmed_and_autopromote_atomic(session_id: int, signup_id
 		stmts.append({"sql": "INSERT INTO non_existent_table_forced_rollback_trigger (id) VALUES (1);", "args": []})
 
 	var tx_res = db.execute_transaction(stmts)
-	res_dict["success"] = tx_res["success"]
-	if not tx_res["success"]: res_dict["error"] = tx_res["error"]
+	if tx_res["success"]:
+		_publish_session_sync()
 	return res_dict
+
+func _publish_session_sync() -> void:
+	if not db: return
+	const GatewaySyncScript = preload("res://src/domain/sync/gateway_sync_service.gd")
+	var sync_svc = GatewaySyncScript.new(db, null)
+	sync_svc.publish_session_index()
 
 func reorder_waitlist_atomic(session_id: int, ordered_signup_ids: Array) -> Dictionary:
 	var stmts = []

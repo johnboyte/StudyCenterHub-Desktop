@@ -1736,8 +1736,7 @@ if ($uri === '/public' || $uri === '/public/' || $uri === '/public-returning') {
                     statusBadgeHtml = '<span style="background:#f1f5f9; color:#64748b; font-size:12px; font-weight:700; padding:4px 8px; border-radius:6px;">Registration Closed</span>';
                     actionBtnHtml = '<button class="btn btn-secondary" disabled style="height:44px; font-size:14px; opacity:0.6;">Closed</button>';
                 } else if (!isFull) {
-                    const spotText = (rem === 1) ? '1 spot remaining' : (rem + ' spots remaining');
-                    statusBadgeHtml = '<span style="background:#dbeafe; color:#1e40af; font-size:12px; font-weight:700; padding:4px 8px; border-radius:6px;">' + spotText + '</span>';
+                    statusBadgeHtml = '<span style="background:#dbeafe; color:#1e40af; font-size:12px; font-weight:700; padding:4px 8px; border-radius:6px;">' + rem + ' spots remaining</span>';
                     actionBtnHtml = '<button class="btn btn-primary" style="height:44px; font-size:14px;" onclick="submitSessionAction(' + sid + ', \'signup\')">Sign Up 🚀</button>';
                 } else if (isFull && waitEnabled) {
                     statusBadgeHtml = '<span style="background:#fef3c7; color:#b45309; font-size:12px; font-weight:700; padding:4px 8px; border-radius:6px;">Full — Waitlist Available</span>';

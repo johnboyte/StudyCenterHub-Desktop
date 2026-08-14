@@ -134,14 +134,63 @@ func _push_acknowledgements(callback: Callable, inserted_count: int) -> void:
 		
 	http_client.request_completed.connect(func(_result: int, response_code: int, _r_headers: PackedStringArray, _body_bytes: PackedByteArray):
 		publish_directory_index()
+		publish_today_attendance_index()
 		if response_code == 200:
 			callback.call({"success": true, "inserted_count": inserted_count, "ack_count": event_ids.size()})
 		else:
 			callback.call({"success": true, "inserted_count": inserted_count, "error": "Pull complete, ack response failed: " + str(response_code)})
 	, CONNECT_ONE_SHOT)
 
+func publish_today_attendance_index(callback: Callable = Callable()) -> void:
+	var today_date = Time.get_date_string_from_system()
+	var res = db.execute("""
+		SELECT DISTINCT al.human_id, p.phone
+		FROM attendance_log al
+		LEFT JOIN people p ON p.id = al.person_id
+		WHERE al.check_in_date = ?;
+	""", [today_date])
+	var attendance = []
+	if res["success"]:
+		for row in res["data"]:
+			var hid = String(row.get("human_id", ""))
+			var ph = String(row.get("phone", "")) if row.get("phone") != null else ""
+			if hid != "":
+				attendance.append({
+					"human_id": hid,
+					"phone_e164": ph
+				})
+
+	var gateway_url = get_gateway_url()
+	var api_key = get_sync_api_key()
+	var url = gateway_url + "/api/v1/sync/attendance-index"
+	var headers = [
+		"Content-Type: application/json",
+		"x-sync-api-key: " + api_key
+	]
+	var body = JSON.stringify({
+		"attendance_date": today_date,
+		"attendance": attendance
+	})
+
+	var req = HTTPRequest.new()
+	if parent_node and parent_node.is_inside_tree():
+		parent_node.add_child(req)
+		req.request_completed.connect(func(_res: int, resp_code: int, _h: PackedStringArray, _b: PackedByteArray):
+			req.queue_free()
+			if callback.is_valid():
+				callback.call({"success": resp_code == 200, "synced_count": attendance.size()})
+		, CONNECT_ONE_SHOT)
+		req.request(url, headers, HTTPClient.METHOD_POST, body)
+	else:
+		if callback.is_valid():
+			callback.call({"success": false, "error": "Parent node not in tree"})
+
 func publish_directory_index(callback: Callable = Callable()) -> void:
-	var res = db.execute("SELECT first_name, phone, human_id FROM people WHERE status = 'active';")
+	var res = db.execute("""
+		SELECT p.first_name, p.phone, p.human_id,
+		       (SELECT MAX(al.check_in_date) FROM attendance_log al WHERE al.person_id = p.id) as last_checkin_date
+		FROM people p WHERE p.status = 'active';
+	""")
 	var members = []
 	if res["success"]:
 		members = res["data"]
@@ -225,14 +274,17 @@ func publish_session_index(callback: Callable = Callable()) -> void:
 	var body = JSON.stringify({ "sessions": sessions, "signups": signups })
 
 	var req = HTTPRequest.new()
-	if parent_node:
+	if parent_node and parent_node.is_inside_tree():
 		parent_node.add_child(req)
-	req.request_completed.connect(func(_res: int, resp_code: int, _h: PackedStringArray, _b: PackedByteArray):
-		req.queue_free()
+		req.request_completed.connect(func(_res: int, resp_code: int, _h: PackedStringArray, _b: PackedByteArray):
+			req.queue_free()
+			if callback.is_valid():
+				callback.call({"success": resp_code == 200})
+		, CONNECT_ONE_SHOT)
+		req.request(url, headers, HTTPClient.METHOD_POST, body)
+	else:
 		if callback.is_valid():
-			callback.call({"success": resp_code == 200})
-	, CONNECT_ONE_SHOT)
-	req.request(url, headers, HTTPClient.METHOD_POST, body)
+			callback.call({"success": false, "error": "Parent node not in tree"})
 
 func push_acknowledgements_now(callback: Callable = Callable()) -> void:
 	_push_acknowledgements(func(res: Dictionary):

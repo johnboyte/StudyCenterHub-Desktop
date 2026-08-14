@@ -23,6 +23,23 @@ func record_check_in_atomic(person: Dictionary, method: String = "Manual", devic
 	var check_in_date = Time.get_date_string_from_system()
 	var check_in_time = Time.get_time_string_from_system()
 	
+	# ATOMIC DUPLICATE CHECK: If member is already checked in today, do not log a second attendance row
+	if person_id > 0:
+		var dup_chk = db.execute("SELECT id, checkin_uuid FROM attendance_log WHERE person_id = ? AND check_in_date = ? LIMIT 1;", [person_id, check_in_date])
+		if dup_chk["success"] and dup_chk["data"].size() > 0:
+			var existing_id = int(dup_chk["data"][0]["id"])
+			var existing_uuid = str(dup_chk["data"][0]["checkin_uuid"])
+			var end_time_usec = Time.get_ticks_usec()
+			var elapsed_ms = (end_time_usec - start_time_usec) / 1000.0
+			return {
+				"success": true,
+				"already_checked_in": true,
+				"checkin_id": existing_id,
+				"checkin_uuid": existing_uuid,
+				"elapsed_ms": elapsed_ms,
+				"message": "Member is already checked in today."
+			}
+	
 	var payload_dict = {
 		"event_uuid": event_uuid,
 		"event_type": "CheckInRecorded",
