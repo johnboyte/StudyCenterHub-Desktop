@@ -1130,7 +1130,7 @@ func _render_shifts_tab() -> void:
 	if active_shift_view_mode == "board":
 		_render_shift_cards(main_panel, hours_data)
 	else:
-		_render_shift_table(main_panel)
+		_render_shift_table(main_panel, hours_data)
 
 	vbox.add_child(main_panel)
 	content_card.add_child(vbox)
@@ -2114,7 +2114,20 @@ func _render_shift_cards(container: PanelContainer, hours_data: Dictionary) -> v
 
 # ==================== TABLE VIEW RENDERER ====================
 
-func _render_shift_table(container: PanelContainer) -> void:
+func _get_weekly_hours_data() -> Dictionary:
+	var hours_data = {}
+	if not sch_service and db:
+		sch_service = SchedulesServiceScript.new(db)
+	if sch_service:
+		var open_hours = sch_service.get_open_hours()
+		for h in open_hours:
+			hours_data[str(h.get("day_of_week"))] = h
+	return hours_data
+
+func _render_shift_table(container: PanelContainer, hours_data: Dictionary = {}) -> void:
+	if hours_data.is_empty():
+		hours_data = _get_weekly_hours_data()
+
 	var scroll = ScrollContainer.new(); scroll.size_flags_horizontal = SIZE_EXPAND_FILL; scroll.size_flags_vertical = SIZE_EXPAND_FILL
 	var tbl_card = PanelContainer.new(); tbl_card.size_flags_horizontal = SIZE_EXPAND_FILL; tbl_card.size_flags_vertical = SIZE_EXPAND_FILL
 
@@ -2134,17 +2147,27 @@ func _render_shift_table(container: PanelContainer) -> void:
 	th_panel.add_theme_stylebox_override("panel", th_st)
 
 	var th_hbox = HBoxContainer.new()
-	var h_date = Label.new(); h_date.text = "Date"; h_date.custom_minimum_size = Vector2(160, 0)
+	th_hbox.add_theme_constant_override("separation", 12)
+
+	var h_date = Label.new(); h_date.text = "Date"; h_date.custom_minimum_size = Vector2(140, 0)
 	h_date.add_theme_font_size_override("font_size", 13); h_date.add_theme_color_override("font_color", Color(0.35, 0.45, 0.55, 1.0))
 	th_hbox.add_child(h_date)
 
-	var h_hours = Label.new(); h_hours.text = "Hours"; h_hours.custom_minimum_size = Vector2(180, 0)
-	h_hours.add_theme_font_size_override("font_size", 13); h_hours.add_theme_color_override("font_color", Color(0.35, 0.45, 0.55, 1.0))
-	th_hbox.add_child(h_hours)
+	var h_center_hours = Label.new(); h_center_hours.text = "Center Hours"; h_center_hours.custom_minimum_size = Vector2(180, 0)
+	h_center_hours.add_theme_font_size_override("font_size", 13); h_center_hours.add_theme_color_override("font_color", Color(0.35, 0.45, 0.55, 1.0))
+	th_hbox.add_child(h_center_hours)
 
-	var h_staff = Label.new(); h_staff.text = "Staff & Role"; h_staff.size_flags_horizontal = SIZE_EXPAND_FILL
+	var h_staff = Label.new(); h_staff.text = "Staff / Worker"; h_staff.size_flags_horizontal = SIZE_EXPAND_FILL
 	h_staff.add_theme_font_size_override("font_size", 13); h_staff.add_theme_color_override("font_color", Color(0.35, 0.45, 0.55, 1.0))
 	th_hbox.add_child(h_staff)
+
+	var h_assigned_hours = Label.new(); h_assigned_hours.text = "Assigned Hours"; h_assigned_hours.custom_minimum_size = Vector2(160, 0)
+	h_assigned_hours.add_theme_font_size_override("font_size", 13); h_assigned_hours.add_theme_color_override("font_color", Color(0.35, 0.45, 0.55, 1.0))
+	th_hbox.add_child(h_assigned_hours)
+
+	var h_role = Label.new(); h_role.text = "Role"; h_role.custom_minimum_size = Vector2(120, 0)
+	h_role.add_theme_font_size_override("font_size", 13); h_role.add_theme_color_override("font_color", Color(0.35, 0.45, 0.55, 1.0))
+	th_hbox.add_child(h_role)
 
 	th_panel.add_child(th_hbox)
 	tvbox.add_child(th_panel)
@@ -2152,68 +2175,143 @@ func _render_shift_table(container: PanelContainer) -> void:
 	var sep1 = ColorRect.new(); sep1.custom_minimum_size = Vector2(0, 1); sep1.color = Color(0.88, 0.91, 0.95, 1.0)
 	tvbox.add_child(sep1)
 
-	var shifts = _get_all_ordered_shifts()
-	if shifts.size() > 0:
-		for i in range(shifts.size()):
-			var s = shifts[i]
-			var s_uuid = str(s.get("entry_uuid"))
-			var name = str(s.get("person_name", ""))
-			var role = str(s.get("shift_role", ""))
-			var date_str = str(s.get("shift_date", ""))
-			var start_t = str(s.get("start_time", "03:00 PM"))
-			var end_t = str(s.get("end_time", "08:00 PM"))
-			var area = str(s.get("area", ""))
+	var all_shifts = _get_all_ordered_shifts()
+	var total_rows = 0
 
-			var day_idx = get_day_index_from_date_string(date_str)
-			var day_name = DAYS_META[day_idx]["code"]
+	for meta in DAYS_META:
+		var day_idx = meta["day_idx"]
+		var day_code = meta["code"]
+		var full_day_name = meta["name"]
+		var date_s = get_date_string_for_day_index(day_idx)
+		var formatted_date = day_code + " " + _format_short_date(date_s)
 
-			var formatted_date = day_name + ", " + date_str
+		var override = get_hour_override_for_date(date_s)
+		var is_override_active = (override.size() > 0)
+		var center_hours_text = ""
+		var is_closed = false
 
-			var row_panel = PanelContainer.new()
-			row_panel.gui_input.connect(func(ev):
-				if ev is InputEventMouseButton and ev.pressed:
-					if ev.button_index == MOUSE_BUTTON_LEFT:
-						open_shift_modal(s)
-					elif ev.button_index == MOUSE_BUTTON_RIGHT:
-						_prompt_delete_shift_dialog(s)
-			)
+		if is_override_active:
+			is_closed = (int(override.get("is_closed", 0)) == 1)
+			if is_closed:
+				center_hours_text = "Closed (Override)"
+			else:
+				var s1_start = str(override.get("session1_start", "03:00 PM"))
+				var s1_end = str(override.get("session1_end", "08:00 PM"))
+				var has_split = (int(override.get("has_split_shift", 0)) == 1)
+				if has_split:
+					var s2_start = str(override.get("session2_start", "05:00 PM"))
+					var s2_end = str(override.get("session2_end", "08:00 PM"))
+					center_hours_text = s1_start + "–" + s1_end + " & " + s2_start + "–" + s2_end
+				else:
+					center_hours_text = s1_start + "–" + s1_end
+		else:
+			var day_hours = hours_data.get(full_day_name, {"open_time": "09:00 AM", "close_time": "06:00 PM", "is_closed": 0})
+			is_closed = (int(day_hours.get("is_closed", 0)) == 1)
+			var open_str = str(day_hours.get("open_time", "03:00 PM"))
+			var close_str = str(day_hours.get("close_time", "08:00 PM"))
+			if is_closed:
+				center_hours_text = "Closed"
+			else:
+				center_hours_text = open_str + "–" + close_str
 
-			var r_st = StyleBoxFlat.new()
-			r_st.bg_color = Color(1.0, 1.0, 1.0, 1.0)
-			r_st.content_margin_left = 18; r_st.content_margin_top = 12; r_st.content_margin_right = 18; r_st.content_margin_bottom = 12
-			row_panel.add_theme_stylebox_override("panel", r_st)
+		var day_shifts = []
+		for s in all_shifts:
+			var s_date = str(s.get("shift_date", ""))
+			if s_date == date_s or get_day_index_from_date_string(s_date) == day_idx:
+				day_shifts.append(s)
 
-			var r_hbox = HBoxContainer.new()
+		if is_closed:
+			_add_table_row(tvbox, formatted_date, center_hours_text, "—", "—", "—", null, true, total_rows > 0)
+			total_rows += 1
+		elif day_shifts.size() == 0:
+			_add_table_row(tvbox, formatted_date, center_hours_text, "Unassigned", "—", "—", null, false, total_rows > 0, date_s)
+			total_rows += 1
+		else:
+			for s in day_shifts:
+				var s_name = str(s.get("person_name", ""))
+				var s_role = str(s.get("shift_role", "Staff"))
+				var s_start = str(s.get("start_time", ""))
+				var s_end = str(s.get("end_time", ""))
+				var assigned_hours = s_start + "–" + s_end if (s_start != "" and s_end != "") else "—"
+				_add_table_row(tvbox, formatted_date, center_hours_text, s_name, assigned_hours, s_role, s, false, total_rows > 0)
+				total_rows += 1
 
-			var l_date = Label.new(); l_date.text = formatted_date; l_date.custom_minimum_size = Vector2(160, 0)
-			l_date.add_theme_font_size_override("font_size", 13); l_date.add_theme_color_override("font_color", Color(0.18, 0.24, 0.32, 1.0))
-			r_hbox.add_child(l_date)
-
-			var l_hours = Label.new(); l_hours.text = start_t + " - " + end_t; l_hours.custom_minimum_size = Vector2(180, 0)
-			l_hours.add_theme_font_size_override("font_size", 13); l_hours.add_theme_color_override("font_color", Color(0.35, 0.45, 0.55, 1.0))
-			r_hbox.add_child(l_hours)
-
-			var l_staff = Label.new(); l_staff.text = "👤 " + name + " (" + role + ") • " + area; l_staff.size_flags_horizontal = SIZE_EXPAND_FILL
-			l_staff.add_theme_font_size_override("font_size", 13); l_staff.add_theme_color_override("font_color", Color(0.18, 0.24, 0.32, 1.0))
-			r_hbox.add_child(l_staff)
-
-			row_panel.add_child(r_hbox)
-			tvbox.add_child(row_panel)
-
-			if i < shifts.size() - 1:
-				var r_sep = ColorRect.new(); r_sep.custom_minimum_size = Vector2(0, 1); r_sep.color = Color(0.93, 0.95, 0.97, 1.0)
-				tvbox.add_child(r_sep)
-	else:
+	if total_rows == 0:
 		var empty_panel = PanelContainer.new()
 		var ep_st = StyleBoxFlat.new(); ep_st.content_margin_left = 18; ep_st.content_margin_top = 20; ep_st.content_margin_right = 18; ep_st.content_margin_bottom = 20
 		empty_panel.add_theme_stylebox_override("panel", ep_st)
-		var empty = Label.new(); empty.text = "No staff shifts scheduled."; empty.add_theme_font_size_override("font_size", 13); empty.add_theme_color_override("font_color", Color(0.60, 0.68, 0.78, 1.0))
+		var empty = Label.new(); empty.text = "No operating hours or staff shifts scheduled."; empty.add_theme_font_size_override("font_size", 13); empty.add_theme_color_override("font_color", Color(0.60, 0.68, 0.78, 1.0))
 		empty_panel.add_child(empty)
 		tvbox.add_child(empty_panel)
 
 	tbl_card.add_child(tvbox)
 	scroll.add_child(tbl_card)
 	container.add_child(scroll)
+
+func _add_table_row(tvbox: VBoxContainer, formatted_date: String, center_hours: String, staff_name: String, assigned_hours: String, role: String, shift_data: Variant = null, is_closed: bool = false, show_top_sep: bool = false, date_str: String = "") -> void:
+	if show_top_sep:
+		var r_sep = ColorRect.new(); r_sep.custom_minimum_size = Vector2(0, 1); r_sep.color = Color(0.93, 0.95, 0.97, 1.0)
+		tvbox.add_child(r_sep)
+
+	var row_panel = PanelContainer.new()
+	if shift_data != null and shift_data is Dictionary:
+		var s = shift_data as Dictionary
+		row_panel.gui_input.connect(func(ev):
+			if ev is InputEventMouseButton and ev.pressed:
+				if ev.button_index == MOUSE_BUTTON_LEFT:
+					open_shift_modal(s)
+				elif ev.button_index == MOUSE_BUTTON_RIGHT:
+					_prompt_delete_shift_dialog(s)
+		)
+
+	var r_st = StyleBoxFlat.new()
+	r_st.bg_color = Color(0.98, 0.98, 0.99, 0.5) if is_closed else Color(1.0, 1.0, 1.0, 1.0)
+	r_st.content_margin_left = 18; r_st.content_margin_top = 12; r_st.content_margin_right = 18; r_st.content_margin_bottom = 12
+	row_panel.add_theme_stylebox_override("panel", r_st)
+
+	var r_hbox = HBoxContainer.new()
+	r_hbox.add_theme_constant_override("separation", 12)
+
+	var l_date = Label.new(); l_date.text = formatted_date; l_date.custom_minimum_size = Vector2(140, 0)
+	l_date.add_theme_font_size_override("font_size", 13)
+	l_date.add_theme_color_override("font_color", Color(0.50, 0.55, 0.62, 1.0) if is_closed else Color(0.18, 0.24, 0.32, 1.0))
+	r_hbox.add_child(l_date)
+
+	var l_chours = Label.new(); l_chours.text = center_hours; l_chours.custom_minimum_size = Vector2(180, 0)
+	l_chours.add_theme_font_size_override("font_size", 13)
+	if is_closed:
+		l_chours.add_theme_color_override("font_color", Color(0.85, 0.30, 0.20, 1.0))
+	elif center_hours.contains("Override"):
+		l_chours.add_theme_color_override("font_color", Color(0.88, 0.35, 0.21, 1.0))
+	else:
+		l_chours.add_theme_color_override("font_color", Color(0.12, 0.45, 0.22, 1.0))
+	r_hbox.add_child(l_chours)
+
+	var l_staff = Label.new(); l_staff.size_flags_horizontal = SIZE_EXPAND_FILL
+	if is_closed:
+		l_staff.text = "—"
+		l_staff.add_theme_color_override("font_color", Color(0.60, 0.65, 0.72, 1.0))
+	elif staff_name == "Unassigned":
+		l_staff.text = "Unassigned"
+		l_staff.add_theme_color_override("font_color", Color(0.72, 0.50, 0.15, 1.0))
+	else:
+		l_staff.text = "👤 " + staff_name
+		l_staff.add_theme_color_override("font_color", Color(0.12, 0.16, 0.22, 1.0))
+	l_staff.add_theme_font_size_override("font_size", 13)
+	r_hbox.add_child(l_staff)
+
+	var l_ahours = Label.new(); l_ahours.text = assigned_hours; l_ahours.custom_minimum_size = Vector2(160, 0)
+	l_ahours.add_theme_font_size_override("font_size", 13)
+	l_ahours.add_theme_color_override("font_color", Color(0.35, 0.45, 0.55, 1.0) if assigned_hours != "—" else Color(0.60, 0.65, 0.72, 1.0))
+	r_hbox.add_child(l_ahours)
+
+	var l_role = Label.new(); l_role.text = role; l_role.custom_minimum_size = Vector2(120, 0)
+	l_role.add_theme_font_size_override("font_size", 13)
+	l_role.add_theme_color_override("font_color", Color(0.20, 0.32, 0.48, 1.0) if role != "—" else Color(0.60, 0.65, 0.72, 1.0))
+	r_hbox.add_child(l_role)
+
+	row_panel.add_child(r_hbox)
+	tvbox.add_child(row_panel)
 
 func _style_circle_action_button(btn: Button) -> void:
 	var st = StyleBoxFlat.new()
