@@ -16,3 +16,15 @@ The cloud relay exists only because external services (Twilio, future webhook in
 * **Modal Dialog Close 'X' Window Rule**: All modal dialog windows (`Window`) MUST connect `dialog.close_requested` to their primary Cancel/Close button action so clicking the top-right `X` window control executes identical unsaved-changes protection and cleanup logic as clicking the bottom Cancel button.
 * **CheckBox Text High-Contrast Rule**: All `CheckBox` controls across all views MUST explicitly override `font_color` (`Color(0.12, 0.18, 0.26, 1.0)` / `#1F2937`), `font_pressed_color`, and `font_hover_color` (`#E05936`) so checkbox labels are crisp and readable on light backgrounds instead of defaulting to low-contrast white text.
 * **Automatic Staging App Launch Rule**: Always launch the staging application (`STUDYCENTERHUB_ENV=staging /Users/johnboyte/Downloads/Godot.app/Contents/MacOS/Godot --path /Users/johnboyte/Development/StudyCenterHub-Desktop/study-center-hub---desktop`) after completing any code change to the app so the user can immediately test and inspect changes in the live staging environment.
+
+### Production Deployment & Build Standards
+* **Source/Development Launch vs. Production App Bundle**:
+  - `STUDYCENTERHUB_ENV=production Godot --path ...` runs current uncompiled source directly. Useful for development/testing, but does NOT update the installed Production app bundle.
+  - `StudyCenterHub-Desktop-Production.app` in `/Users/johnboyte/Development/StudyCenterHub-Desktop/builds/` is the actual application opened by the user from Finder/Dock/Spotlight. It must be explicitly exported after verified changes.
+* **Definition of "Implemented in Production"**: Work described as "implemented in Production" MUST complete all 6 steps:
+  1. Code implementation completed
+  2. Automated tests passed
+  3. Git commit created
+  4. Git push to `origin/main` completed
+  5. Actual `StudyCenterHub-Desktop-Production.app` exported/updated using `./scripts/export_production_app.sh`
+  6. Actual exported `StudyCenterHub-Desktop-Production.app` launched for live verification
