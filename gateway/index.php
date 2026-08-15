@@ -535,8 +535,12 @@ try {
             last_name TEXT DEFAULT '',
             masked_phone TEXT DEFAULT '',
             profile_photo TEXT DEFAULT '',
+            primary_email TEXT DEFAULT '',
+            sms_consent INTEGER DEFAULT 0,
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         );");
+    try { $pdo->exec("ALTER TABLE directory_index ADD COLUMN primary_email TEXT DEFAULT ''"); } catch (Exception $e) {}
+    try { $pdo->exec("ALTER TABLE directory_index ADD COLUMN sms_consent INTEGER DEFAULT 0"); } catch (Exception $e) {}
 
     $pdo->exec("CREATE TABLE IF NOT EXISTS today_attendance_index (
             human_id TEXT PRIMARY KEY,
@@ -586,6 +590,22 @@ try {
             identifier_match INTEGER NOT NULL DEFAULT 0,
             pin_verified INTEGER NOT NULL DEFAULT 0,
             credential_version INTEGER NOT NULL DEFAULT 0
+        );");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS schedule_entries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entry_uuid TEXT UNIQUE,
+            person_name TEXT,
+            person_id INTEGER,
+            shift_role TEXT NOT NULL DEFAULT 'Staff',
+            shift_date TEXT NOT NULL,
+            start_time TEXT NOT NULL,
+            end_time TEXT NOT NULL,
+            area TEXT NOT NULL DEFAULT 'Study Center',
+            notes TEXT DEFAULT '',
+            session_id INTEGER,
+            sort_order INTEGER DEFAULT 0,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         );");
     } catch (PDOException $e) {}
 
@@ -1032,17 +1052,15 @@ if ($uri === '/api/v1/sync/operating-hours' && $method === 'POST') {
     exit;
 }
 
-function ensure_shift_notes_table($pdo) {
-    $pdo->exec("CREATE TABLE IF NOT EXISTS shift_notes_index (
+function ensure_shift_briefings_table($pdo) {
+    $pdo->exec("CREATE TABLE IF NOT EXISTS shift_briefings (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        note_uuid TEXT UNIQUE NOT NULL,
-        title TEXT NOT NULL,
-        body TEXT NOT NULL,
-        category TEXT NOT NULL DEFAULT 'Operational',
-        urgency_level TEXT NOT NULL DEFAULT 'normal',
-        author_human_id TEXT NOT NULL,
-        author_name TEXT NOT NULL,
-        privacy_level TEXT NOT NULL DEFAULT 'operational',
+        briefing_uuid TEXT UNIQUE NOT NULL,
+        leader_name TEXT NOT NULL DEFAULT 'Staff Member',
+        shift_date TEXT NOT NULL,
+        summary_notes TEXT NOT NULL,
+        incident_count INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'submitted',
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );");
 }
@@ -1324,11 +1342,12 @@ if (($uri === '/api/v1/mobile/attention/summary' || $uri === '/mobile/api/attent
     $overdue_tasks = $t_stmt->fetchAll(PDO::FETCH_ASSOC);
     $t_stmt->closeCursor();
 
-    // 2. High urgency shift notes
+    // 2. High urgency shift briefings (incident_count > 0 or recent briefing notes)
+    ensure_shift_briefings_table($pdo);
     $n_stmt = $pdo->prepare("
-        SELECT note_uuid as id, title, body, author_name as authorName, urgency_level as urgencyLevel, created_at as createdAt
-        FROM shift_notes_index
-        WHERE urgency_level IN ('high', 'urgent')
+        SELECT briefing_uuid as id, ('Shift Briefing - ' || shift_date) as title, summary_notes as body, leader_name as authorName, 'high' as urgencyLevel, created_at as createdAt
+        FROM shift_briefings
+        WHERE incident_count > 0 OR status = 'urgent'
         ORDER BY id DESC LIMIT 5
     ");
     $n_stmt->execute();
@@ -1425,14 +1444,15 @@ if (($uri === '/api/v1/mobile/staff/me' || $uri === '/mobile/api/staff/me') && $
         }
     }
 
-    // 2. My Activity (Authored shift notes)
+    // 2. My Activity (Authored shift briefings)
+    ensure_shift_briefings_table($pdo);
     $n_stmt = $pdo->prepare("
-        SELECT note_uuid as id, title, body, category, urgency_level as urgencyLevel, created_at as createdAt
-        FROM shift_notes_index
-        WHERE author_human_id = ? OR author_name = ?
+        SELECT briefing_uuid as id, ('Shift Briefing - ' || shift_date) as title, summary_notes as body, 'Operational' as category, (CASE WHEN incident_count > 0 THEN 'high' ELSE 'normal' END) as urgencyLevel, created_at as createdAt
+        FROM shift_briefings
+        WHERE leader_name = ?
         ORDER BY id DESC LIMIT 10
     ");
-    $n_stmt->execute([$my_hid, $my_name]);
+    $n_stmt->execute([$my_name]);
     $my_notes = $n_stmt->fetchAll(PDO::FETCH_ASSOC);
     $n_stmt->closeCursor();
 
@@ -1468,14 +1488,14 @@ if (($uri === '/api/v1/mobile/communications/shift-notes' || $uri === '/mobile/a
     header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 
     $session = verify_mobile_session($pdo);
-    ensure_shift_notes_table($pdo);
+    ensure_shift_briefings_table($pdo);
 
     $stmt = $pdo->prepare("
         SELECT 
-            note_uuid as id, title, body, category, urgency_level,
-            author_human_id, author_name, created_at
-        FROM shift_notes_index
-        WHERE LOWER(privacy_level) NOT IN ('private', 'pastoral')
+            briefing_uuid as id, ('Shift Briefing - ' || shift_date) as title, summary_notes as body,
+            'Operational' as category, (CASE WHEN incident_count > 0 THEN 'high' ELSE 'normal' END) as urgency_level,
+            '' as author_human_id, leader_name as author_name, created_at
+        FROM shift_briefings
         ORDER BY created_at DESC
         LIMIT 50
     ");
@@ -1509,45 +1529,44 @@ if (($uri === '/api/v1/mobile/communications/shift-notes' || $uri === '/mobile/a
     header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 
     $session = verify_mobile_session($pdo);
-    ensure_shift_notes_table($pdo);
+    ensure_shift_briefings_table($pdo);
 
     $raw = file_get_contents('php://input');
     $input = json_decode($raw, true);
 
+    $body = is_array($input) ? trim($input['body'] ?? $input['summary_notes'] ?? '') : '';
     $title = is_array($input) ? trim($input['title'] ?? '') : '';
-    $body = is_array($input) ? trim($input['body'] ?? '') : '';
-    $category = is_array($input) ? trim($input['category'] ?? 'Operational') : 'Operational';
-    $urgency = is_array($input) ? trim($input['urgencyLevel'] ?? $input['urgency_level'] ?? 'normal') : 'normal';
+    $summary = !empty($title) ? ($title . ": " . $body) : $body;
+    $shift_date = is_array($input) && !empty($input['shift_date']) ? trim($input['shift_date']) : current_operational_date();
+    $incidents = is_array($input) && !empty($input['incident_count']) ? intval($input['incident_count']) : 0;
 
-    if (empty($title) || empty($body)) {
+    if (empty($summary)) {
         http_response_code(400);
-        echo json_encode(['success' => false, 'error' => 'Title and note body are required for shift handoff.']);
+        echo json_encode(['success' => false, 'error' => 'Summary notes are required for shift briefing handoff.']);
         exit;
     }
 
-    $uuid = 'note_' . bin2hex(random_bytes(8));
-    $author_hid = strval($session['human_id'] ?? 'SYSTEM');
-    $author_name = strval($session['display_name'] ?? 'Staff Member');
+    $uuid = 'brief_mob_' . bin2hex(random_bytes(8));
+    $leader_name = strval($session['display_name'] ?? 'Staff Member');
     $created_at = gmdate('Y-m-d H:i:s');
 
     $stmt = $pdo->prepare("
-        INSERT INTO shift_notes_index 
-        (note_uuid, title, body, category, urgency_level, author_human_id, author_name, privacy_level, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'operational', ?)
+        INSERT INTO shift_briefings 
+        (briefing_uuid, leader_name, shift_date, summary_notes, incident_count, status, created_at)
+        VALUES (?, ?, ?, ?, ?, 'submitted', ?)
     ");
-    $stmt->execute([$uuid, $title, $body, $category, $urgency, $author_hid, $author_name, $created_at]);
+    $stmt->execute([$uuid, $leader_name, $shift_date, $summary, $incidents, $created_at]);
 
     echo json_encode([
         'success' => true,
-        'message' => 'Shift handoff note created successfully',
+        'message' => 'Shift briefing handoff saved to Desktop shift_briefings table.',
         'note' => [
             'id' => $uuid,
-            'title' => $title,
-            'body' => $body,
-            'category' => $category,
-            'urgencyLevel' => $urgency,
-            'authorHumanId' => $author_hid,
-            'authorName' => $author_name,
+            'title' => 'Shift Briefing - ' . $shift_date,
+            'body' => $summary,
+            'category' => 'Operational',
+            'urgencyLevel' => $incidents > 0 ? 'high' : 'normal',
+            'authorName' => $leader_name,
             'createdAt' => $created_at
         ]
     ]);
@@ -1783,17 +1802,60 @@ if (($uri === '/api/v1/public/signup' || $uri === '/public/api/signup') && $meth
     $event_uuid = 'evt_portal_sgn_' . bin2hex(random_bytes(8));
     $payload = $input;
     $payload['event_uuid'] = $event_uuid;
-    $payload['source'] = 'Public Self-Service Portal';
+    $payload['source'] = trim($input['source'] ?? 'Public Self-Service Portal');
     $payload['received_at'] = gmdate('Y-m-d H:i:s') . ' UTC';
 
     $stmt = $pdo->prepare("INSERT INTO inbound_event_queue (event_type, provider_event_id, payload_json, received_at, processed) VALUES (?, ?, ?, datetime('now'), 0)");
     $stmt->execute([$event_type, $event_uuid, json_encode($payload)]);
+    $stmt->closeCursor();
+
+    // Direct Cloud Roster update for instant availability & capacity safety
+    $sid = intval($input['session_id']);
+    $hid = trim($input['human_id'] ?? $input['humanId'] ?? '');
+    $phone_raw = trim($input['phone'] ?? $input['phone_e164'] ?? '');
+    $e164 = !empty($phone_raw) ? normalize_phone_e164_php($phone_raw) : '';
+    $signup_status = 'confirmed';
+
+    if (!empty($sid) && (!empty($hid) || !empty($e164))) {
+        try {
+            if ($action === 'cancel') {
+                $del_sgn = $pdo->prepare("DELETE FROM member_signups_index WHERE session_id = ? AND (phone_e164 = ? OR human_id = ?)");
+                $del_sgn->execute([$sid, $e164, $hid]);
+                $del_sgn->closeCursor();
+                $signup_status = 'cancelled';
+            } else {
+                $cap_stmt = $pdo->prepare("SELECT max_capacity, confirmed_count FROM session_index WHERE session_id = ? LIMIT 1");
+                $cap_stmt->execute([$sid]);
+                $s_info = $cap_stmt->fetch(PDO::FETCH_ASSOC);
+                $cap_stmt->closeCursor();
+
+                $max_cap = intval($s_info['max_capacity'] ?? 30);
+                $conf_cnt = intval($s_info['confirmed_count'] ?? 0);
+                $signup_status = ($conf_cnt >= $max_cap) ? 'waitlist' : 'confirmed';
+
+                $ins_sgn = $pdo->prepare("
+                    INSERT INTO member_signups_index (session_id, human_id, phone_e164, signup_status, registered_at)
+                    VALUES (?, ?, ?, ?, datetime('now'))
+                    ON CONFLICT(session_id, phone_e164) DO UPDATE SET signup_status = excluded.signup_status
+                ");
+                $ins_sgn->execute([$sid, $hid, $e164, $signup_status]);
+                $ins_sgn->closeCursor();
+
+                if ($signup_status === 'confirmed') {
+                    $upd_c = $pdo->prepare("UPDATE session_index SET confirmed_count = confirmed_count + 1 WHERE session_id = ?");
+                    $upd_c->execute([$sid]);
+                    $upd_c->closeCursor();
+                }
+            }
+        } catch (Throwable $e) {}
+    }
 
     echo json_encode([
         'success' => true,
-        'message' => 'Signup request received',
+        'message' => ($action === 'cancel') ? 'Signup cancelled' : ($signup_status === 'waitlist' ? 'Added to Session Waitlist' : 'Registered for Session'),
         'event_uuid' => $event_uuid,
-        'action' => $action
+        'action' => $action,
+        'signup_status' => $signup_status,
     ]);
     exit;
 }
@@ -3218,14 +3280,30 @@ if (($uri === '/api/v1/mobile/people/register' || $uri === '/mobile/api/people/r
 
     $first_name = trim($payload['first_name'] ?? $payload['firstName'] ?? '');
     $last_name = trim($payload['last_name'] ?? $payload['lastName'] ?? '');
+    $email = trim($payload['email'] ?? $payload['primary_email'] ?? $payload['primaryEmail'] ?? '');
     $raw_phone = trim($payload['phone'] ?? $payload['phone_e164'] ?? '');
     $notes_body = trim($payload['notes'] ?? $payload['note_body'] ?? '');
     $auto_checkin = !empty($payload['auto_checkin'] ?? $payload['autoCheckIn'] ?? false);
     $override_duplicate = !empty($payload['override_duplicate'] ?? $payload['overrideDuplicate'] ?? false);
+    $raw_sms = $payload['sms_consent'] ?? $payload['smsConsent'] ?? null;
+    $sms_consent = ($raw_sms === 'Yes' || $raw_sms === 1 || $raw_sms === '1' || $raw_sms === true) ? 1 : 0;
+    $profile_photo = trim($payload['profile_photo'] ?? $payload['profilePhoto'] ?? '');
 
     if (empty($first_name)) {
         http_response_code(400);
         echo json_encode(['success' => false, 'error' => 'First name is required.']);
+        exit;
+    }
+
+    if (empty($last_name)) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => 'Last name is required.']);
+        exit;
+    }
+
+    if (empty($raw_phone)) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => 'Phone number is required.']);
         exit;
     }
 
@@ -3286,10 +3364,10 @@ if (($uri === '/api/v1/mobile/people/register' || $uri === '/mobile/api/people/r
 
     // Insert into directory_index
     $ins_stmt = $pdo->prepare("
-        INSERT INTO directory_index (human_id, phone_e164, first_name, last_name, masked_phone, profile_photo, updated_at)
-        VALUES (?, ?, ?, ?, ?, '', datetime('now'))
+        INSERT INTO directory_index (human_id, phone_e164, first_name, last_name, masked_phone, profile_photo, primary_email, sms_consent, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
     ");
-    $ins_stmt->execute([$new_hid, $phone_e164, $first_name, $last_name, $masked_phone]);
+    $ins_stmt->execute([$new_hid, $phone_e164, $first_name, $last_name, $masked_phone, $profile_photo, $email, $sms_consent]);
     $ins_stmt->closeCursor();
 
     // Optional Operational Note
@@ -3341,6 +3419,60 @@ if (($uri === '/api/v1/mobile/people/register' || $uri === '/mobile/api/people/r
             'check_in_time' => $check_in_time
         ]
     ]);
+    exit;
+}
+
+// Route: Authenticated Mobile All Sessions & Events List Endpoint
+if (($uri === '/api/v1/mobile/sessions/all' || $uri === '/mobile/api/sessions/all') && $method === 'GET') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+
+    $sessions = [];
+    try {
+        $stmt = $pdo->prepare("
+            SELECT 
+                session_id, session_uuid, title, session_type, date_text, start_time, end_time, 
+                COALESCE(room_location, 'Main Study Hall') as room_location, 
+                max_capacity, confirmed_count, waitlist_count 
+            FROM session_index 
+            ORDER BY date_text ASC, start_time ASC
+        ");
+        $stmt->execute();
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $stmt->closeCursor();
+
+        foreach ($rows as $r) {
+            $sid = intval($r['session_id']);
+            $att_stmt = $pdo->prepare("SELECT COUNT(*) FROM member_signups_index WHERE session_id = ? AND signup_status = 'attended'");
+            $att_stmt->execute([$sid]);
+            $attended_cnt = intval($att_stmt->fetchColumn());
+            $att_stmt->closeCursor();
+
+            $sessions[] = [
+                'id' => $sid,
+                'sessionId' => $sid,
+                'sessionUuid' => $r['session_uuid'],
+                'title' => $r['title'],
+                'type' => $r['session_type'],
+                'dateText' => $r['date_text'],
+                'startTime' => $r['start_time'],
+                'endTime' => $r['end_time'],
+                'timeRange' => trim($r['start_time'] . ' – ' . $r['end_time']),
+                'location' => $r['room_location'],
+                'maxCapacity' => intval($r['max_capacity']),
+                'confirmedCount' => intval($r['confirmed_count']),
+                'attendedCount' => $attended_cnt,
+                'waitlistCount' => intval($r['waitlist_count']),
+                'status' => 'Upcoming',
+            ];
+        }
+    } catch (Exception $e) {
+        $sessions = [];
+    }
+
+    echo json_encode(['success' => true, 'total' => count($sessions), 'sessions' => $sessions]);
     exit;
 }
 
@@ -3764,6 +3896,59 @@ if (($uri === '/api/v1/mobile/schedule/today' || $uri === '/mobile/api/schedule/
         'has_override' => $has_override,
         'todaySchedule' => $schedule_items
     ]);
+    exit;
+}
+
+// Route: Authenticated Mobile Shift Coverage / Staff Assignment Endpoint
+if (($uri === '/api/v1/mobile/schedule/cover' || $uri === '/mobile/api/schedule/cover' || $uri === '/api/v1/mobile/schedule/assign') && $method === 'POST') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+
+    $raw = file_get_contents('php://input');
+    $input = json_decode($raw, true);
+    $payload = is_array($input) ? $input : [];
+
+    $person_name = trim($payload['person_name'] ?? $payload['personName'] ?? $session['display_name'] ?? '');
+    $shift_role = trim($payload['shift_role'] ?? $payload['shiftRole'] ?? $session['role'] ?? 'Staff');
+    $shift_date = trim($payload['shift_date'] ?? $payload['shiftDate'] ?? current_operational_date());
+    $start_time = trim($payload['start_time'] ?? $payload['startTime'] ?? '03:15 PM');
+    $end_time = trim($payload['end_time'] ?? $payload['endTime'] ?? '06:00 PM');
+    $area = trim($payload['area'] ?? $payload['location'] ?? 'Study Center');
+    $notes = trim($payload['notes'] ?? 'Assigned via Mobile Operational Hub');
+    $session_id = !empty($payload['session_id']) ? intval($payload['session_id']) : null;
+
+    if (empty($person_name)) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => 'Staff name is required for coverage assignment.']);
+        exit;
+    }
+
+    $entry_uuid = 'shf_mob_' . bin2hex(random_bytes(6));
+
+    try {
+        $ins = $pdo->prepare("
+            INSERT INTO schedule_entries (entry_uuid, person_name, shift_role, shift_date, start_time, end_time, area, notes, session_id, sort_order, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 99, datetime('now'))
+        ");
+        $ins->execute([$entry_uuid, $person_name, $shift_role, $shift_date, $start_time, $end_time, $area, $notes, $session_id]);
+        $ins->closeCursor();
+
+        echo json_encode([
+            'success' => true,
+            'message' => "Shift coverage for {$person_name} ({$area}, {$start_time}–{$end_time}) saved to Production schedule.",
+            'entry_uuid' => $entry_uuid,
+            'person_name' => $person_name,
+            'shift_date' => $shift_date,
+            'start_time' => $start_time,
+            'end_time' => $end_time,
+            'area' => $area,
+        ]);
+    } catch (Exception $e) {
+        http_response_code(500);
+        echo json_encode(['success' => false, 'error' => 'Failed to save shift coverage assignment: ' . $e->getMessage()]);
+    }
     exit;
 }
 
