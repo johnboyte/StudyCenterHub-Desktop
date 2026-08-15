@@ -92,6 +92,10 @@ func _process_next_event(events: Array, index: int, processed_count: int, callba
 		print("[Processor] Processing mobile.checkout event ", event_id)
 		_process_mobile_checkout(event_id, payload)
 		_process_next_event(events, index + 1, processed_count + 1, callback)
+	elif event_type == "mobile.schedule_cover" or event_type == "mobile.shift_assignment":
+		print("[Processor] Processing mobile.schedule_cover event ", event_id)
+		_process_mobile_schedule_cover(event_id, payload)
+		_process_next_event(events, index + 1, processed_count + 1, callback)
 	elif event_type == "twilio.sms":
 		print("[Processor] Processing SMS event ", event_id)
 		_process_sms(event_id, payload)
@@ -520,6 +524,27 @@ func _process_mobile_checkout(event_id: int, payload: Dictionary) -> void:
 	if target_hid != "":
 		# Record check-out time in attendance_log for today
 		db.execute("UPDATE attendance_log SET check_out_time = ? WHERE (human_id = ? OR person_uuid = ?) AND check_in_date = ? AND (check_out_time IS NULL OR check_out_time = '');", [time_str, target_hid, target_hid, today_str])
+
+	db.execute("UPDATE inbound_event_queue SET processed = 1 WHERE id = ?;", [event_id])
+
+func _process_mobile_schedule_cover(event_id: int, payload: Dictionary) -> void:
+	var entry_uuid = str(payload.get("entry_uuid", payload.get("entryUuid", ""))).strip_edges()
+	var person_name = str(payload.get("person_name", payload.get("personName", ""))).strip_edges()
+	var shift_role = str(payload.get("shift_role", payload.get("shiftRole", "Staff"))).strip_edges()
+	var shift_date = str(payload.get("shift_date", payload.get("shiftDate", ""))).strip_edges()
+	var start_time = str(payload.get("start_time", payload.get("startTime", ""))).strip_edges()
+	var end_time = str(payload.get("end_time", payload.get("endTime", ""))).strip_edges()
+	var area = str(payload.get("area", "Study Center")).strip_edges()
+	var notes = str(payload.get("notes", "Assigned via Mobile Operational Hub")).strip_edges()
+	var session_id = payload.get("session_id", payload.get("sessionId", null))
+
+	if entry_uuid != "" and person_name != "":
+		# Upsert into local Desktop schedule_entries table
+		var ex_res = db.execute("SELECT id FROM schedule_entries WHERE entry_uuid = ? LIMIT 1;", [entry_uuid])
+		if ex_res["success"] and ex_res["data"].size() > 0:
+			db.execute("UPDATE schedule_entries SET person_name = ?, shift_role = ?, shift_date = ?, start_time = ?, end_time = ?, area = ?, notes = ?, session_id = ? WHERE entry_uuid = ?;", [person_name, shift_role, shift_date, start_time, end_time, area, notes, session_id, entry_uuid])
+		else:
+			db.execute("INSERT INTO schedule_entries (entry_uuid, person_name, shift_role, shift_date, start_time, end_time, area, notes, session_id, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 99);", [entry_uuid, person_name, shift_role, shift_date, start_time, end_time, area, notes, session_id])
 
 	db.execute("UPDATE inbound_event_queue SET processed = 1 WHERE id = ?;", [event_id])
 

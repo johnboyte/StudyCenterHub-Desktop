@@ -3115,7 +3115,7 @@ if (preg_match('#^/(api/v1/mobile|mobile/api)/people/([^/]+)$#', $uri, $m) && $m
     $target_hid = trim($m[2]);
 
     $stmt = $pdo->prepare("
-        SELECT human_id, first_name, last_name, masked_phone, profile_photo, updated_at 
+        SELECT human_id, first_name, last_name, masked_phone, profile_photo, primary_email, sms_consent, updated_at 
         FROM directory_index 
         WHERE human_id = ? 
         LIMIT 1
@@ -3142,7 +3142,7 @@ if (preg_match('#^/(api/v1/mobile|mobile/api)/people/([^/]+)$#', $uri, $m) && $m
             if ($resolved_hid) {
                 $target_hid = $resolved_hid;
                 $stmt = $pdo->prepare("
-                    SELECT human_id, first_name, last_name, masked_phone, profile_photo, updated_at 
+                    SELECT human_id, first_name, last_name, masked_phone, profile_photo, primary_email, sms_consent, updated_at 
                     FROM directory_index 
                     WHERE human_id = ? 
                     LIMIT 1
@@ -3163,6 +3163,39 @@ if (preg_match('#^/(api/v1/mobile|mobile/api)/people/([^/]+)$#', $uri, $m) && $m
     $fn = trim($person['first_name'] ?? '');
     $ln = trim($person['last_name'] ?? '');
     $name = trim($fn . ' ' . $ln);
+    $primary_email = trim($person['primary_email'] ?? '');
+    $sms_consent = intval($person['sms_consent'] ?? 0) === 1 ? 'OPTED IN' : 'OPTED OUT / UNSET';
+
+    $role = (strpos($target_hid, 'STF') === 0) ? 'Staff' : 'Participant';
+    $institution = '';
+    $academic_year = '';
+    $major = '';
+    $residence = '';
+    $graduation_term = '';
+    $community_connected = false;
+
+    try {
+        $p_extra = $pdo->prepare("
+            SELECT role, classification, school_name, academic_year, major, residence_hall, grad_term, community_connected 
+            FROM people 
+            WHERE human_id = ? OR id = ? 
+            LIMIT 1
+        ");
+        $p_extra->execute([$target_hid, $target_hid]);
+        $row_extra = $p_extra->fetch(PDO::FETCH_ASSOC);
+        $p_extra->closeCursor();
+
+        if ($row_extra) {
+            if (!empty($row_extra['role'])) $role = $row_extra['role'];
+            if (!empty($row_extra['classification']) && empty($row_extra['role'])) $role = $row_extra['classification'];
+            if (!empty($row_extra['school_name'])) $institution = $row_extra['school_name'];
+            if (!empty($row_extra['academic_year'])) $academic_year = $row_extra['academic_year'];
+            if (!empty($row_extra['major'])) $major = $row_extra['major'];
+            if (!empty($row_extra['residence_hall'])) $residence = $row_extra['residence_hall'];
+            if (!empty($row_extra['grad_term'])) $graduation_term = $row_extra['grad_term'];
+            if (!empty($row_extra['community_connected'])) $community_connected = (intval($row_extra['community_connected']) === 1);
+        }
+    } catch (Throwable $e) {}
 
     $is_checked_in = false;
     $check_in_time = null;
@@ -3215,7 +3248,16 @@ if (preg_match('#^/(api/v1/mobile|mobile/api)/people/([^/]+)$#', $uri, $m) && $m
             'last_name' => $ln,
             'display_name' => $name,
             'name' => $name,
+            'role' => $role,
+            'primary_email' => $primary_email,
             'masked_phone' => $person['masked_phone'] ?? '',
+            'sms_consent' => $sms_consent,
+            'institution' => $institution,
+            'academic_year' => $academic_year,
+            'major' => $major,
+            'residence' => $residence,
+            'graduation_term' => $graduation_term,
+            'community_connected' => $community_connected,
             'has_photo' => $has_photo,
             'photo_url' => $has_photo ? "https://app.reallife-studycenter.org/api/v1/mobile/people/{$target_hid}/photo" : null,
             'is_checked_in' => $is_checked_in,
@@ -3854,13 +3896,12 @@ if (($uri === '/api/v1/mobile/schedule/today' || $uri === '/mobile/api/schedule/
 
     // 3. Query REAL per-shift staff assignments from schedule_entries table
     $workers = [];
+    $detailed_shifts = [];
     try {
         $se_stmt = $pdo->prepare("
-            SELECT person_name, shift_role, start_time, end_time 
+            SELECT entry_uuid, person_name, shift_role, start_time, end_time, area, notes 
             FROM schedule_entries 
             WHERE shift_date = ? 
-              AND person_name IS NOT NULL 
-              AND TRIM(person_name) != ''
             ORDER BY id ASC
         ");
         $se_stmt->execute([$op_date]);
@@ -3868,23 +3909,55 @@ if (($uri === '/api/v1/mobile/schedule/today' || $uri === '/mobile/api/schedule/
         $se_stmt->closeCursor();
 
         foreach ($se_rows as $sr) {
-            $w_name = trim($sr['person_name']);
+            $w_name = trim($sr['person_name'] ?? '');
             if (!empty($w_name) && !in_array($w_name, $workers)) {
                 $workers[] = $w_name;
             }
+            $role = trim($sr['shift_role'] ?? 'Staff');
+            $s_time = trim($sr['start_time'] ?? '');
+            $e_time = trim($sr['end_time'] ?? '');
+            $t_range = (!empty($s_time) && !empty($e_time)) ? "{$s_time} – {$e_time}" : $hours_label;
+
+            $detailed_shifts[] = [
+                'id' => $sr['entry_uuid'] ?? ('entry_' . bin2hex(random_bytes(4))),
+                'entry_uuid' => $sr['entry_uuid'] ?? '',
+                'person_name' => $w_name,
+                'assigned_staff' => $w_name,
+                'shift_role' => $role,
+                'role' => $role,
+                'start_time' => $s_time,
+                'end_time' => $e_time,
+                'timeRange' => $t_range,
+                'area' => trim($sr['area'] ?? 'Main Study Hall'),
+                'location' => trim($sr['area'] ?? 'Main Study Hall'),
+                'notes' => trim($sr['notes'] ?? ''),
+                'is_covered' => !empty($w_name),
+                'is_team_leader' => (strpos(strtolower($role), 'leader') !== false || strpos(strtolower($role), 'supervisor') !== false),
+                'workers' => !empty($w_name) ? [$w_name] : [],
+                'title' => !empty($role) ? "{$role} Shift" : 'Study Center Shift'
+            ];
         }
     } catch (Throwable $e) {}
 
-    $schedule_items = [
-        [
-            'id' => 'shift_op_' . str_replace('-', '', $op_date),
-            'timeRange' => $hours_label,
-            'title' => 'Study Center Operations',
-            'workers' => $workers,
-            'location' => 'Main Study Hall',
-            'isToday' => true
-        ]
-    ];
+    if (empty($detailed_shifts)) {
+        $detailed_shifts = [
+            [
+                'id' => 'shift_op_' . str_replace('-', '', $op_date),
+                'entry_uuid' => '',
+                'person_name' => !empty($workers) ? implode(', ', $workers) : '',
+                'assigned_staff' => !empty($workers) ? implode(', ', $workers) : '',
+                'shift_role' => 'Study Center Operations',
+                'role' => 'Study Center Operations',
+                'timeRange' => $hours_label,
+                'area' => 'Main Study Hall',
+                'location' => 'Main Study Hall',
+                'is_covered' => !empty($workers),
+                'is_team_leader' => false,
+                'workers' => $workers,
+                'title' => 'Study Center Operations'
+            ]
+        ];
+    }
 
     echo json_encode([
         'success' => true,
@@ -3894,7 +3967,7 @@ if (($uri === '/api/v1/mobile/schedule/today' || $uri === '/mobile/api/schedule/
         'hours_label' => $hours_label,
         'status_text' => $status_text,
         'has_override' => $has_override,
-        'todaySchedule' => $schedule_items
+        'todaySchedule' => $detailed_shifts
     ]);
     exit;
 }
@@ -3934,6 +4007,25 @@ if (($uri === '/api/v1/mobile/schedule/cover' || $uri === '/mobile/api/schedule/
         ");
         $ins->execute([$entry_uuid, $person_name, $shift_role, $shift_date, $start_time, $end_time, $area, $notes, $session_id]);
         $ins->closeCursor();
+
+        // Enqueue event for Production Desktop return-sync
+        try {
+            $evt_uuid = 'evt_shf_' . bin2hex(random_bytes(6));
+            $evt_payload = json_encode([
+                'entry_uuid' => $entry_uuid,
+                'person_name' => $person_name,
+                'shift_role' => $shift_role,
+                'shift_date' => $shift_date,
+                'start_time' => $start_time,
+                'end_time' => $end_time,
+                'area' => $area,
+                'notes' => $notes,
+                'session_id' => $session_id,
+            ]);
+            $q_stmt = $pdo->prepare("INSERT INTO inbound_event_queue (event_type, provider_event_id, payload_json, received_at, processed) VALUES ('mobile.schedule_cover', ?, ?, datetime('now'), 0)");
+            $q_stmt->execute([$evt_uuid, $evt_payload]);
+            $q_stmt->closeCursor();
+        } catch (Throwable $e) {}
 
         echo json_encode([
             'success' => true,
