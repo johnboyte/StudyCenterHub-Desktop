@@ -3957,3 +3957,4 @@ func _publish_session_sync() -> void:
 	var GatewaySyncScript = load("res://src/domain/sync/gateway_sync_service.gd")
 	var sync_svc = GatewaySyncScript.new(db, self)
 	sync_svc.publish_session_index()
+	sync_svc.publish_operating_hours()

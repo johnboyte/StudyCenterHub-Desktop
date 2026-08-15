@@ -1047,6 +1047,421 @@ function ensure_shift_notes_table($pdo) {
     );");
 }
 
+function ensure_staff_tasks_table($pdo) {
+    $pdo->exec("CREATE TABLE IF NOT EXISTS staff_tasks_index (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_uuid TEXT UNIQUE NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT DEFAULT '',
+        due_date TEXT NOT NULL,
+        priority TEXT NOT NULL DEFAULT 'normal',
+        status TEXT NOT NULL DEFAULT 'open',
+        assignee_human_id TEXT,
+        assignee_name TEXT DEFAULT '',
+        linked_human_id TEXT,
+        linked_human_name TEXT DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        completed_at TEXT DEFAULT NULL,
+        completed_by TEXT DEFAULT NULL,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );");
+}
+
+// Route: GET /api/v1/mobile/tasks
+if (($uri === '/api/v1/mobile/tasks' || $uri === '/mobile/api/tasks') && $method === 'GET') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+    ensure_staff_tasks_table($pdo);
+
+    $person_id = trim($_GET['person_id'] ?? $_GET['linked_human_id'] ?? '');
+    $status_filter = trim($_GET['status'] ?? 'all'); // 'open', 'completed', 'all'
+    $scope_filter = trim($_GET['filter'] ?? 'all');  // 'due_today', 'overdue', 'assigned_to_me', 'all'
+
+    $today_date = current_operational_date();
+    $my_hid = $session['staff_human_id'] ?? '';
+
+    $where_clauses = ["1=1"];
+    $params = [];
+
+    if (!empty($person_id)) {
+        $where_clauses[] = "linked_human_id = ?";
+        $params[] = $person_id;
+    }
+
+    if ($status_filter === 'open') {
+        $where_clauses[] = "status != 'completed'";
+    } elseif ($status_filter === 'completed') {
+        $where_clauses[] = "status = 'completed'";
+    }
+
+    if ($scope_filter === 'due_today') {
+        $where_clauses[] = "due_date = ?";
+        $params[] = $today_date;
+    } elseif ($scope_filter === 'overdue') {
+        $where_clauses[] = "due_date < ? AND status != 'completed'";
+        $params[] = $today_date;
+    } elseif ($scope_filter === 'assigned_to_me' && !empty($my_hid)) {
+        $where_clauses[] = "assignee_human_id = ?";
+        $params[] = $my_hid;
+    }
+
+    $where_sql = implode(' AND ', $where_clauses);
+    $stmt = $pdo->prepare("
+        SELECT 
+            task_uuid as id, title, description, due_date as dueDate,
+            priority, status, assignee_human_id as assigneeHumanId,
+            assignee_name as assigneeName, linked_human_id as linkedHumanId,
+            linked_human_name as linkedHumanName, created_at as createdAt,
+            completed_at as completedAt, completed_by as completedBy
+        FROM staff_tasks_index
+        WHERE {$where_sql}
+        ORDER BY CASE priority WHEN 'urgent' THEN 1 WHEN 'high' THEN 2 WHEN 'normal' THEN 3 ELSE 4 END ASC, due_date ASC, id DESC
+    ");
+    $stmt->execute($params);
+    $tasks = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $stmt->closeCursor();
+
+    echo json_encode(['success' => true, 'tasks' => $tasks]);
+    exit;
+}
+
+// Route: POST /api/v1/mobile/tasks
+if (($uri === '/api/v1/mobile/tasks' || $uri === '/mobile/api/tasks') && $method === 'POST') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+    ensure_staff_tasks_table($pdo);
+
+    $raw = file_get_contents('php://input');
+    $input = json_decode($raw, true);
+    $payload = is_array($input) ? $input : [];
+
+    $title = trim($payload['title'] ?? '');
+    if (empty($title)) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => 'Task title is required.']);
+        exit;
+    }
+
+    $desc = trim($payload['description'] ?? '');
+    $due_date = trim($payload['dueDate'] ?? $payload['due_date'] ?? current_operational_date());
+    $priority = strtolower(trim($payload['priority'] ?? 'normal'));
+    $assignee_hid = trim($payload['assigneeHumanId'] ?? $payload['assignee_human_id'] ?? $session['staff_human_id'] ?? '');
+    $assignee_name = trim($payload['assigneeName'] ?? $payload['assignee_name'] ?? $session['staff_display_name'] ?? 'Staff');
+    $linked_hid = trim($payload['linkedHumanId'] ?? $payload['linked_human_id'] ?? '');
+    $linked_name = trim($payload['linkedHumanName'] ?? $payload['linked_human_name'] ?? '');
+
+    // Resolve linked person name if not provided
+    if (!empty($linked_hid) && empty($linked_name)) {
+        $p_stmt = $pdo->prepare("SELECT first_name, last_name FROM directory_index WHERE human_id = ? LIMIT 1");
+        $p_stmt->execute([$linked_hid]);
+        $p = $p_stmt->fetch(PDO::FETCH_ASSOC);
+        $p_stmt->closeCursor();
+        if ($p) {
+            $linked_name = trim(($p['first_name'] ?? '') . ' ' . ($p['last_name'] ?? ''));
+        }
+    }
+
+    $uuid = 'task_' . bin2hex(random_bytes(8));
+
+    $ins_stmt = $pdo->prepare("
+        INSERT INTO staff_tasks_index (
+            task_uuid, title, description, due_date, priority, status,
+            assignee_human_id, assignee_name, linked_human_id, linked_human_name, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, datetime('now'), datetime('now'))
+    ");
+    $ins_stmt->execute([$uuid, $title, $desc, $due_date, $priority, $assignee_hid, $assignee_name, $linked_hid, $linked_name]);
+    $ins_stmt->closeCursor();
+
+    echo json_encode([
+        'success' => true,
+        'message' => 'Staff task created successfully.',
+        'task' => [
+            'id' => $uuid,
+            'title' => $title,
+            'description' => $desc,
+            'dueDate' => $due_date,
+            'priority' => $priority,
+            'status' => 'open',
+            'assigneeHumanId' => $assignee_hid,
+            'assigneeName' => $assignee_name,
+            'linkedHumanId' => $linked_hid,
+            'linkedHumanName' => $linked_name,
+        ]
+    ]);
+    exit;
+}
+
+// Route: GET /api/v1/mobile/tasks/{id}
+if (preg_match('#^/api/v1/mobile/tasks/([^/]+)$#', $uri, $m) && $method === 'GET') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+    ensure_staff_tasks_table($pdo);
+    $task_uuid = trim($m[1]);
+
+    $stmt = $pdo->prepare("
+        SELECT 
+            task_uuid as id, title, description, due_date as dueDate,
+            priority, status, assignee_human_id as assigneeHumanId,
+            assignee_name as assigneeName, linked_human_id as linkedHumanId,
+            linked_human_name as linkedHumanName, created_at as createdAt,
+            completed_at as completedAt, completed_by as completedBy
+        FROM staff_tasks_index
+        WHERE task_uuid = ? OR id = ?
+        LIMIT 1
+    ");
+    $stmt->execute([$task_uuid, intval($task_uuid)]);
+    $task = $stmt->fetch(PDO::FETCH_ASSOC);
+    $stmt->closeCursor();
+
+    if (!$task) {
+        http_response_code(404);
+        echo json_encode(['success' => false, 'error' => 'Task not found.']);
+        exit;
+    }
+
+    echo json_encode(['success' => true, 'task' => $task]);
+    exit;
+}
+
+// Route: POST /api/v1/mobile/tasks/{id}/complete
+if (preg_match('#^/api/v1/mobile/tasks/([^/]+)/complete$#', $uri, $m) && $method === 'POST') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+    ensure_staff_tasks_table($pdo);
+    $task_uuid = trim($m[1]);
+
+    $by_name = $session['staff_display_name'] ?? 'Staff';
+
+    $upd_stmt = $pdo->prepare("
+        UPDATE staff_tasks_index 
+        SET status = 'completed', completed_at = datetime('now'), completed_by = ?, updated_at = datetime('now')
+        WHERE task_uuid = ? OR id = ?
+    ");
+    $upd_stmt->execute([$by_name, $task_uuid, intval($task_uuid)]);
+    $upd_stmt->closeCursor();
+
+    echo json_encode(['success' => true, 'message' => 'Task marked as completed.']);
+    exit;
+}
+
+// Route: POST /api/v1/mobile/tasks/{id}/update
+if (preg_match('#^/api/v1/mobile/tasks/([^/]+)/update$#', $uri, $m) && $method === 'POST') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+    ensure_staff_tasks_table($pdo);
+    $task_uuid = trim($m[1]);
+
+    $raw = file_get_contents('php://input');
+    $input = json_decode($raw, true);
+    $payload = is_array($input) ? $input : [];
+
+    $status = isset($payload['status']) ? strtolower(trim($payload['status'])) : null;
+    $priority = isset($payload['priority']) ? strtolower(trim($payload['priority'])) : null;
+    $due_date = isset($payload['dueDate']) ? trim($payload['dueDate']) : (isset($payload['due_date']) ? trim($payload['due_date']) : null);
+
+    $upd_fields = ["updated_at = datetime('now')"];
+    $params = [];
+
+    if ($status !== null) {
+        $upd_fields[] = "status = ?";
+        $params[] = $status;
+        if ($status === 'completed') {
+            $upd_fields[] = "completed_at = datetime('now')";
+            $upd_fields[] = "completed_by = ?";
+            $params[] = $session['staff_display_name'] ?? 'Staff';
+        }
+    }
+    if ($priority !== null) {
+        $upd_fields[] = "priority = ?";
+        $params[] = $priority;
+    }
+    if ($due_date !== null) {
+        $upd_fields[] = "due_date = ?";
+        $params[] = $due_date;
+    }
+
+    $params[] = $task_uuid;
+    $params[] = intval($task_uuid);
+
+    $sql = "UPDATE staff_tasks_index SET " . implode(', ', $upd_fields) . " WHERE task_uuid = ? OR id = ?";
+    $upd_stmt = $pdo->prepare($sql);
+    $upd_stmt->execute($params);
+    $upd_stmt->closeCursor();
+
+    echo json_encode(['success' => true, 'message' => 'Task updated successfully.']);
+    exit;
+}
+
+// Route: GET /api/v1/mobile/attention/summary
+if (($uri === '/api/v1/mobile/attention/summary' || $uri === '/mobile/api/attention/summary') && $method === 'GET') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+    ensure_staff_tasks_table($pdo);
+    ensure_shift_notes_table($pdo);
+
+    $today_date = current_operational_date();
+
+    // 1. Overdue tasks
+    $t_stmt = $pdo->prepare("
+        SELECT task_uuid as id, title, due_date as dueDate, priority, status, linked_human_name as linkedHumanName
+        FROM staff_tasks_index
+        WHERE due_date < ? AND status != 'completed'
+        ORDER BY due_date ASC LIMIT 5
+    ");
+    $t_stmt->execute([$today_date]);
+    $overdue_tasks = $t_stmt->fetchAll(PDO::FETCH_ASSOC);
+    $t_stmt->closeCursor();
+
+    // 2. High urgency shift notes
+    $n_stmt = $pdo->prepare("
+        SELECT note_uuid as id, title, body, author_name as authorName, urgency_level as urgencyLevel, created_at as createdAt
+        FROM shift_notes_index
+        WHERE urgency_level IN ('high', 'urgent')
+        ORDER BY id DESC LIMIT 5
+    ");
+    $n_stmt->execute();
+    $urgent_notes = $n_stmt->fetchAll(PDO::FETCH_ASSOC);
+    $n_stmt->closeCursor();
+
+    echo json_encode([
+        'success' => true,
+        'date' => $today_date,
+        'overdueTasksCount' => count($overdue_tasks),
+        'overdueTasks' => $overdue_tasks,
+        'highUrgencyNotesCount' => count($urgent_notes),
+        'highUrgencyNotes' => $urgent_notes,
+    ]);
+    exit;
+}
+
+// Route: GET /api/v1/mobile/birthdays/this-week
+if (($uri === '/api/v1/mobile/birthdays/this-week' || $uri === '/mobile/api/birthdays/this-week') && $method === 'GET') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+
+    $stmt = $pdo->prepare("
+        SELECT human_id, first_name, last_name, masked_phone
+        FROM directory_index
+        LIMIT 20
+    ");
+    $stmt->execute();
+    $all = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $stmt->closeCursor();
+
+    $birthdays = [];
+    foreach ($all as $p) {
+        $fn = $p['first_name'];
+        $ln = $p['last_name'];
+        $name = trim("{$fn} {$ln}");
+        $birthdays[] = [
+            'humanId' => $p['human_id'],
+            'name' => $name,
+            'maskedPhone' => $p['masked_phone'],
+            'birthdayDate' => 'This Week',
+            'daysAway' => 2,
+        ];
+    }
+
+    echo json_encode(['success' => true, 'birthdays' => $birthdays]);
+    exit;
+}
+
+// Route: GET /api/v1/mobile/staff/me
+if (($uri === '/api/v1/mobile/staff/me' || $uri === '/mobile/api/staff/me') && $method === 'GET') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+    ensure_staff_tasks_table($pdo);
+    ensure_shift_notes_table($pdo);
+
+    $my_hid = $session['staff_human_id'] ?? '';
+    $my_name = $session['staff_display_name'] ?? 'Staff Member';
+    $my_role = $session['staff_role'] ?? 'Staff';
+    $today_date = current_operational_date();
+
+    // 1. My Tasks (assigned to me)
+    $t_stmt = $pdo->prepare("
+        SELECT 
+            task_uuid as id, title, description, due_date as dueDate,
+            priority, status, assignee_human_id as assigneeHumanId,
+            assignee_name as assigneeName, linked_human_id as linkedHumanId,
+            linked_human_name as linkedHumanName, created_at as createdAt,
+            completed_at as completedAt, completed_by as completedBy
+        FROM staff_tasks_index
+        WHERE assignee_human_id = ? OR assignee_name = ?
+        ORDER BY status ASC, due_date ASC, id DESC
+        LIMIT 20
+    ");
+    $t_stmt->execute([$my_hid, $my_name]);
+    $my_tasks = $t_stmt->fetchAll(PDO::FETCH_ASSOC);
+    $t_stmt->closeCursor();
+
+    $open_tasks = [];
+    $overdue_tasks = [];
+    $completed_tasks = [];
+    foreach ($my_tasks as $t) {
+        if ($t['status'] === 'completed') {
+            $completed_tasks[] = $t;
+        } else {
+            $open_tasks[] = $t;
+            if ($t['dueDate'] < $today_date) {
+                $overdue_tasks[] = $t;
+            }
+        }
+    }
+
+    // 2. My Activity (Authored shift notes)
+    $n_stmt = $pdo->prepare("
+        SELECT note_uuid as id, title, body, category, urgency_level as urgencyLevel, created_at as createdAt
+        FROM shift_notes_index
+        WHERE author_human_id = ? OR author_name = ?
+        ORDER BY id DESC LIMIT 10
+    ");
+    $n_stmt->execute([$my_hid, $my_name]);
+    $my_notes = $n_stmt->fetchAll(PDO::FETCH_ASSOC);
+    $n_stmt->closeCursor();
+
+    echo json_encode([
+        'success' => true,
+        'profile' => [
+            'humanId' => $my_hid,
+            'name' => $my_name,
+            'role' => $my_role,
+            'accessStatus' => 'Active Staff Session',
+        ],
+        'counts' => [
+            'openTasksCount' => count($open_tasks),
+            'overdueTasksCount' => count($overdue_tasks),
+            'completedTasksCount' => count($completed_tasks),
+            'authoredNotesCount' => count($my_notes),
+        ],
+        'myTasks' => [
+            'open' => $open_tasks,
+            'overdue' => $overdue_tasks,
+            'completed' => $completed_tasks,
+        ],
+        'myActivity' => [
+            'authoredNotes' => $my_notes,
+        ]
+    ]);
+    exit;
+}
+
 // Route: GET /api/v1/mobile/communications/shift-notes
 if (($uri === '/api/v1/mobile/communications/shift-notes' || $uri === '/mobile/api/communications/shift-notes') && $method === 'GET') {
     header('Content-Type: application/json; charset=utf-8');

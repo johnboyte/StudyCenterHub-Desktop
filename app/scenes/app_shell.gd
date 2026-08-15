@@ -102,6 +102,7 @@ func _on_sync_timer_tick() -> void:
 		return
 	_is_syncing = true
 	var sync_svc = GatewaySyncScript.new(db, self)
+	sync_svc.publish_operating_hours()
 	sync_svc.sync_now(func(result: Dictionary):
 		var processor = InboundEventProcessorScript.new(db, self)
 		processor.process_pending_events(func(proc_result: Dictionary):
