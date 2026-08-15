@@ -135,6 +135,7 @@ func _push_acknowledgements(callback: Callable, inserted_count: int) -> void:
 	http_client.request_completed.connect(func(_result: int, response_code: int, _r_headers: PackedStringArray, _body_bytes: PackedByteArray):
 		publish_directory_index()
 		publish_today_attendance_index()
+		publish_staff_credentials_index()
 		if response_code == 200:
 			callback.call({"success": true, "inserted_count": inserted_count, "ack_count": event_ids.size()})
 		else:
@@ -147,7 +148,8 @@ func publish_today_attendance_index(callback: Callable = Callable()) -> void:
 		SELECT DISTINCT al.human_id, p.phone
 		FROM attendance_log al
 		LEFT JOIN people p ON p.id = al.person_id
-		WHERE al.check_in_date = ?;
+		WHERE al.check_in_date = ?
+		  AND (al.check_out_time IS NULL OR al.check_out_time = '');
 	""", [today_date])
 	var attendance = []
 	if res["success"]:
@@ -187,7 +189,7 @@ func publish_today_attendance_index(callback: Callable = Callable()) -> void:
 
 func publish_directory_index(callback: Callable = Callable()) -> void:
 	var res = db.execute("""
-		SELECT p.first_name, p.phone, p.human_id,
+		SELECT p.first_name, COALESCE(p.last_name, '') as last_name, p.phone, p.human_id, COALESCE(p.profile_photo, '') as profile_photo,
 		       (SELECT MAX(al.check_in_date) FROM attendance_log al WHERE al.person_id = p.id) as last_checkin_date
 		FROM people p WHERE p.status = 'active';
 	""")
@@ -487,4 +489,85 @@ func _compile_node_recursive(node: Dictionary, all_nodes: Array, parent_path: St
 	
 	for child in children:
 		_compile_node_recursive(child, all_nodes, current_path, compiled_options, active_staff, com_svc)
+
+func publish_staff_credentials_index(callback: Callable = Callable()) -> void:
+	if not db:
+		if callback.is_valid():
+			callback.call({"success": false, "error": "Database unavailable"})
+		return
+
+	# Ensure staff_mobile_credentials table exists
+	db.execute("""
+		CREATE TABLE IF NOT EXISTS staff_mobile_credentials (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			person_id INTEGER NOT NULL UNIQUE REFERENCES people(id) ON DELETE CASCADE,
+			human_id TEXT NOT NULL UNIQUE,
+			pin_pbkdf_hash TEXT NOT NULL,
+			credential_version INTEGER NOT NULL DEFAULT 1,
+			mobile_access_enabled INTEGER NOT NULL DEFAULT 1,
+			created_at TEXT NOT NULL DEFAULT (datetime('now')),
+			updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+		);
+	""")
+
+	var res = db.execute("""
+		SELECT 
+			p.id, p.human_id, p.first_name, p.last_name, p.primary_role, p.email, p.status,
+			smc.pin_pbkdf_hash, smc.credential_version
+		FROM people p
+		JOIN staff_mobile_credentials smc ON smc.person_id = p.id AND smc.mobile_access_enabled = 1
+		WHERE LOWER(p.status) = 'active'
+		  AND (
+			  LOWER(p.primary_role) IN ('staff', 'team leader', 'supervisor', 'administrator', 'intern', 'volunteer')
+		   OR LOWER(COALESCE(p.staff_classification, '')) IN ('staff', 'team leader', 'supervisor', 'administrator', 'intern', 'volunteer')
+		  );
+	""")
+
+	var staff_payload = []
+	if res["success"]:
+		for row in res["data"]:
+			var hid = String(row.get("human_id", "")).strip_edges()
+			var fn = String(row.get("first_name", "")).strip_edges()
+			var ln = String(row.get("last_name", "")).strip_edges()
+			var disp_name = (fn + " " + ln).strip_edges()
+			if disp_name == "":
+				disp_name = "Staff Member"
+			var email = String(row.get("email", "")).strip_edges() if row.get("email") != null else ""
+			var role = String(row.get("primary_role", "Staff")).strip_edges()
+			var pin_h = String(row.get("pin_pbkdf_hash", "")).strip_edges()
+			var cred_ver = int(row.get("credential_version", 1))
+
+			if hid != "" and pin_h != "":
+				staff_payload.append({
+					"human_id": hid,
+					"display_name": disp_name,
+					"email": email,
+					"role": role,
+					"pin_hash": pin_h,
+					"credential_version": cred_ver,
+					"capabilities": ["view_attendance"],
+					"status": "active"
+				})
+
+	var gateway_url = get_gateway_url()
+	var api_key = get_sync_api_key()
+	var url = gateway_url + "/api/v1/sync/staff-credentials-index"
+	var headers = [
+		"Content-Type: application/json",
+		"x-sync-api-key: " + api_key
+	]
+	var body = JSON.stringify({ "staff": staff_payload })
+
+	var req = HTTPRequest.new()
+	if parent_node and parent_node.is_inside_tree():
+		parent_node.add_child(req)
+		req.request_completed.connect(func(_res: int, resp_code: int, _h: PackedStringArray, _b: PackedByteArray):
+			req.queue_free()
+			if callback.is_valid():
+				callback.call({"success": resp_code == 200, "synced_count": staff_payload.size()})
+		, CONNECT_ONE_SHOT)
+		req.request(url, headers, HTTPClient.METHOD_POST, body)
+	else:
+		if callback.is_valid():
+			callback.call({"success": false, "error": "Parent node not in scene tree"})
 

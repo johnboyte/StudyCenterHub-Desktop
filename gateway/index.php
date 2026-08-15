@@ -30,6 +30,379 @@ function enforce_rate_limit_php($pdo, $endpoint_name) {
     $ins->execute([$ip, $endpoint_name, $now]);
 }
 
+// Layered PIN Rate Limiting Helpers
+function check_staff_auth_rate_limit($pdo, $identifier, $ip) {
+    $now_ts = time();
+    $id_key = 'id:' . strtolower(trim($identifier));
+    $ip_key = 'ip:' . trim($ip);
+
+    // Check identifier lock (max 5 failed attempts in 15 mins)
+    $stmt = $pdo->prepare("SELECT failed_attempts, locked_until FROM staff_auth_rate_limits WHERE rate_key = ?");
+    $stmt->execute([$id_key]);
+    $id_row = $stmt->fetch(PDO::FETCH_ASSOC);
+    $stmt->closeCursor();
+
+    if ($id_row && !empty($id_row['locked_until'])) {
+        if (strtotime($id_row['locked_until']) > $now_ts) {
+            return false;
+        }
+    }
+
+    // Check IP lock (max 20 failed attempts in 15 mins)
+    $stmt->execute([$ip_key]);
+    $ip_row = $stmt->fetch(PDO::FETCH_ASSOC);
+    $stmt->closeCursor();
+
+    if ($ip_row && !empty($ip_row['locked_until'])) {
+        if (strtotime($ip_row['locked_until']) > $now_ts) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+function record_staff_auth_attempt($pdo, $identifier, $ip, $success) {
+    $now_ts = time();
+    $now_str = gmdate('Y-m-d H:i:s');
+    $lock_duration = 900; // 15-minute lock duration
+
+    $id_key = 'id:' . strtolower(trim($identifier));
+    $ip_key = 'ip:' . trim($ip);
+
+    if ($success) {
+        $stmt = $pdo->prepare("DELETE FROM staff_auth_rate_limits WHERE rate_key IN (?, ?)");
+        $stmt->execute([$id_key, $ip_key]);
+        return;
+    }
+
+    // Update ID failure count
+    $stmt = $pdo->prepare("SELECT failed_attempts FROM staff_auth_rate_limits WHERE rate_key = ?");
+    $stmt->execute([$id_key]);
+    $id_row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    $id_fails = ($id_row ? intval($id_row['failed_attempts']) : 0) + 1;
+    $id_locked = ($id_fails >= 5) ? gmdate('Y-m-d H:i:s', $now_ts + $lock_duration) : null;
+
+    $stmt2 = $pdo->prepare("INSERT OR REPLACE INTO staff_auth_rate_limits (rate_key, failed_attempts, locked_until, last_attempt_at) VALUES (?, ?, ?, ?)");
+    $stmt2->execute([$id_key, $id_fails, $id_locked, $now_str]);
+
+    // Update IP failure count
+    $stmt->execute([$ip_key]);
+    $ip_row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    $ip_fails = ($ip_row ? intval($ip_row['failed_attempts']) : 0) + 1;
+    $ip_locked = ($ip_fails >= 20) ? gmdate('Y-m-d H:i:s', $now_ts + $lock_duration) : null;
+
+    $stmt2->execute([$ip_key, $ip_fails, $ip_locked, $now_str]);
+}
+
+// Mobile Staff Authentication Session Validator Helper
+function verify_mobile_session($pdo) {
+    $srv_sync_set = isset($_SERVER['HTTP_X_SYNC_API_KEY']) ? 1 : 0;
+    $srv_sync_len = strlen($_SERVER['HTTP_X_SYNC_API_KEY'] ?? '');
+
+    $srv_x_tok_set = isset($_SERVER['HTTP_X_MOBILE_SESSION_TOKEN']) ? 1 : 0;
+    $srv_x_tok_len = strlen($_SERVER['HTTP_X_MOBILE_SESSION_TOKEN'] ?? '');
+
+    $srv_sch_tok_set = isset($_SERVER['HTTP_X_SCH_MOBILE_TOKEN']) ? 1 : 0;
+    $srv_sch_tok_len = strlen($_SERVER['HTTP_X_SCH_MOBILE_TOKEN'] ?? '');
+
+    $srv_cookie_set = isset($_SERVER['HTTP_COOKIE']) ? 1 : 0;
+    $srv_cookie_len = strlen($_SERVER['HTTP_COOKIE'] ?? '');
+
+    $cookie_var_set = isset($_COOKIE['sch_mobile_session']) ? 1 : 0;
+    $cookie_var_len = strlen($_COOKIE['sch_mobile_session'] ?? '');
+
+    $has_gah = function_exists('getallheaders') ? 1 : 0;
+    $gah_sync_len = -1;
+    $gah_x_len = -1;
+    $gah_sch_len = -1;
+    $gah_cookie_len = -1;
+
+    if ($has_gah) {
+        $headers = getallheaders();
+        foreach ($headers as $hk => $hv) {
+            $lk = strtolower($hk);
+            if ($lk === 'x-sync-api-key') {
+                $gah_sync_len = strlen($hv);
+            } elseif ($lk === 'x-mobile-session-token') {
+                $gah_x_len = strlen($hv);
+            } elseif ($lk === 'x-sch-mobile-token') {
+                $gah_sch_len = strlen($hv);
+            } elseif ($lk === 'cookie') {
+                $gah_cookie_len = strlen($hv);
+            }
+        }
+    }
+
+    $token = trim($_SERVER['HTTP_X_MOBILE_SESSION_TOKEN'] ?? '');
+    if (empty($token) && isset($_SERVER['HTTP_X_SCH_MOBILE_TOKEN'])) {
+        $token = trim($_SERVER['HTTP_X_SCH_MOBILE_TOKEN']);
+    }
+    if (empty($token) && isset($_COOKIE['sch_mobile_session'])) {
+        $token = trim($_COOKIE['sch_mobile_session']);
+    }
+    if (empty($token) && isset($_SERVER['HTTP_AUTHORIZATION'])) {
+        if (preg_match('/Bearer\s+(mobsess_\S+)/i', $_SERVER['HTTP_AUTHORIZATION'], $m)) {
+            $token = trim($m[1]);
+        }
+    }
+
+    $extracted_len = strlen($token);
+    $extracted_pref = (strpos($token, 'mobsess_') === 0) ? 1 : 0;
+
+    $diag_payload = [
+        'srv_sync_set' => $srv_sync_set, 'srv_sync_len' => $srv_sync_len,
+        'srv_x_tok_set' => $srv_x_tok_set, 'srv_x_tok_len' => $srv_x_tok_len,
+        'srv_sch_tok_set' => $srv_sch_tok_set, 'srv_sch_tok_len' => $srv_sch_tok_len,
+        'srv_cookie_set' => $srv_cookie_set, 'srv_cookie_len' => $srv_cookie_len,
+        'cookie_var_set' => $cookie_var_set, 'cookie_var_len' => $cookie_var_len,
+        'has_gah' => $has_gah,
+        'gah_sync_len' => $gah_sync_len,
+        'gah_x_len' => $gah_x_len,
+        'gah_sch_len' => $gah_sch_len,
+        'gah_cookie_len' => $gah_cookie_len,
+        'extracted_len' => $extracted_len,
+        'extracted_pref' => $extracted_pref
+    ];
+
+    if (empty($token)) {
+        $diag_payload['reason'] = 'token_empty';
+        log_auth_diagnostic($pdo, 'DIAG-EXTENDED-HEADERS', 'verify_mobile_session', 'AuthException', json_encode($diag_payload), 401);
+        http_response_code(401);
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode(['success' => false, 'error' => 'Authentication required. Missing staff session token.']);
+        exit;
+    }
+
+    $token_hash = hash('sha256', $token);
+    $server_received_fp = substr($token_hash, 0, 12);
+
+    // Task 1 Progressive Predicate Diagnostic Evaluation
+    $pred_diag = [
+        'server_received_fp' => $server_received_fp,
+        'session_exists' => 0,
+        'session_revoked_value' => null,
+        'revoked_pass' => 0,
+        'created_at' => null,
+        'expires_at' => null,
+        'sqlite_now' => null,
+        'expiry_pass' => 0,
+        'session_human_id' => null,
+        'staff_row_exists_for_human_id' => 0,
+        'staff_status' => null,
+        'staff_status_pass' => 0,
+        'session_credential_version' => null,
+        'session_cred_ver_type' => null,
+        'staff_credential_version' => null,
+        'staff_cred_ver_type' => null,
+        'credential_version_pass' => 0,
+        'join_by_human_id_pass' => 0,
+        'stage_A_hash_only' => 0,
+        'stage_B_hash_plus_join' => 0,
+        'stage_C_plus_revoked' => 0,
+        'stage_D_plus_expiry' => 0,
+        'stage_E_plus_active' => 0,
+        'stage_F_plus_cred_ver' => 0,
+        'first_failing_stage' => 'none'
+    ];
+
+    try {
+        $ms_stmt = $pdo->prepare("SELECT human_id, credential_version, created_at, expires_at, revoked, typeof(credential_version) as cv_type FROM mobile_sessions WHERE session_token_hash = ? LIMIT 1");
+        $ms_stmt->execute([$token_hash]);
+        $ms_row = $ms_stmt->fetch(PDO::FETCH_ASSOC);
+        $ms_stmt->closeCursor();
+
+        if ($ms_row) {
+            $pred_diag['session_exists'] = 1;
+            $pred_diag['stage_A_hash_only'] = 1;
+            $pred_diag['session_human_id'] = $ms_row['human_id'];
+            $pred_diag['session_revoked_value'] = intval($ms_row['revoked']);
+            $pred_diag['revoked_pass'] = (intval($ms_row['revoked']) === 0) ? 1 : 0;
+            $pred_diag['created_at'] = $ms_row['created_at'];
+            $pred_diag['expires_at'] = $ms_row['expires_at'];
+            $pred_diag['session_credential_version'] = $ms_row['credential_version'];
+            $pred_diag['session_cred_ver_type'] = $ms_row['cv_type'];
+
+            $now_stmt = $pdo->query("SELECT datetime('now')");
+            $pred_diag['sqlite_now'] = $now_stmt->fetchColumn();
+            $now_stmt->closeCursor();
+
+            $exp_stmt = $pdo->prepare("SELECT (datetime(?) > datetime('now'))");
+            $exp_stmt->execute([$ms_row['expires_at']]);
+            $pred_diag['expiry_pass'] = intval($exp_stmt->fetchColumn()) === 1 ? 1 : 0;
+            $exp_stmt->closeCursor();
+
+            $sc_stmt = $pdo->prepare("SELECT human_id, status, credential_version, typeof(credential_version) as cv_type FROM staff_credentials_index WHERE human_id = ? LIMIT 1");
+            $sc_stmt->execute([$ms_row['human_id']]);
+            $sc_row = $sc_stmt->fetch(PDO::FETCH_ASSOC);
+            $sc_stmt->closeCursor();
+
+            if ($sc_row) {
+                $pred_diag['staff_row_exists_for_human_id'] = 1;
+                $pred_diag['staff_status'] = $sc_row['status'];
+                $pred_diag['staff_status_pass'] = (strtolower($sc_row['status']) === 'active') ? 1 : 0;
+                $pred_diag['staff_credential_version'] = $sc_row['credential_version'];
+                $pred_diag['staff_cred_ver_type'] = $sc_row['cv_type'];
+                $pred_diag['credential_version_pass'] = ($ms_row['credential_version'] == $sc_row['credential_version']) ? 1 : 0;
+            }
+
+            // Stage B: JOIN by human_id
+            $b_stmt = $pdo->prepare("SELECT 1 FROM mobile_sessions ms JOIN staff_credentials_index sc ON sc.human_id = ms.human_id WHERE ms.session_token_hash = ? LIMIT 1");
+            $b_stmt->execute([$token_hash]);
+            $pred_diag['stage_B_hash_plus_join'] = $b_stmt->fetchColumn() ? 1 : 0;
+            $pred_diag['join_by_human_id_pass'] = $pred_diag['stage_B_hash_plus_join'];
+            $b_stmt->closeCursor();
+
+            // Stage C: plus revoked = 0
+            $c_stmt = $pdo->prepare("SELECT 1 FROM mobile_sessions ms JOIN staff_credentials_index sc ON sc.human_id = ms.human_id WHERE ms.session_token_hash = ? AND ms.revoked = 0 LIMIT 1");
+            $c_stmt->execute([$token_hash]);
+            $pred_diag['stage_C_plus_revoked'] = $c_stmt->fetchColumn() ? 1 : 0;
+            $c_stmt->closeCursor();
+
+            // Stage D: plus expiry
+            $d_stmt = $pdo->prepare("SELECT 1 FROM mobile_sessions ms JOIN staff_credentials_index sc ON sc.human_id = ms.human_id WHERE ms.session_token_hash = ? AND ms.revoked = 0 AND datetime(ms.expires_at) > datetime('now') LIMIT 1");
+            $d_stmt->execute([$token_hash]);
+            $pred_diag['stage_D_plus_expiry'] = $d_stmt->fetchColumn() ? 1 : 0;
+            $d_stmt->closeCursor();
+
+            // Stage E: plus active status
+            $e_stmt = $pdo->prepare("SELECT 1 FROM mobile_sessions ms JOIN staff_credentials_index sc ON sc.human_id = ms.human_id WHERE ms.session_token_hash = ? AND ms.revoked = 0 AND datetime(ms.expires_at) > datetime('now') AND LOWER(sc.status) = 'active' LIMIT 1");
+            $e_stmt->execute([$token_hash]);
+            $pred_diag['stage_E_plus_active'] = $e_stmt->fetchColumn() ? 1 : 0;
+            $e_stmt->closeCursor();
+
+            // Stage F: plus credential version match
+            $f_stmt = $pdo->prepare("SELECT 1 FROM mobile_sessions ms JOIN staff_credentials_index sc ON sc.human_id = ms.human_id WHERE ms.session_token_hash = ? AND ms.revoked = 0 AND datetime(ms.expires_at) > datetime('now') AND LOWER(sc.status) = 'active' AND ms.credential_version = sc.credential_version LIMIT 1");
+            $f_stmt->execute([$token_hash]);
+            $pred_diag['stage_F_plus_cred_ver'] = $f_stmt->fetchColumn() ? 1 : 0;
+            $f_stmt->closeCursor();
+
+            if ($pred_diag['stage_A_hash_only'] && !$pred_diag['stage_B_hash_plus_join']) {
+                $pred_diag['first_failing_stage'] = 'stage_B_join_human_id';
+            } elseif ($pred_diag['stage_B_hash_plus_join'] && !$pred_diag['stage_C_plus_revoked']) {
+                $pred_diag['first_failing_stage'] = 'stage_C_revoked';
+            } elseif ($pred_diag['stage_C_plus_revoked'] && !$pred_diag['stage_D_plus_expiry']) {
+                $pred_diag['first_failing_stage'] = 'stage_D_expiry';
+            } elseif ($pred_diag['stage_D_plus_expiry'] && !$pred_diag['stage_E_plus_active']) {
+                $pred_diag['first_failing_stage'] = 'stage_E_staff_status';
+            } elseif ($pred_diag['stage_E_plus_active'] && !$pred_diag['stage_F_plus_cred_ver']) {
+                $pred_diag['first_failing_stage'] = 'stage_F_credential_version';
+            }
+        }
+    } catch (Throwable $pe) {
+        $pred_diag['pred_diag_error'] = get_class($pe) . ': ' . $pe->getMessage();
+    }
+
+    $stmt = $pdo->prepare("
+        SELECT 
+            ms.session_token_hash, ms.human_id, ms.display_name, ms.role, ms.expires_at, ms.credential_version,
+            sc.capabilities_json, sc.status as staff_status
+        FROM mobile_sessions ms
+        JOIN staff_credentials_index sc ON sc.human_id = ms.human_id
+        WHERE ms.session_token_hash = ?
+          AND ms.revoked = 0
+          AND datetime(ms.expires_at) > datetime('now')
+          AND LOWER(sc.status) = 'active'
+          AND ms.credential_version = sc.credential_version
+    ");
+    $stmt->execute([$token_hash]);
+    $session = $stmt->fetch(PDO::FETCH_ASSOC);
+    $stmt->closeCursor();
+
+    if (!$session) {
+        $diag_payload['predicates'] = $pred_diag;
+        $diag_payload['reason'] = 'query_failed';
+        log_auth_diagnostic($pdo, 'DIAG-PREDICATES-FAIL', 'verify_mobile_session', 'AuthException', json_encode($diag_payload), 401);
+        http_response_code(401);
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode(['success' => false, 'error' => 'Invalid or revoked staff session token. Please sign in again.']);
+        exit;
+    }
+
+    $diag_payload['predicates'] = $pred_diag;
+    log_auth_diagnostic($pdo, 'DIAG-PREDICATES-OK', 'verify_mobile_session', 'None', json_encode($diag_payload), 200);
+    return $session;
+}
+
+// Canonical Mobile Session Creation Helper
+function create_mobile_session_record($pdo, $staff) {
+    $token = 'mobsess_' . bin2hex(random_bytes(32));
+    $token_hash = hash('sha256', $token);
+    $created_at = gmdate('Y-m-d H:i:s');
+    $expires_at = gmdate('Y-m-d H:i:s', time() + (7 * 86400));
+
+    $hid = strval($staff['human_id'] ?? '');
+    $name = strval($staff['display_name'] ?? '');
+    $role = strval($staff['role'] ?? 'Staff');
+    $cred_ver = intval($staff['credential_version'] ?? 1);
+
+    $s_stmt = $pdo->prepare("INSERT INTO mobile_sessions (session_token_hash, human_id, display_name, role, credential_version, created_at, expires_at, revoked) VALUES (?, ?, ?, ?, ?, ?, ?, 0)");
+    
+    $attempts = 0;
+    $max_attempts = 3;
+    while ($attempts < $max_attempts) {
+        try {
+            $s_stmt->execute([
+                $token_hash,
+                $hid,
+                $name,
+                $role,
+                $cred_ver,
+                $created_at,
+                $expires_at
+            ]);
+            break;
+        } catch (PDOException $e) {
+            $attempts++;
+            $err_msg = strtolower($e->getMessage());
+            $is_busy = ($e->getCode() == 5 || strpos($err_msg, 'database is locked') !== false || strpos($err_msg, 'sqlite_busy') !== false);
+            if ($is_busy && $attempts < $max_attempts) {
+                usleep(150000);
+                continue;
+            }
+            throw $e;
+        }
+    }
+
+    return [
+        'token' => $token,
+        'created_at' => $created_at,
+        'expires_at' => $expires_at
+    ];
+}
+
+// Safe Server-Side Diagnostic Logging Helper (Zero Secrets Stored)
+function log_auth_diagnostic($pdo, $ref_id, $stage, $ex_class, $msg, $code = 0, $id_match = 0, $pin_ok = 0, $cred_ver = 0) {
+    try {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS mobile_auth_diagnostics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            reference_id TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            stage TEXT NOT NULL,
+            exception_class TEXT,
+            sanitized_error TEXT,
+            error_code INTEGER DEFAULT 0,
+            identifier_match INTEGER NOT NULL DEFAULT 0,
+            pin_verified INTEGER NOT NULL DEFAULT 0,
+            credential_version INTEGER NOT NULL DEFAULT 0
+        );");
+
+        $stmt = $pdo->prepare("INSERT INTO mobile_auth_diagnostics (reference_id, created_at, stage, exception_class, sanitized_error, error_code, identifier_match, pin_verified, credential_version) VALUES (?, datetime('now'), ?, ?, ?, ?, ?, ?, ?)");
+        $stmt->execute([
+            strval($ref_id),
+            strval($stage),
+            strval($ex_class),
+            substr(strval($msg), 0, 1000),
+            intval($code),
+            $id_match ? 1 : 0,
+            $pin_ok ? 1 : 0,
+            intval($cred_ver)
+        ]);
+    } catch (Throwable $e) {}
+}
+
 /**
  * index.php
  * Production Cloud Relay Router & Hardware Scanner Intake Controller.
@@ -51,8 +424,11 @@ try {
         mkdir($db_dir, 0755, true);
     }
 
-    $pdo = new PDO('sqlite:' . $db_dir . '/relay.db');
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $pdo = new PDO('sqlite:' . $db_dir . '/relay.db', null, null, [
+        PDO::ATTR_TIMEOUT => 5,
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION
+    ]);
+    $pdo->exec("PRAGMA busy_timeout = 5000");
 
     // Ensure Cloud Relay tables exist
     $pdo->exec("
@@ -132,10 +508,12 @@ try {
     );");
 
     $pdo->exec("CREATE TABLE IF NOT EXISTS directory_index (
-            phone_e164 TEXT PRIMARY KEY,
+            human_id TEXT PRIMARY KEY,
+            phone_e164 TEXT,
             first_name TEXT NOT NULL,
-            masked_phone TEXT NOT NULL,
-            human_id TEXT NOT NULL,
+            last_name TEXT DEFAULT '',
+            masked_phone TEXT DEFAULT '',
+            profile_photo TEXT DEFAULT '',
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         );");
 
@@ -145,6 +523,179 @@ try {
             attendance_date TEXT NOT NULL,
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         );");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS staff_credentials_index (
+            human_id TEXT PRIMARY KEY,
+            display_name TEXT NOT NULL,
+            email TEXT,
+            role TEXT NOT NULL DEFAULT 'Staff',
+            pin_hash TEXT NOT NULL,
+            credential_version INTEGER NOT NULL DEFAULT 1,
+            capabilities_json TEXT NOT NULL DEFAULT '[\"view_attendance\"]',
+            status TEXT NOT NULL DEFAULT 'active',
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS mobile_sessions (
+            session_token_hash TEXT PRIMARY KEY,
+            human_id TEXT NOT NULL,
+            display_name TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'Staff',
+            credential_version INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            expires_at TEXT NOT NULL,
+            revoked INTEGER NOT NULL DEFAULT 0
+        );");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS staff_auth_rate_limits (
+            rate_key TEXT PRIMARY KEY,
+            failed_attempts INTEGER NOT NULL DEFAULT 0,
+            locked_until TEXT DEFAULT NULL,
+            last_attempt_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS mobile_auth_diagnostics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            reference_id TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            stage TEXT NOT NULL,
+            exception_class TEXT,
+            sanitized_error TEXT,
+            error_code INTEGER DEFAULT 0,
+            identifier_match INTEGER NOT NULL DEFAULT 0,
+            pin_verified INTEGER NOT NULL DEFAULT 0,
+            credential_version INTEGER NOT NULL DEFAULT 0
+        );");
+    } catch (PDOException $e) {}
+
+    // Idempotent Safe Migration for directory_index (Legacy phone_e164 PRIMARY KEY -> Canonical human_id PRIMARY KEY)
+    $GLOBALS['dir_migration_stats'] = [
+        'migration_executed' => false,
+        'legacy_rows_migrated' => 0,
+        'legacy_rows_skipped' => 0
+    ];
+
+    try {
+        $table_exists = false;
+        $chk = $pdo->query("SELECT name FROM sqlite_master WHERE type='table' AND name='directory_index'")->fetch();
+        if ($chk) {
+            $table_exists = true;
+        }
+
+        $pk_col = '';
+        $has_last_name = false;
+        $has_profile_photo = false;
+
+        if ($table_exists) {
+            $pragma = $pdo->query("PRAGMA table_info(directory_index)")->fetchAll(PDO::FETCH_ASSOC);
+            foreach ($pragma as $c) {
+                if (!empty($c['pk'])) {
+                    $pk_col = $c['name'];
+                }
+                if ($c['name'] === 'last_name') {
+                    $has_last_name = true;
+                }
+                if ($c['name'] === 'profile_photo') {
+                    $has_profile_photo = true;
+                }
+            }
+        }
+
+        if (!$table_exists || $pk_col === 'phone_e164' || !$has_last_name || !$has_profile_photo) {
+            $pdo->beginTransaction();
+
+            $total_legacy_rows = 0;
+            if ($table_exists) {
+                $cnt_stmt = $pdo->query("SELECT COUNT(*) FROM directory_index");
+                $total_legacy_rows = intval($cnt_stmt->fetchColumn());
+                $pdo->exec("ALTER TABLE directory_index RENAME TO directory_index_legacy_backup;");
+            }
+
+            $pdo->exec("CREATE TABLE IF NOT EXISTS directory_index (
+                human_id TEXT PRIMARY KEY,
+                phone_e164 TEXT,
+                first_name TEXT NOT NULL,
+                last_name TEXT DEFAULT '',
+                masked_phone TEXT DEFAULT '',
+                profile_photo TEXT DEFAULT '',
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );");
+
+            $pdo->exec("CREATE INDEX IF NOT EXISTS idx_directory_phone_e164 ON directory_index(phone_e164);");
+
+            $migrated_count = 0;
+            if ($table_exists) {
+                $old_pragma = $pdo->query("PRAGMA table_info(directory_index_legacy_backup)")->fetchAll(PDO::FETCH_ASSOC);
+                $old_cols = array_column($old_pragma, 'name');
+
+                if (in_array('human_id', $old_cols)) {
+                    $sel_phone = in_array('phone_e164', $old_cols) ? "COALESCE(phone_e164, '')" : "''";
+                    $sel_first = in_array('first_name', $old_cols) ? "COALESCE(first_name, 'Member')" : "'Member'";
+                    $sel_last = in_array('last_name', $old_cols) ? "COALESCE(last_name, '')" : "''";
+                    $sel_masked = in_array('masked_phone', $old_cols) ? "COALESCE(masked_phone, '')" : "''";
+                    $sel_photo = in_array('profile_photo', $old_cols) ? "COALESCE(profile_photo, '')" : "''";
+                    $sel_updated = in_array('updated_at', $old_cols) ? "COALESCE(updated_at, datetime('now'))" : "datetime('now')";
+
+                    $migrated_count = $pdo->exec("INSERT OR IGNORE INTO directory_index (human_id, phone_e164, first_name, last_name, masked_phone, profile_photo, updated_at)
+                                SELECT trim(human_id), $sel_phone, $sel_first, $sel_last, $sel_masked, $sel_photo, $sel_updated
+                                FROM directory_index_legacy_backup
+                                WHERE human_id IS NOT NULL AND trim(human_id) != '';");
+                }
+
+                $pdo->exec("DROP TABLE directory_index_legacy_backup;");
+            }
+
+            $pdo->commit();
+            $GLOBALS['dir_migration_stats']['migration_executed'] = true;
+            $GLOBALS['dir_migration_stats']['legacy_rows_migrated'] = intval($migrated_count);
+            $GLOBALS['dir_migration_stats']['legacy_rows_skipped'] = max(0, $total_legacy_rows - intval($migrated_count));
+        } else {
+            $pdo->exec("CREATE INDEX IF NOT EXISTS idx_directory_phone_e164 ON directory_index(phone_e164);");
+        }
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+    }
+
+    try {
+        $pdo->exec("ALTER TABLE staff_credentials_index ADD COLUMN email TEXT");
+    } catch (PDOException $e) {}
+
+    try {
+        $pdo->exec("ALTER TABLE staff_credentials_index ADD COLUMN role TEXT NOT NULL DEFAULT 'Staff'");
+    } catch (PDOException $e) {}
+
+    try {
+        $pdo->exec("ALTER TABLE staff_credentials_index ADD COLUMN credential_version INTEGER NOT NULL DEFAULT 1");
+    } catch (PDOException $e) {}
+
+    try {
+        $pdo->exec("ALTER TABLE staff_credentials_index ADD COLUMN capabilities_json TEXT NOT NULL DEFAULT '[\"view_attendance\"]'");
+    } catch (PDOException $e) {}
+
+    try {
+        $pdo->exec("ALTER TABLE staff_credentials_index ADD COLUMN status TEXT NOT NULL DEFAULT 'active'");
+    } catch (PDOException $e) {}
+
+    try {
+        $pdo->exec("ALTER TABLE mobile_sessions ADD COLUMN display_name TEXT NOT NULL DEFAULT ''");
+    } catch (PDOException $e) {}
+
+    try {
+        $pdo->exec("ALTER TABLE mobile_sessions ADD COLUMN role TEXT NOT NULL DEFAULT 'Staff'");
+    } catch (PDOException $e) {}
+
+    try {
+        $pdo->exec("ALTER TABLE mobile_sessions ADD COLUMN credential_version INTEGER NOT NULL DEFAULT 1");
+    } catch (PDOException $e) {}
+
+    try {
+        $pdo->exec("ALTER TABLE mobile_sessions ADD COLUMN created_at TEXT NOT NULL DEFAULT (datetime('now'))");
+    } catch (PDOException $e) {}
+
+    try {
+        $pdo->exec("ALTER TABLE mobile_sessions ADD COLUMN revoked INTEGER NOT NULL DEFAULT 0");
     } catch (PDOException $e) {}
 
     try {
@@ -190,10 +741,12 @@ try {
     );");
 
     $pdo->exec("CREATE TABLE IF NOT EXISTS directory_index (
-            phone_e164 TEXT PRIMARY KEY,
+            human_id TEXT PRIMARY KEY,
+            phone_e164 TEXT,
             first_name TEXT NOT NULL,
-            masked_phone TEXT NOT NULL,
-            human_id TEXT NOT NULL,
+            last_name TEXT DEFAULT '',
+            masked_phone TEXT DEFAULT '',
+            profile_photo TEXT DEFAULT '',
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         )");
     } catch (PDOException $e) {
@@ -529,21 +1082,54 @@ if ($uri === '/api/v1/sync/directory-index' && $method === 'POST') {
     $input = json_decode($raw, true);
     $members = is_array($input) && isset($input['members']) ? $input['members'] : (is_array($input) ? $input : []);
 
-    $stmt = $pdo->prepare("INSERT OR REPLACE INTO directory_index (phone_e164, first_name, masked_phone, human_id, updated_at) VALUES (?, ?, ?, ?, datetime('now'))");
+    // Ensure columns exist on target table
+    try { $pdo->exec("ALTER TABLE directory_index ADD COLUMN last_name TEXT DEFAULT ''"); } catch (Throwable $e) {}
+    try { $pdo->exec("ALTER TABLE directory_index ADD COLUMN profile_photo TEXT DEFAULT ''"); } catch (Throwable $e) {}
+
+    $stmt = $pdo->prepare("
+        INSERT INTO directory_index (human_id, phone_e164, first_name, last_name, masked_phone, profile_photo, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(human_id) DO UPDATE SET
+            phone_e164 = excluded.phone_e164,
+            first_name = excluded.first_name,
+            last_name = excluded.last_name,
+            masked_phone = excluded.masked_phone,
+            profile_photo = excluded.profile_photo,
+            updated_at = datetime('now')
+    ");
+
     $count = 0;
+    $failed_count = 0;
+    $errors = [];
+
     foreach ($members as $m) {
+        $hid = trim($m['human_id'] ?? '');
+        $fn = trim($m['first_name'] ?? '');
+        $ln = trim($m['last_name'] ?? '');
+        $photo = trim($m['profile_photo'] ?? '');
         $raw_p = $m['phone'] ?? $m['phone_e164'] ?? '';
         $e164 = normalize_phone_e164_php($raw_p);
-        $fn = trim($m['first_name'] ?? '');
-        $hid = trim($m['human_id'] ?? '');
         $mp = mask_phone_php($raw_p);
-        if ($e164 && $fn) {
-            $stmt->execute([$e164, $fn, $mp, $hid]);
-            $count++;
+
+        if ($hid !== '' && $fn !== '') {
+            try {
+                $stmt->execute([$hid, $e164, $fn, $ln, $mp, $photo]);
+                $count++;
+            } catch (Throwable $e) {
+                $failed_count++;
+                $errors[] = get_class($e) . ": " . $e->getMessage();
+            }
         }
     }
 
-    echo json_encode(['success' => true, 'synced_count' => $count]);
+    $is_success = ($failed_count === 0);
+    http_response_code($is_success ? 200 : 500);
+    echo json_encode([
+        'success' => $is_success,
+        'synced_count' => $count,
+        'failed_count' => $failed_count,
+        'errors' => $errors
+    ]);
     exit;
 }
 
@@ -578,6 +1164,1401 @@ if ($uri === '/api/v1/sync/attendance-index' && $method === 'POST') {
     $pdo->commit();
 
     echo json_encode(['success' => true, 'synced_count' => $count, 'attendance_date' => $att_date]);
+    exit;
+}
+
+// Route: Safe Read-Back Status of Staff Credentials Index (Diagnostic Read-Back Only)
+if ($uri === '/api/v1/sync/staff-credentials-status' && $method === 'GET') {
+    header('Content-Type: application/json; charset=utf-8');
+    $req_key = $_SERVER['HTTP_X_SYNC_API_KEY'] ?? $_GET['sync_api_key'] ?? '';
+    if ($req_key !== $sync_api_key) {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'error' => 'Unauthorized']);
+        exit;
+    }
+
+    $cols = [];
+    $pragma = $pdo->query("PRAGMA table_info(staff_credentials_index)")->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($pragma as $col) {
+        $cols[] = $col['name'];
+    }
+
+    $ms_cols = [];
+    $ms_pragma = $pdo->query("PRAGMA table_info(mobile_sessions)")->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($ms_pragma as $col) {
+        $ms_cols[] = $col['name'];
+    }
+
+    $rl_cols = [];
+    $rl_pragma = $pdo->query("PRAGMA table_info(staff_auth_rate_limits)")->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($rl_pragma as $col) {
+        $rl_cols[] = $col['name'];
+    }
+
+    $dir_cols = [];
+    $dir_pk = '';
+    $dir_count = 0;
+    $pragma_table_info = [];
+    $pragma_index_list = [];
+    $pragma_index_details = [];
+
+    try {
+        $pragma_table_info = $pdo->query("PRAGMA table_info(directory_index)")->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($pragma_table_info as $col) {
+            $dir_cols[] = $col['name'];
+            if (!empty($col['pk'])) {
+                $dir_pk = $col['name'];
+            }
+        }
+        $cnt_r = $pdo->query("SELECT COUNT(*) as cnt FROM directory_index")->fetch(PDO::FETCH_ASSOC);
+        $dir_count = intval($cnt_r['cnt'] ?? 0);
+
+        $pragma_index_list = $pdo->query("PRAGMA index_list(directory_index)")->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($pragma_index_list as $idx) {
+            $idx_name = $idx['name'] ?? '';
+            if (!empty($idx_name)) {
+                $idx_info = $pdo->query("PRAGMA index_info(" . $pdo->quote($idx_name) . ")")->fetchAll(PDO::FETCH_ASSOC);
+                $pragma_index_details[$idx_name] = $idx_info;
+            }
+        }
+    } catch (Throwable $e) {}
+
+    $dir_records = [];
+    try {
+        $d_stmt = $pdo->query("SELECT human_id, phone_e164, first_name, COALESCE(last_name, '') as last_name, length(COALESCE(profile_photo, '')) as photo_len FROM directory_index WHERE human_id = 'P-20260813-F9C7' OR length(profile_photo) > 0 ORDER BY length(profile_photo) DESC LIMIT 5");
+        while ($dr = $d_stmt->fetch(PDO::FETCH_ASSOC)) {
+            $dir_records[] = $dr;
+        }
+    } catch (Throwable $e) {
+        $dir_records = ['error' => $e->getMessage()];
+    }
+
+    $write_audit_log = [];
+    try {
+        $audit_stmt = $pdo->query("SELECT id, timestamp, route_name, pid, human_id, operation_type, incoming_last_name, incoming_photo_len, post_write_last_name, post_write_photo_len FROM directory_write_audit ORDER BY id DESC LIMIT 20");
+        while ($ar_row = $audit_stmt->fetch(PDO::FETCH_ASSOC)) {
+            $write_audit_log[] = $ar_row;
+        }
+    } catch (Throwable $e) {}
+
+    $records = [];
+    $stmt = $pdo->query("SELECT human_id, display_name, email, role, credential_version, capabilities_json, status, updated_at, length(pin_hash) as hash_len, substr(pin_hash, 1, 13) as hash_prefix FROM staff_credentials_index");
+    while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        $records[] = $r;
+    }
+
+    # Protected Session Creation Self-Test using REAL Staff Record (Rolled back immediately)
+    $test_res = "PASS";
+    $test_err = "";
+    $rnd_test = "PASS";
+    $pdo_test = "PASS";
+    $failing_stage = "none";
+    try {
+        $pdo->beginTransaction();
+        $real_staff_row = isset($records[0]) ? $records[0] : [
+            'human_id' => 'P-20260813-F9C7',
+            'display_name' => 'John Boyte',
+            'role' => 'Staff',
+            'credential_version' => 3
+        ];
+        
+        $failing_stage = "create_mobile_session_record";
+        $sess_test = create_mobile_session_record($pdo, $real_staff_row);
+        
+        $failing_stage = "rollback";
+        $pdo->rollBack();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        $test_res = "FAIL";
+        $pdo_test = "FAIL";
+        $test_err = get_class($e) . ": " . $e->getMessage() . " at line " . strval($e->getLine());
+    }
+
+    $att_sample = [];
+    try {
+        $a_stmt = $pdo->prepare("
+            SELECT 
+                t.human_id,
+                COALESCE(d.first_name, 'Member') as first_name,
+                COALESCE(d.last_name, '') as last_name,
+                length(COALESCE(d.profile_photo, '')) as photo_len,
+                CASE WHEN length(COALESCE(d.profile_photo, '')) > 0 THEN 1 ELSE 0 END as has_photo,
+                t.attendance_date,
+                t.updated_at as check_in_time
+            FROM today_attendance_index t
+            LEFT JOIN directory_index d 
+                   ON (t.human_id = d.human_id OR (t.phone_e164 = d.phone_e164 AND t.phone_e164 != ''))
+            ORDER BY t.updated_at DESC LIMIT 5
+        ");
+        $a_stmt->execute();
+        while ($ar = $a_stmt->fetch(PDO::FETCH_ASSOC)) {
+            $att_sample[] = [
+                'human_id' => $ar['human_id'],
+                'first_name' => $ar['first_name'],
+                'last_name' => $ar['last_name'],
+                'has_photo' => intval($ar['has_photo']) === 1,
+                'photo_len' => intval($ar['photo_len']),
+                'photo_url' => intval($ar['has_photo']) === 1 ? ('/api/v1/mobile/people/photo?human_id=' . urlencode($ar['human_id'])) : null,
+                'check_in_time' => $ar['check_in_time']
+            ];
+        }
+    } catch (Throwable $e) {
+        $att_sample = ['error' => $e->getMessage()];
+    }
+
+    echo json_encode([
+        'success' => true,
+        'table_columns' => $cols,
+        'mobile_sessions_columns' => $ms_cols,
+        'rate_limits_columns' => $rl_cols,
+        'directory_columns' => $dir_cols,
+        'directory_pk' => $dir_pk,
+        'directory_count' => $dir_count,
+        'directory_migration' => $GLOBALS['dir_migration_stats'],
+        'pragma_table_info' => $pragma_table_info,
+        'pragma_index_list' => $pragma_index_list,
+        'pragma_index_details' => $pragma_index_details,
+        'directory_sample' => $dir_records,
+        'today_attendance_sample' => $att_sample,
+        'session_insert_test' => $test_res,
+        'real_staff_session_insert_test' => $test_res,
+        'random_bytes_test' => $rnd_test,
+        'pdo_session_insert_test' => $pdo_test,
+        'failing_stage' => $failing_stage,
+        'test_error' => $test_err,
+        'records' => $records
+    ]);
+    exit;
+}
+
+// Route: Safe Read-Back of Latest Mobile Auth Diagnostic Record
+if ($uri === '/api/v1/sync/mobile-auth-diagnostic/latest' && $method === 'GET') {
+    header('Content-Type: application/json; charset=utf-8');
+    $req_key = $_SERVER['HTTP_X_SYNC_API_KEY'] ?? $_GET['sync_api_key'] ?? '';
+    if ($req_key !== $sync_api_key) {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'error' => 'Unauthorized']);
+        exit;
+    }
+
+    $diag = null;
+    try {
+        $stmt = $pdo->query("SELECT reference_id, created_at, stage, exception_class, sanitized_error, error_code, identifier_match, pin_verified, credential_version FROM mobile_auth_diagnostics ORDER BY id DESC LIMIT 1");
+        $diag = $stmt->fetch(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {}
+
+    echo json_encode([
+        'success' => true,
+        'latest_diagnostic' => $diag
+    ]);
+    exit;
+}
+
+// Route: Staff Credentials Index Sync (Desktop -> Cloud Relay)
+if ($uri === '/api/v1/sync/staff-credentials-index' && $method === 'POST') {
+    header('Content-Type: application/json; charset=utf-8');
+    $req_key = $_SERVER['HTTP_X_SYNC_API_KEY'] ?? $_GET['sync_api_key'] ?? '';
+    if ($req_key !== $sync_api_key) {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'error' => 'Unauthorized']);
+        exit;
+    }
+
+    $raw = file_get_contents('php://input');
+    $input = json_decode($raw, true);
+    $staff = is_array($input) && isset($input['staff']) ? $input['staff'] : [];
+
+    $pdo->beginTransaction();
+    $pdo->exec("DELETE FROM staff_credentials_index;");
+    $stmt = $pdo->prepare("INSERT OR REPLACE INTO staff_credentials_index (human_id, display_name, email, role, pin_hash, credential_version, capabilities_json, status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))");
+
+    $count = 0;
+    foreach ($staff as $item) {
+        if (is_array($item)) {
+            $hid = trim($item['human_id'] ?? '');
+            $name = trim($item['display_name'] ?? $item['name'] ?? '');
+            $email = trim($item['email'] ?? '');
+            $role = trim($item['role'] ?? 'Staff');
+            $pin_h = trim($item['pin_hash'] ?? '');
+            $cred_ver = intval($item['credential_version'] ?? 1);
+            $caps = is_array($item['capabilities'] ?? null) ? json_encode($item['capabilities']) : '["view_attendance"]';
+            $st = trim($item['status'] ?? 'active');
+
+            if ($hid !== '' && $name !== '' && $pin_h !== '') {
+                $stmt->execute([$hid, $name, $email, $role, $pin_h, $cred_ver, $caps, $st]);
+                $count++;
+            }
+        }
+    }
+
+    // Instantly revoke active mobile sessions for staff who were deactivated, removed, or whose credential version changed
+    $rev_audit_list = [];
+    try {
+        $audit_q = $pdo->query("
+            SELECT 
+                ms.human_id,
+                ms.credential_version as ms_cred_ver,
+                ms.created_at as ms_created_at,
+                ms.expires_at as ms_expires_at,
+                sc.credential_version as sc_cred_ver,
+                sc.status as sc_status,
+                CASE 
+                    WHEN sc.human_id IS NULL THEN 'missing_staff'
+                    WHEN LOWER(sc.status) != 'active' THEN 'inactive_staff'
+                    WHEN ms.credential_version != sc.credential_version THEN 'credential_version_mismatch'
+                    ELSE 'unknown'
+                END as revocation_reason
+            FROM mobile_sessions ms
+            LEFT JOIN staff_credentials_index sc ON sc.human_id = ms.human_id
+            WHERE ms.revoked = 0
+              AND (
+                  sc.human_id IS NULL 
+               OR LOWER(sc.status) != 'active' 
+               OR ms.credential_version != sc.credential_version
+              )
+        ");
+        $rev_audit_list = $audit_q->fetchAll(PDO::FETCH_ASSOC);
+        $audit_q->closeCursor();
+    } catch (Throwable $ae) {}
+
+    $rev_stmt = $pdo->prepare("
+        UPDATE mobile_sessions 
+        SET revoked = 1 
+        WHERE revoked = 0
+          AND session_token_hash IN (
+            SELECT ms.session_token_hash 
+            FROM mobile_sessions ms
+            LEFT JOIN staff_credentials_index sc ON sc.human_id = ms.human_id
+            WHERE ms.revoked = 0
+              AND (
+                  sc.human_id IS NULL 
+               OR LOWER(sc.status) != 'active' 
+               OR ms.credential_version != sc.credential_version
+              )
+        )
+    ");
+    $rev_stmt->execute();
+    $affected_rows = $rev_stmt->rowCount();
+    $rev_stmt->closeCursor();
+
+    if ($affected_rows > 0 || !empty($rev_audit_list)) {
+        $audit_payload = [
+            'revocation_source' => 'staff_credentials_sync',
+            'affected_rows' => $affected_rows,
+            'caller_ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown',
+            'caller_user_agent' => substr($_SERVER['HTTP_USER_AGENT'] ?? 'unknown', 0, 100),
+            'has_valid_sync_key' => ($req_key === $sync_api_key) ? 1 : 0,
+            'revoked_sessions_audit' => $rev_audit_list
+        ];
+        log_auth_diagnostic($pdo, 'DIAG-REVOCATION-AUDIT', 'sync_staff_credentials_index', 'RevocationEvent', json_encode($audit_payload), 200);
+    }
+
+    $pdo->commit();
+
+    echo json_encode(['success' => true, 'synced_count' => $count]);
+    exit;
+}
+
+// Route: Authenticated Mobile Staff Login
+if (($uri === '/api/v1/mobile/auth/login' || $uri === '/mobile/api/auth/login') && $method === 'POST') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $ref_id = 'REF-' . strtoupper(bin2hex(random_bytes(4)));
+    $cur_stage = 'request_parse';
+    $id_match = 0;
+    $pin_ok = 0;
+    $cred_ver = 0;
+
+    try {
+        $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+        $raw = file_get_contents('php://input');
+        $input = json_decode($raw, true);
+
+        $identifier = is_array($input) ? trim($input['identifier'] ?? $input['human_id'] ?? $input['email'] ?? '') : '';
+        $pin = is_array($input) ? trim($input['pin'] ?? '') : '';
+
+        if (empty($identifier) || empty($pin)) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'error' => 'Staff ID or email and 6-digit PIN are required.', 'reference_id' => $ref_id]);
+            exit;
+        }
+
+        if (strlen($pin) !== 6 || !ctype_digit($pin)) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'error' => 'Mobile Staff PIN must be exactly 6 numeric digits.', 'reference_id' => $ref_id]);
+            exit;
+        }
+
+        $cur_stage = 'rate_limit_check';
+        if (!check_staff_auth_rate_limit($pdo, $identifier, $ip)) {
+            http_response_code(429);
+            echo json_encode(['success' => false, 'error' => 'Too many failed login attempts. Please wait 15 minutes before trying again.', 'reference_id' => $ref_id]);
+            exit;
+        }
+
+        $cur_stage = 'staff_lookup';
+        $stmt = $pdo->prepare("SELECT human_id, display_name, email, role, pin_hash, credential_version, capabilities_json, status FROM staff_credentials_index WHERE (human_id = ? OR LOWER(email) = LOWER(?)) AND LOWER(status) = 'active' LIMIT 1");
+        $stmt->execute([$identifier, $identifier]);
+        $staff = $stmt->fetch(PDO::FETCH_ASSOC);
+        $stmt->closeCursor();
+        unset($stmt);
+
+        $authenticated = false;
+
+        if ($staff) {
+            $id_match = 1;
+            $cred_ver = intval($staff['credential_version'] ?? 1);
+            $cur_stage = 'pbkdf2_verification';
+            $stored_hash = $staff['pin_hash'];
+            if (strpos($stored_hash, 'pbkdf2:') === 0) {
+                $parts = explode(':', $stored_hash);
+                if (count($parts) === 5) {
+                    $algo = $parts[1];
+                    $iterations = intval($parts[2]);
+                    $salt_bin = hex2bin($parts[3]);
+                    $expected_digest = $parts[4];
+                    $computed_digest = bin2hex(hash_pbkdf2($algo, $pin, $salt_bin, $iterations, 32, true));
+                    if (hash_equals($expected_digest, $computed_digest)) {
+                        $authenticated = true;
+                        $pin_ok = 1;
+                    }
+                }
+            } elseif (strpos($stored_hash, '$2y$') === 0 || strpos($stored_hash, '$argon2') === 0) {
+                if (password_verify($pin, $stored_hash)) {
+                    $authenticated = true;
+                    $pin_ok = 1;
+                }
+            }
+        }
+
+        $cur_stage = 'successful_rate_limit_clear';
+        record_staff_auth_attempt($pdo, $identifier, $ip, $authenticated);
+
+        if (!$authenticated || !$staff) {
+            http_response_code(401);
+            echo json_encode(['success' => false, 'error' => 'Invalid staff credentials or PIN.', 'reference_id' => $ref_id]);
+            exit;
+        }
+
+        $cur_stage = 'create_mobile_session_record';
+        try {
+            $sess_res = create_mobile_session_record($pdo, $staff);
+        } catch (Throwable $se) {
+            $err_detail = get_class($se) . ': ' . $se->getMessage() . ' (Code: ' . $se->getCode() . ')';
+            if ($se instanceof PDOException && !empty($se->errorInfo)) {
+                $err_detail .= ' | PDOErrorInfo: ' . json_encode($se->errorInfo);
+            }
+            log_auth_diagnostic($pdo, $ref_id, 'create_mobile_session_record', get_class($se), $err_detail, $se->getCode(), $id_match, $pin_ok, $cred_ver);
+            throw $se;
+        }
+        $token = $sess_res['token'];
+        $expires_at = $sess_res['expires_at'];
+
+        $cur_stage = 'response_array_build';
+        $caps = json_decode($staff['capabilities_json'] ?? '["view_attendance"]', true);
+
+        $resp_array = [
+            'success' => true,
+            'session_token' => $token,
+            'staff_user' => [
+                'human_id' => $staff['human_id'],
+                'name' => $staff['display_name'],
+                'role' => $staff['role'],
+                'email' => $staff['email'] ?? '',
+                'capabilities' => is_array($caps) ? $caps : ['view_attendance']
+            ],
+            'expires_at' => $expires_at,
+            'reference_id' => $ref_id
+        ];
+
+        $cur_stage = 'json_encode';
+        $json_out = json_encode($resp_array);
+
+        if ($json_out === false) {
+            $json_err = json_last_error_msg();
+            log_auth_diagnostic($pdo, $ref_id, 'json_encode', 'JsonException', 'JSON encoding failed: ' . $json_err, 0, $id_match, $pin_ok, $cred_ver);
+            http_response_code(500);
+            echo json_encode([
+                'success' => false,
+                'error' => 'Unable to create staff session due to a server error.',
+                'reference_id' => $ref_id
+            ]);
+            exit;
+        }
+
+        $cur_stage = 'response_emit';
+        echo $json_out;
+        exit;
+    } catch (Throwable $e) {
+        log_auth_diagnostic($pdo, $ref_id, $cur_stage, get_class($e), $e->getMessage(), $e->getCode(), $id_match, $pin_ok, $cred_ver);
+        http_response_code(500);
+        echo json_encode([
+            'success' => false,
+            'error' => 'Unable to create staff session due to a server error.',
+            'reference_id' => $ref_id
+        ]);
+        exit;
+    }
+}
+
+// Route: Authenticated Mobile Session Validation (/auth/me)
+if (($uri === '/api/v1/mobile/auth/me' || $uri === '/mobile/api/auth/me') && $method === 'GET') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+    $caps = json_decode($session['capabilities_json'] ?? '["view_attendance"]', true);
+
+    echo json_encode([
+        'success' => true,
+        'staff_user' => [
+            'human_id' => $session['human_id'],
+            'name' => $session['display_name'],
+            'role' => $session['role'],
+            'capabilities' => is_array($caps) ? $caps : ['view_attendance']
+        ],
+        'expires_at' => $session['expires_at']
+    ]);
+    exit;
+}
+
+// Route: Authenticated Mobile Staff Logout
+if (($uri === '/api/v1/mobile/auth/logout' || $uri === '/mobile/api/auth/logout') && $method === 'POST') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+    $l_stmt = $pdo->prepare("UPDATE mobile_sessions SET revoked = 1 WHERE session_token_hash = ?");
+    $l_stmt->execute([$session['session_token_hash']]);
+    $l_stmt->closeCursor();
+
+    $audit_payload = [
+        'revocation_source' => 'explicit_logout',
+        'affected_human_id' => $session['human_id'],
+        'reason' => 'explicit_logout',
+        'caller_ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown',
+        'caller_user_agent' => substr($_SERVER['HTTP_USER_AGENT'] ?? 'unknown', 0, 100)
+    ];
+    log_auth_diagnostic($pdo, 'DIAG-LOGOUT-REVOCATION', 'mobile_auth_logout', 'RevocationEvent', json_encode($audit_payload), 200);
+
+    echo json_encode(['success' => true, 'message' => 'Staff session revoked successfully.']);
+    exit;
+}
+
+// Route: Authenticated Mobile System Health & Sync Status Endpoint
+if (($uri === '/api/v1/mobile/system/health' || $uri === '/mobile/api/system/health') && $method === 'GET') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+
+    $today_date = current_operational_date();
+    $att_count = 0;
+    $last_att_update = null;
+
+    try {
+        $c_stmt = $pdo->prepare("SELECT COUNT(*) as cnt, MAX(updated_at) as max_up FROM today_attendance_index WHERE attendance_date = ?");
+        $c_stmt->execute([$today_date]);
+        $c_row = $c_stmt->fetch(PDO::FETCH_ASSOC);
+        $c_stmt->closeCursor();
+        if ($c_row) {
+            $att_count = intval($c_row['cnt'] ?? 0);
+            $last_att_update = $c_row['max_up'];
+        }
+    } catch (Throwable $e) {}
+
+    $dir_count = 0;
+    try {
+        $d_stmt = $pdo->query("SELECT COUNT(*) as cnt FROM directory_index");
+        $d_row = $d_stmt->fetch(PDO::FETCH_ASSOC);
+        $dir_count = intval($d_row['cnt'] ?? 0);
+    } catch (Throwable $e) {}
+
+    $dt_ny = new DateTime('now', new DateTimeZone('America/New_York'));
+
+    echo json_encode([
+        'success' => true,
+        'environment' => 'production',
+        'gateway_host' => $_SERVER['HTTP_HOST'] ?? 'app.reallife-studycenter.org',
+        'server_time_utc' => gmdate('Y-m-d H:i:s'),
+        'server_time_ny' => $dt_ny->format('Y-m-d H:i:s T'),
+        'operational_date' => $today_date,
+        'today_checked_in_count' => $att_count,
+        'last_attendance_update' => $last_att_update,
+        'directory_indexed_count' => $dir_count
+    ]);
+    exit;
+}
+
+// Route: Authenticated Staff-Only Who's Here / Attendance Endpoint
+if (($uri === '/api/v1/mobile/attendance/today' || $uri === '/mobile/api/attendance/today') && $method === 'GET') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+    $raw_caps = $session['capabilities_json'] ?? null;
+    $caps = (!empty($raw_caps)) ? json_decode($raw_caps, true) : null;
+    if (!is_array($caps)) {
+        $caps = ['view_attendance'];
+    }
+
+    if (!in_array('view_attendance', $caps)) {
+        http_response_code(403);
+        echo json_encode(['success' => false, 'error' => 'Forbidden: Your staff role is not authorized to view attendance.']);
+        exit;
+    }
+
+    $today_date = current_operational_date();
+
+    $stmt = $pdo->prepare("
+        SELECT 
+            t.human_id,
+            COALESCE(d.first_name, 'Member') as first_name,
+            COALESCE(d.last_name, '') as last_name,
+            COALESCE(d.profile_photo, '') as profile_photo,
+            t.attendance_date,
+            t.updated_at as check_in_time
+        FROM today_attendance_index t
+        LEFT JOIN directory_index d 
+               ON (t.human_id = d.human_id OR (t.phone_e164 = d.phone_e164 AND t.phone_e164 != ''))
+        WHERE t.attendance_date = ?
+        ORDER BY t.updated_at DESC
+    ");
+    $stmt->execute([$today_date]);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $checked_in = [];
+    foreach ($rows as $row) {
+        $has_photo = !empty($row['profile_photo']);
+        $checked_in[] = [
+            'human_id' => $row['human_id'],
+            'first_name' => $row['first_name'],
+            'last_name' => $row['last_name'],
+            'photo_url' => $has_photo ? ('/api/v1/mobile/people/photo?human_id=' . urlencode($row['human_id'])) : null,
+            'attendance_date' => $row['attendance_date'],
+            'check_in_time' => $row['check_in_time']
+        ];
+    }
+
+    echo json_encode([
+        'success' => true,
+        'attendance_date' => $today_date,
+        'total_checked_in' => count($checked_in),
+        'checked_in' => $checked_in
+    ]);
+    exit;
+}
+
+// Route: Authenticated Staff Profile Photo Endpoint
+if (($uri === '/api/v1/mobile/people/photo' || $uri === '/mobile/api/people/photo') && $method === 'GET') {
+    $session = verify_mobile_session($pdo);
+    $hid = trim($_GET['human_id'] ?? '');
+    if (empty($hid)) {
+        http_response_code(400);
+        exit;
+    }
+
+    $stmt = $pdo->prepare("SELECT profile_photo FROM directory_index WHERE human_id = ? LIMIT 1");
+    $stmt->execute([$hid]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    $photo = $row['profile_photo'] ?? '';
+    if (empty($photo)) {
+        http_response_code(404);
+        exit;
+    }
+
+    if (strpos($photo, 'data:image/') === 0) {
+        $parts = explode(',', $photo, 2);
+        if (count($parts) === 2) {
+            $meta = $parts[0];
+            $data = base64_decode($parts[1]);
+            $mime = 'image/jpeg';
+            if (strpos($meta, 'image/png') !== false) {
+                $mime = 'image/png';
+            } elseif (strpos($meta, 'image/webp') !== false) {
+                $mime = 'image/webp';
+            }
+            header('Content-Type: ' . $mime);
+            header('Cache-Control: private, max-age=86400');
+            echo $data;
+            exit;
+        }
+    } elseif (filter_var($photo, FILTER_VALIDATE_URL)) {
+        header('Location: ' . $photo);
+        exit;
+    }
+
+    http_response_code(404);
+    exit;
+}
+
+// Route: Authenticated Mobile Participant / People Search Endpoint
+if (($uri === '/api/v1/mobile/people/search' || $uri === '/mobile/api/people/search') && $method === 'GET') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+
+    $q = trim($_GET['q'] ?? $_GET['query'] ?? '');
+    if (empty($q)) {
+        echo json_encode([
+            'success' => true,
+            'query' => '',
+            'total_results' => 0,
+            'results' => []
+        ]);
+        exit;
+    }
+
+    $param = '%' . $q . '%';
+    $stmt = $pdo->prepare("
+        SELECT 
+            human_id,
+            COALESCE(first_name, 'Member') as first_name,
+            COALESCE(last_name, '') as last_name,
+            COALESCE(masked_phone, '') as masked_phone,
+            COALESCE(phone_e164, '') as phone_e164,
+            CASE WHEN length(COALESCE(profile_photo, '')) > 0 THEN 1 ELSE 0 END as has_photo
+        FROM directory_index
+        WHERE LOWER(first_name) LIKE LOWER(?)
+           OR LOWER(last_name) LIKE LOWER(?)
+           OR LOWER(first_name || ' ' || last_name) LIKE LOWER(?)
+           OR LOWER(human_id) LIKE LOWER(?)
+           OR phone_e164 LIKE ?
+        ORDER BY first_name ASC, last_name ASC
+        LIMIT 50
+    ");
+    $stmt->execute([$param, $param, $param, $param, $param]);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $stmt->closeCursor();
+
+    $results = [];
+    foreach ($rows as $row) {
+        $fn = trim($row['first_name']);
+        $ln = trim($row['last_name']);
+        $full_name = trim($fn . ' ' . $ln);
+        $has_photo = intval($row['has_photo']) === 1;
+        $photo_url = $has_photo ? ('/api/v1/mobile/people/photo?human_id=' . urlencode($row['human_id'])) : null;
+
+        $results[] = [
+            'human_id' => $row['human_id'],
+            'humanId' => $row['human_id'],
+            'first_name' => $fn,
+            'firstName' => $fn,
+            'last_name' => $ln,
+            'lastName' => $ln,
+            'name' => $full_name,
+            'fullName' => $full_name,
+            'phone_e164' => $row['phone_e164'],
+            'phoneE164' => $row['phone_e164'],
+            'masked_phone' => $row['masked_phone'],
+            'maskedPhone' => $row['masked_phone'],
+            'photo_url' => $photo_url,
+            'photoUrl' => $photo_url,
+            'has_photo' => $has_photo
+        ];
+    }
+
+    echo json_encode([
+        'success' => true,
+        'query' => $q,
+        'total_results' => count($results),
+        'results' => $results
+    ]);
+    exit;
+}
+
+// Route: Authenticated Mobile Staff Participant Check-In Endpoint
+if (($uri === '/api/v1/mobile/attendance/check-in' || $uri === '/mobile/api/attendance/check-in') && $method === 'POST') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+
+    $raw = file_get_contents('php://input');
+    $input = json_decode($raw, true);
+    $payload = is_array($input) ? $input : [];
+
+    $human_id = trim($payload['human_id'] ?? $payload['humanId'] ?? $payload['personUuid'] ?? $payload['person_uuid'] ?? $_GET['human_id'] ?? '');
+    $phone = trim($payload['phone'] ?? $payload['phone_e164'] ?? '');
+
+    if (empty($human_id) && empty($phone)) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => 'Missing participant identifier (human_id or phone).']);
+        exit;
+    }
+
+    // Lookup participant in directory_index (direct human_id, phone, or QR credential_id / token_hash)
+    $p_stmt = $pdo->prepare("
+        SELECT human_id, phone_e164, first_name, last_name, masked_phone 
+        FROM directory_index 
+        WHERE (human_id = ? AND human_id != '') 
+           OR (phone_e164 = ? AND phone_e164 != '')
+        LIMIT 1
+    ");
+    $p_stmt->execute([$human_id, $phone]);
+    $person = $p_stmt->fetch(PDO::FETCH_ASSOC);
+    $p_stmt->closeCursor();
+
+    if (!$person && !empty($human_id)) {
+        try {
+            $token_hash = hash('sha256', $human_id);
+            $qr_stmt = $pdo->prepare("
+                SELECT p.human_id 
+                FROM participant_qr_credentials c
+                JOIN people p ON c.person_id = p.id
+                WHERE (c.credential_id = ? OR c.token_hash = ? OR c.token_hash = ?)
+                  AND LOWER(COALESCE(c.status, 'active')) = 'active'
+                LIMIT 1
+            ");
+            $qr_stmt->execute([$human_id, $token_hash, $human_id]);
+            $resolved_hid = $qr_stmt->fetchColumn();
+            $qr_stmt->closeCursor();
+
+            if ($resolved_hid) {
+                $p_stmt = $pdo->prepare("
+                    SELECT human_id, phone_e164, first_name, last_name, masked_phone 
+                    FROM directory_index 
+                    WHERE human_id = ? 
+                    LIMIT 1
+                ");
+                $p_stmt->execute([$resolved_hid]);
+                $person = $p_stmt->fetch(PDO::FETCH_ASSOC);
+                $p_stmt->closeCursor();
+            }
+        } catch (Throwable $e) {}
+    }
+
+    if (!$person) {
+        http_response_code(404);
+        echo json_encode(['success' => false, 'error' => 'Participant not found in directory index.']);
+        exit;
+    }
+
+    $target_hid = $person['human_id'];
+    $target_phone = $person['phone_e164'];
+    $first_name = trim($person['first_name']);
+    $last_name = trim($person['last_name']);
+    $op_date = current_operational_date();
+
+    // Check duplicate check-in today
+    $chk_stmt = $pdo->prepare("
+        SELECT updated_at 
+        FROM today_attendance_index 
+        WHERE (human_id = ? OR (phone_e164 = ? AND phone_e164 != '')) 
+          AND attendance_date = ? 
+        LIMIT 1
+    ");
+    $chk_stmt->execute([$target_hid, $target_phone, $op_date]);
+    $existing = $chk_stmt->fetch(PDO::FETCH_ASSOC);
+    $chk_stmt->closeCursor();
+
+    if ($existing) {
+        echo json_encode([
+            'success' => true,
+            'already_checked_in' => true,
+            'message' => "Welcome back, {$first_name}! You are already checked in for today.",
+            'human_id' => $target_hid,
+            'humanId' => $target_hid,
+            'first_name' => $first_name,
+            'last_name' => $last_name,
+            'check_in_time' => $existing['updated_at'],
+            'checkInTime' => $existing['updated_at']
+        ]);
+        exit;
+    }
+
+    // Record check-in in today_attendance_index
+    $ins_stmt = $pdo->prepare("
+        INSERT OR REPLACE INTO today_attendance_index (human_id, phone_e164, attendance_date, updated_at)
+        VALUES (?, ?, ?, datetime('now'))
+    ");
+    $ins_stmt->execute([$target_hid, $target_phone, $op_date]);
+    $ins_stmt->closeCursor();
+
+    // Queue inbound event for Desktop synchronization
+    $event_uuid = 'evt_mob_chk_' . bin2hex(random_bytes(8));
+    $event_payload = [
+        'event_uuid' => $event_uuid,
+        'source' => 'mobile_staff_app',
+        'staff_human_id' => $session['human_id'],
+        'human_id' => $target_hid,
+        'phone_e164' => $target_phone,
+        'checkInDate' => $op_date,
+        'received_at' => gmdate('Y-m-d H:i:s') . ' UTC'
+    ];
+
+    $q_stmt = $pdo->prepare("
+        INSERT INTO inbound_event_queue (event_type, provider_event_id, payload_json, received_at, processed)
+        VALUES ('mobile.checkin', ?, ?, datetime('now'), 0)
+    ");
+    $q_stmt->execute([$event_uuid, json_encode($event_payload)]);
+    $q_stmt->closeCursor();
+
+    $now_str = date('Y-m-d H:i:s');
+    echo json_encode([
+        'success' => true,
+        'already_checked_in' => false,
+        'message' => "Check-in recorded successfully for {$first_name}.",
+        'human_id' => $target_hid,
+        'humanId' => $target_hid,
+        'first_name' => $first_name,
+        'last_name' => $last_name,
+        'check_in_time' => $now_str,
+        'checkInTime' => $now_str,
+        'event_uuid' => $event_uuid
+    ]);
+    exit;
+}
+
+// Route: Authenticated Mobile Staff Participant Check-Out Endpoint
+if (($uri === '/api/v1/mobile/attendance/check-out' || $uri === '/mobile/api/attendance/check-out') && $method === 'POST') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+
+    $raw = file_get_contents('php://input');
+    $input = json_decode($raw, true);
+    $payload = is_array($input) ? $input : [];
+
+    $human_id = trim($payload['human_id'] ?? $payload['humanId'] ?? $payload['personUuid'] ?? $payload['person_uuid'] ?? $_GET['human_id'] ?? '');
+
+    if (empty($human_id)) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => 'Missing participant identifier (human_id).']);
+        exit;
+    }
+
+    $p_stmt = $pdo->prepare("
+        SELECT human_id, phone_e164, first_name, last_name 
+        FROM directory_index 
+        WHERE (human_id = ? AND human_id != '') 
+        LIMIT 1
+    ");
+    $p_stmt->execute([$human_id]);
+    $person = $p_stmt->fetch(PDO::FETCH_ASSOC);
+    $p_stmt->closeCursor();
+
+    if (!$person) {
+        try {
+            $token_hash = hash('sha256', $human_id);
+            $qr_stmt = $pdo->prepare("
+                SELECT p.human_id 
+                FROM participant_qr_credentials c
+                JOIN people p ON c.person_id = p.id
+                WHERE (c.credential_id = ? OR c.token_hash = ? OR c.token_hash = ?)
+                  AND LOWER(COALESCE(c.status, 'active')) = 'active'
+                LIMIT 1
+            ");
+            $qr_stmt->execute([$human_id, $token_hash, $human_id]);
+            $resolved_hid = $qr_stmt->fetchColumn();
+            $qr_stmt->closeCursor();
+
+            if ($resolved_hid) {
+                $p_stmt = $pdo->prepare("
+                    SELECT human_id, phone_e164, first_name, last_name 
+                    FROM directory_index 
+                    WHERE human_id = ? 
+                    LIMIT 1
+                ");
+                $p_stmt->execute([$resolved_hid]);
+                $person = $p_stmt->fetch(PDO::FETCH_ASSOC);
+                $p_stmt->closeCursor();
+            }
+        } catch (Throwable $e) {}
+    }
+
+    if (!$person) {
+        http_response_code(404);
+        echo json_encode(['success' => false, 'error' => 'Participant not found in directory index.']);
+        exit;
+    }
+
+    $target_hid = $person['human_id'];
+    $first_name = trim($person['first_name']);
+    $last_name = trim($person['last_name']);
+
+    $chk_stmt = $pdo->prepare("
+        SELECT updated_at 
+        FROM today_attendance_index 
+        WHERE human_id = ? 
+        LIMIT 1
+    ");
+    $chk_stmt->execute([$target_hid]);
+    $existing = $chk_stmt->fetch(PDO::FETCH_ASSOC);
+    $chk_stmt->closeCursor();
+
+    if (!$existing) {
+        echo json_encode([
+            'success' => true,
+            'already_checked_out' => true,
+            'message' => "{$first_name} is not currently checked in.",
+            'human_id' => $target_hid,
+            'humanId' => $target_hid
+        ]);
+        exit;
+    }
+
+    $del_stmt = $pdo->prepare("DELETE FROM today_attendance_index WHERE human_id = ?");
+    $del_stmt->execute([$target_hid]);
+    $del_stmt->closeCursor();
+
+    $event_uuid = 'evt_mob_chkout_' . bin2hex(random_bytes(8));
+    $event_payload = [
+        'event_uuid' => $event_uuid,
+        'source' => 'mobile_staff_app',
+        'staff_human_id' => $session['human_id'],
+        'human_id' => $target_hid,
+        'received_at' => gmdate('Y-m-d H:i:s') . ' UTC'
+    ];
+
+    $q_stmt = $pdo->prepare("
+        INSERT INTO inbound_event_queue (event_type, provider_event_id, payload_json, received_at, processed)
+        VALUES ('mobile.checkout', ?, ?, datetime('now'), 0)
+    ");
+    $q_stmt->execute([$event_uuid, json_encode($event_payload)]);
+    $q_stmt->closeCursor();
+
+    $now_str = date('Y-m-d H:i:s');
+    echo json_encode([
+        'success' => true,
+        'already_checked_out' => false,
+        'message' => "Check-out recorded successfully for {$first_name}.",
+        'human_id' => $target_hid,
+        'humanId' => $target_hid,
+        'first_name' => $first_name,
+        'last_name' => $last_name,
+        'check_out_time' => $now_str,
+        'checkOutTime' => $now_str,
+        'event_uuid' => $event_uuid
+    ]);
+    exit;
+}
+
+// Route: Authenticated Mobile Communications Summary & Operational Shift Notes Endpoint
+if (($uri === '/api/v1/mobile/communications/summary' || $uri === '/mobile/api/communications/summary') && $method === 'GET') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+
+    $unread_count = 0;
+    $recent_messages = [];
+    $recent_notes = [];
+
+    try {
+        $pn_stmt = $pdo->prepare("
+            SELECT 
+                pn.note_uuid,
+                pn.person_uuid,
+                pn.title,
+                pn.body,
+                pn.created_at,
+                COALESCE(d.first_name || ' ' || d.last_name, 'Staff Member') as author_name
+            FROM person_notes pn
+            LEFT JOIN directory_index d ON d.human_id = pn.person_uuid
+            WHERE pn.is_deleted = 0
+              AND LOWER(COALESCE(pn.visibility, 'standard_staff')) NOT IN ('sensitive_pastoral', 'pastoral', 'confidential', 'private')
+            ORDER BY pn.created_at DESC
+            LIMIT 10
+        ");
+        $pn_stmt->execute();
+        $rows = $pn_stmt->fetchAll(PDO::FETCH_ASSOC);
+        $pn_stmt->closeCursor();
+
+        foreach ($rows as $r) {
+            $recent_notes[] = [
+                'id' => $r['note_uuid'],
+                'authorName' => $r['author_name'],
+                'shiftDate' => substr($r['created_at'], 0, 10),
+                'textSnippet' => (strlen($r['body']) > 80) ? (substr($r['body'], 0, 77) . '...') : $r['body']
+            ];
+        }
+    } catch (Throwable $e) {
+        // Table not yet present on gateway or empty
+    }
+
+    echo json_encode([
+        'success' => true,
+        'communications' => [
+            'unreadInboxCount' => $unread_count,
+            'recentMessages' => $recent_messages
+        ],
+        'shiftNotes' => [
+            'totalRecentNotes' => count($recent_notes),
+            'recentNotes' => $recent_notes
+        ]
+    ]);
+    exit;
+}
+
+// Route: Authenticated Mobile Participant Operational Notes Endpoint
+if (preg_match('#^/(api/v1/mobile|mobile/api)/people/([^/]+)/notes$#', $uri, $m) && $method === 'GET') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+    $target_hid = trim($m[2]);
+
+    $notes = [];
+    try {
+        $stmt = $pdo->prepare("
+            SELECT 
+                pn.note_uuid,
+                pn.person_uuid,
+                pn.title,
+                pn.body,
+                pn.created_at
+            FROM person_notes pn
+            WHERE pn.person_uuid = ?
+              AND pn.is_deleted = 0
+              AND LOWER(COALESCE(pn.visibility, 'standard_staff')) NOT IN ('sensitive_pastoral', 'pastoral', 'confidential', 'private')
+            ORDER BY pn.created_at DESC
+            LIMIT 20
+        ");
+        $stmt->execute([$target_hid]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $stmt->closeCursor();
+
+        foreach ($rows as $r) {
+            $notes[] = [
+                'id' => $r['note_uuid'],
+                'human_id' => $r['person_uuid'],
+                'title' => $r['title'] ?? 'Staff Note',
+                'body' => $r['body'],
+                'created_at' => $r['created_at']
+            ];
+        }
+    } catch (Throwable $e) {}
+
+    echo json_encode([
+        'success' => true,
+        'human_id' => $target_hid,
+        'notes' => $notes,
+        'total_notes' => count($notes)
+    ]);
+    exit;
+}
+
+// Route: Authenticated Mobile Add Operational Staff Note Endpoint
+if (preg_match('#^/(api/v1/mobile|mobile/api)/people/([^/]+)/notes$#', $uri, $m) && $method === 'POST') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+    $target_hid = trim($m[2]);
+
+    $raw = file_get_contents('php://input');
+    $input = json_decode($raw, true);
+    $payload = is_array($input) ? $input : [];
+
+    $body = trim($payload['body'] ?? $payload['note_text'] ?? $payload['text'] ?? '');
+    $title = trim($payload['title'] ?? 'Staff Note');
+
+    if (empty($body)) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => 'Note content body cannot be empty.']);
+        exit;
+    }
+
+    if (strlen($body) > 1000) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => 'Note content exceeds maximum length of 1000 characters.']);
+        exit;
+    }
+
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS person_notes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            note_uuid TEXT UNIQUE,
+            person_id INTEGER DEFAULT 0,
+            person_uuid TEXT NOT NULL,
+            note_type_uuid TEXT DEFAULT 'nt_general',
+            title TEXT DEFAULT 'Staff Note',
+            body TEXT NOT NULL,
+            visibility TEXT DEFAULT 'standard_staff',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            is_deleted INTEGER DEFAULT 0
+        )
+    ");
+
+    $note_uuid = 'note_' . bin2hex(random_bytes(8));
+    $now_str = date('Y-m-d H:i:s');
+    $author_name = $session['display_name'] ?? 'Staff Member';
+
+    $stmt = $pdo->prepare("
+        INSERT INTO person_notes (note_uuid, person_uuid, note_type_uuid, title, body, visibility, created_at, updated_at, is_deleted)
+        VALUES (?, ?, 'nt_general', ?, ?, 'standard_staff', ?, ?, 0)
+    ");
+    $stmt->execute([$note_uuid, $target_hid, $title, $body, $now_str, $now_str]);
+    $stmt->closeCursor();
+
+    echo json_encode([
+        'success' => true,
+        'message' => 'Operational staff note created successfully.',
+        'note' => [
+            'id' => $note_uuid,
+            'human_id' => $target_hid,
+            'title' => $title,
+            'body' => $body,
+            'author_name' => $author_name,
+            'created_at' => $now_str
+        ]
+    ]);
+    exit;
+}
+
+// Route: Authenticated Mobile Person Detail Profile & Attendance State Endpoint
+if (preg_match('#^/(api/v1/mobile|mobile/api)/people/([^/]+)$#', $uri, $m) && $method === 'GET') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+    $target_hid = trim($m[2]);
+
+    $stmt = $pdo->prepare("
+        SELECT human_id, first_name, last_name, masked_phone, profile_photo, updated_at 
+        FROM directory_index 
+        WHERE human_id = ? 
+        LIMIT 1
+    ");
+    $stmt->execute([$target_hid]);
+    $person = $stmt->fetch(PDO::FETCH_ASSOC);
+    $stmt->closeCursor();
+
+    if (!$person) {
+        try {
+            $token_hash = hash('sha256', $target_hid);
+            $qr_stmt = $pdo->prepare("
+                SELECT p.human_id 
+                FROM participant_qr_credentials c
+                JOIN people p ON c.person_id = p.id
+                WHERE (c.credential_id = ? OR c.token_hash = ? OR c.token_hash = ?)
+                  AND LOWER(COALESCE(c.status, 'active')) = 'active'
+                LIMIT 1
+            ");
+            $qr_stmt->execute([$target_hid, $token_hash, $target_hid]);
+            $resolved_hid = $qr_stmt->fetchColumn();
+            $qr_stmt->closeCursor();
+
+            if ($resolved_hid) {
+                $target_hid = $resolved_hid;
+                $stmt = $pdo->prepare("
+                    SELECT human_id, first_name, last_name, masked_phone, profile_photo, updated_at 
+                    FROM directory_index 
+                    WHERE human_id = ? 
+                    LIMIT 1
+                ");
+                $stmt->execute([$target_hid]);
+                $person = $stmt->fetch(PDO::FETCH_ASSOC);
+                $stmt->closeCursor();
+            }
+        } catch (Throwable $e) {}
+    }
+
+    if (!$person) {
+        http_response_code(404);
+        echo json_encode(['success' => false, 'error' => 'Participant not found.']);
+        exit;
+    }
+
+    $fn = trim($person['first_name'] ?? '');
+    $ln = trim($person['last_name'] ?? '');
+    $name = trim($fn . ' ' . $ln);
+
+    $is_checked_in = false;
+    $check_in_time = null;
+    try {
+        $att_stmt = $pdo->prepare("SELECT check_in_time FROM today_attendance_index WHERE human_id = ? LIMIT 1");
+        $att_stmt->execute([$target_hid]);
+        $att_row = $att_stmt->fetch(PDO::FETCH_ASSOC);
+        $att_stmt->closeCursor();
+        if ($att_row) {
+            $is_checked_in = true;
+            $check_in_time = $att_row['check_in_time'];
+        }
+    } catch (Throwable $e) {}
+
+    $notes = [];
+    try {
+        $pn_stmt = $pdo->prepare("
+            SELECT note_uuid, title, body, created_at 
+            FROM person_notes 
+            WHERE person_uuid = ? 
+              AND is_deleted = 0 
+              AND LOWER(COALESCE(visibility, 'standard_staff')) NOT IN ('sensitive_pastoral', 'pastoral', 'confidential', 'private')
+            ORDER BY created_at DESC 
+            LIMIT 20
+        ");
+        $pn_stmt->execute([$target_hid]);
+        $pn_rows = $pn_stmt->fetchAll(PDO::FETCH_ASSOC);
+        $pn_stmt->closeCursor();
+
+        foreach ($pn_rows as $r) {
+            $notes[] = [
+                'id' => $r['note_uuid'],
+                'human_id' => $target_hid,
+                'title' => $r['title'] ?? 'Staff Note',
+                'body' => $r['body'],
+                'created_at' => $r['created_at']
+            ];
+        }
+    } catch (Throwable $e) {}
+
+    $photo_raw = trim($person['profile_photo'] ?? '');
+    $has_photo = !empty($photo_raw);
+
+    echo json_encode([
+        'success' => true,
+        'person' => [
+            'human_id' => $target_hid,
+            'humanId' => $target_hid,
+            'first_name' => $fn,
+            'last_name' => $ln,
+            'display_name' => $name,
+            'name' => $name,
+            'masked_phone' => $person['masked_phone'] ?? '',
+            'has_photo' => $has_photo,
+            'photo_url' => $has_photo ? "https://app.reallife-studycenter.org/api/v1/mobile/people/{$target_hid}/photo" : null,
+            'is_checked_in' => $is_checked_in,
+            'check_in_time' => $check_in_time,
+            'notes' => $notes,
+            'total_notes' => count($notes)
+        ]
+    ]);
+    exit;
+}
+
+// Route: Authenticated Mobile Today's Operating Hours & Staff Schedule Endpoint
+if (($uri === '/api/v1/mobile/schedule/today' || $uri === '/mobile/api/schedule/today') && $method === 'GET') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+
+    $op_date = current_operational_date();
+    $day_of_week = date('l', strtotime($op_date));
+    $is_open = true;
+    $hours_label = "03:00 PM – 08:00 PM";
+    $status_text = "Open Today";
+    $has_override = false;
+
+    try {
+        $ov_stmt = $pdo->prepare("
+            SELECT is_closed, session1_start, session1_end, has_split_shift, session2_start, session2_end 
+            FROM center_hour_overrides 
+            WHERE override_date = ? 
+            LIMIT 1
+        ");
+        $ov_stmt->execute([$op_date]);
+        $override = $ov_stmt->fetch(PDO::FETCH_ASSOC);
+        $ov_stmt->closeCursor();
+
+        if ($override) {
+            $has_override = true;
+            if (intval($override['is_closed']) === 1) {
+                $is_open = false;
+                $hours_label = "Closed (Override)";
+                $status_text = "Closed Today (Scheduled Override)";
+            } else {
+                $s1_start = trim($override['session1_start'] ?? '03:00 PM');
+                $s1_end = trim($override['session1_end'] ?? '08:00 PM');
+                if (intval($override['has_split_shift']) === 1) {
+                    $s2_start = trim($override['session2_start'] ?? '05:00 PM');
+                    $s2_end = trim($override['session2_end'] ?? '08:00 PM');
+                    $hours_label = "{$s1_start}–{$s1_end} & {$s2_start}–{$s2_end}";
+                } else {
+                    $hours_label = "{$s1_start}–{$s1_end}";
+                }
+                $status_text = "Open Today (Override Hours)";
+            }
+        }
+    } catch (Throwable $e) {}
+
+    // 2. Query normal weekly recurring open hours if no date override was present
+    if (!$has_override) {
+        try {
+            $oh_stmt = $pdo->prepare("
+                SELECT open_time, close_time, is_closed, has_split_shift, session2_start, session2_end 
+                FROM center_open_hours 
+                WHERE LOWER(day_of_week) = LOWER(?) 
+                LIMIT 1
+            ");
+            $oh_stmt->execute([$day_of_week]);
+            $weekly_h = $oh_stmt->fetch(PDO::FETCH_ASSOC);
+            $oh_stmt->closeCursor();
+
+            if ($weekly_h) {
+                if (intval($weekly_h['is_closed']) === 1) {
+                    $is_open = false;
+                    $hours_label = "Closed";
+                    $status_text = "Closed Today";
+                } else {
+                    $o_start = trim($weekly_h['open_time'] ?? '03:00 PM');
+                    $o_end = trim($weekly_h['close_time'] ?? '08:00 PM');
+                    if (intval($weekly_h['has_split_shift']) === 1) {
+                        $s2_start = trim($weekly_h['session2_start'] ?? '05:00 PM');
+                        $s2_end = trim($weekly_h['session2_end'] ?? '08:00 PM');
+                        $hours_label = "{$o_start}–{$o_end} & {$s2_start}–{$s2_end}";
+                    } else {
+                        $hours_label = "{$o_start}–{$o_end}";
+                    }
+                    $status_text = "Open Today";
+                }
+            }
+        } catch (Throwable $e) {}
+    }
+
+    // 3. Query REAL per-shift staff assignments from schedule_entries table
+    $workers = [];
+    try {
+        $se_stmt = $pdo->prepare("
+            SELECT person_name, shift_role, start_time, end_time 
+            FROM schedule_entries 
+            WHERE shift_date = ? 
+              AND person_name IS NOT NULL 
+              AND TRIM(person_name) != ''
+            ORDER BY id ASC
+        ");
+        $se_stmt->execute([$op_date]);
+        $se_rows = $se_stmt->fetchAll(PDO::FETCH_ASSOC);
+        $se_stmt->closeCursor();
+
+        foreach ($se_rows as $sr) {
+            $w_name = trim($sr['person_name']);
+            if (!empty($w_name) && !in_array($w_name, $workers)) {
+                $workers[] = $w_name;
+            }
+        }
+    } catch (Throwable $e) {}
+
+    $schedule_items = [
+        [
+            'id' => 'shift_op_' . str_replace('-', '', $op_date),
+            'timeRange' => $hours_label,
+            'title' => 'Study Center Operations',
+            'workers' => $workers,
+            'location' => 'Main Study Hall',
+            'isToday' => true
+        ]
+    ];
+
+    echo json_encode([
+        'success' => true,
+        'date' => $op_date,
+        'day_of_week' => $day_of_week,
+        'is_open' => $is_open,
+        'hours_label' => $hours_label,
+        'status_text' => $status_text,
+        'has_override' => $has_override,
+        'todaySchedule' => $schedule_items
+    ]);
     exit;
 }
 
