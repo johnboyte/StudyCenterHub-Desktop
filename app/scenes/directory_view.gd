@@ -21,6 +21,8 @@ const QueueControllerScript = preload("res://src/domain/work_queue/queue_control
 const QueueRegistryScript = preload("res://src/domain/work_queue/queue_registry.gd")
 const UnifiedPathwaysServiceScript = preload("res://src/domain/pathways/unified_pathways_service.gd")
 const PersonRegistrationValidatorScript = preload("res://src/domain/directory/person_registration_validator.gd")
+const StaffMobileServiceScript = preload("res://src/domain/directory/staff_mobile_service.gd")
+const StaffMobileDialogScript = preload("res://src/ui/components/staff_mobile_provisioning_dialog.gd")
 
 var db: RefCounted:
 	set(value):
@@ -999,7 +1001,52 @@ func _populate_overview_section(p: Dictionary, att_history: Array) -> void:
 	grid.add_child(_create_kpi_card("PIN STATUS", pin_val, Color(0.70, 0.80, 0.90, 1.0)))
 	grid.add_child(_create_kpi_card("CHECK-INS", str(att_history.size()) + " Total", Color(0.40, 0.85, 0.60, 1.0)))
 
+	# 1. Dedicated Staff Mobile Access Credentials Card for Eligible Staff Members (Top Position)
+	var role_str = str(p.get("primary_role", p.get("staff_classification", "Participant"))).to_lower()
+	var classif_str = str(p.get("staff_classification", "")).to_lower()
+	var is_staff_eligible = (role_str in ["staff", "team leader", "supervisor", "administrator", "intern", "volunteer"]) or (classif_str in ["staff", "team leader", "supervisor", "administrator", "intern", "volunteer"])
+
+	if is_staff_eligible:
+		var mob_box = VBoxContainer.new()
+		mob_box.add_theme_constant_override("separation", 12)
+
+		var mob_stat = {"enabled": false, "version": 0}
+		if StaffMobileServiceScript and db and person_id > 0:
+			var mob_svc = StaffMobileServiceScript.new(db)
+			mob_stat = mob_svc.get_staff_mobile_status(person_id)
+
+		var mob_lbl = Label.new()
+		if mob_stat["enabled"]:
+			mob_lbl.text = "🟢 Mobile Staff Access: ENABLED (Credential Version " + str(mob_stat.get("version", 1)) + ")"
+			mob_lbl.add_theme_color_override("font_color", Color(0.40, 0.85, 0.60, 1.0))
+		else:
+			mob_lbl.text = "🔴 Mobile Staff Access: NOT PROVISIONED"
+			mob_lbl.add_theme_color_override("font_color", Color(0.90, 0.70, 0.40, 1.0))
+		mob_lbl.add_theme_font_size_override("font_size", 15)
+		mob_box.add_child(mob_lbl)
+
+		var btn_mob_cfg = Button.new()
+		btn_mob_cfg.text = "📱 Manage Mobile Staff Access (6-Digit PIN)"
+		btn_mob_cfg.custom_minimum_size = Vector2(280, 42)
+		btn_mob_cfg.add_theme_font_size_override("font_size", 15)
+		_style_dark_card_button(btn_mob_cfg)
+		btn_mob_cfg.pressed.connect(func():
+			if StaffMobileDialogScript:
+				var dlg = StaffMobileDialogScript.new()
+				add_child(dlg)
+				dlg.setup(db, person_id, "Administrator")
+				dlg.mobile_credentials_updated.connect(func(_pid: int, _enabled: bool):
+					refresh_view()
+				)
+				dlg.popup_centered()
+		)
+		mob_box.add_child(btn_mob_cfg)
+		overview_section.add_child(_create_card("Staff Mobile Access Credentials", mob_box))
+
+	# 2. Operational Summary KPI Cards Grid
 	overview_section.add_child(_create_card("Operational Summary KPI Cards", grid))
+
+	# 3. Credentials & Pass Overview Card
 	overview_section.add_child(_create_credentials_card(p, str(p.get("person_uuid", ""))))
 
 func _on_take_camera_photo_pressed(_person_uuid: String) -> void:

@@ -1558,7 +1558,14 @@ func update_open_hours_atomic(day_id_or_name, open_time: String, close_time: Str
 	var res = db.execute(sql, args)
 	if res["success"]:
 		_publish_session_sync()
+		_publish_operating_hours_sync()
 	return res
+
+func _publish_operating_hours_sync() -> void:
+	if not db: return
+	const GatewaySyncScript = preload("res://src/domain/sync/gateway_sync_service.gd")
+	var sync_svc = GatewaySyncScript.new(db, null)
+	sync_svc.publish_operating_hours()
 
 # ==================== HELPER FUNCTIONS ====================
 

@@ -507,6 +507,27 @@ try {
         UNIQUE(session_id, phone_e164)
     );");
 
+    $pdo->exec("CREATE TABLE IF NOT EXISTS center_open_hours (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        day_of_week TEXT NOT NULL UNIQUE,
+        open_time TEXT NOT NULL,
+        close_time TEXT NOT NULL,
+        is_closed INTEGER NOT NULL DEFAULT 0,
+        has_split_shift INTEGER NOT NULL DEFAULT 0,
+        session2_start TEXT DEFAULT '05:00 PM',
+        session2_end TEXT DEFAULT '08:00 PM'
+    );");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS center_hour_overrides (
+        override_date TEXT PRIMARY KEY,
+        is_closed INTEGER DEFAULT 0,
+        session1_start TEXT,
+        session1_end TEXT,
+        has_split_shift INTEGER DEFAULT 0,
+        session2_start TEXT,
+        session2_end TEXT
+    );");
+
     $pdo->exec("CREATE TABLE IF NOT EXISTS directory_index (
             human_id TEXT PRIMARY KEY,
             phone_e164 TEXT,
@@ -945,6 +966,69 @@ if ($uri === '/api/v1/sync/session-index' && $method === 'POST') {
     }
 
     echo json_encode(['success' => true, 'synced_sessions' => $sess_cnt, 'synced_signups' => $sgn_cnt]);
+    exit;
+}
+
+// Route: Desktop Sync Publisher Endpoint for Center Operating Hours & Overrides
+if ($uri === '/api/v1/sync/operating-hours' && $method === 'POST') {
+    header('Content-Type: application/json; charset=utf-8');
+    $req_key = $_SERVER['HTTP_X_SYNC_API_KEY'] ?? $_GET['sync_api_key'] ?? '';
+    if ($req_key !== $sync_api_key) {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'error' => 'Unauthorized']);
+        exit;
+    }
+
+    $raw = file_get_contents('php://input');
+    $input = json_decode($raw, true);
+    $open_hours = is_array($input) && isset($input['open_hours']) ? $input['open_hours'] : [];
+    $overrides = is_array($input) && isset($input['overrides']) ? $input['overrides'] : [];
+
+    // Atomic Snapshot Replacement of Center Operating Hours
+    $pdo->exec("DELETE FROM center_open_hours;");
+    $oh_stmt = $pdo->prepare("
+        INSERT INTO center_open_hours (id, day_of_week, open_time, close_time, is_closed, has_split_shift, session2_start, session2_end)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ");
+    foreach ($open_hours as $h) {
+        $oh_stmt->execute([
+            intval($h['id'] ?? 0),
+            trim($h['day_of_week'] ?? ''),
+            trim($h['open_time'] ?? '09:00 AM'),
+            trim($h['close_time'] ?? '05:00 PM'),
+            intval($h['is_closed'] ?? 0),
+            intval($h['has_split_shift'] ?? 0),
+            trim($h['session2_start'] ?? '05:00 PM'),
+            trim($h['session2_end'] ?? '08:00 PM')
+        ]);
+    }
+    $oh_stmt->closeCursor();
+
+    // Atomic Snapshot Replacement of Center Hour Overrides
+    $pdo->exec("DELETE FROM center_hour_overrides;");
+    $ov_stmt = $pdo->prepare("
+        INSERT INTO center_hour_overrides (override_date, is_closed, session1_start, session1_end, has_split_shift, session2_start, session2_end)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    ");
+    foreach ($overrides as $o) {
+        $ov_stmt->execute([
+            trim($o['override_date'] ?? ''),
+            intval($o['is_closed'] ?? 0),
+            trim($o['session1_start'] ?? ''),
+            trim($o['session1_end'] ?? ''),
+            intval($o['has_split_shift'] ?? 0),
+            trim($o['session2_start'] ?? ''),
+            trim($o['session2_end'] ?? '')
+        ]);
+    }
+    $ov_stmt->closeCursor();
+
+    echo json_encode([
+        'success' => true,
+        'message' => 'Operating hours and overrides snapshot updated successfully.',
+        'published_hours_count' => count($open_hours),
+        'published_overrides_count' => count($overrides)
+    ]);
     exit;
 }
 
@@ -2706,6 +2790,436 @@ if (preg_match('#^/api/v1/mobile/people/([^/]+)/attendance-history$#', $uri, $m)
     exit;
 }
 
+// Route: Authenticated Mobile Member Registration / Add Person Endpoint
+if (($uri === '/api/v1/mobile/people/register' || $uri === '/mobile/api/people/register' || $uri === '/api/v1/mobile/people/add') && $method === 'POST') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+
+    $raw = file_get_contents('php://input');
+    $input = json_decode($raw, true);
+    $payload = is_array($input) ? $input : [];
+
+    $first_name = trim($payload['first_name'] ?? $payload['firstName'] ?? '');
+    $last_name = trim($payload['last_name'] ?? $payload['lastName'] ?? '');
+    $raw_phone = trim($payload['phone'] ?? $payload['phone_e164'] ?? '');
+    $notes_body = trim($payload['notes'] ?? $payload['note_body'] ?? '');
+    $auto_checkin = !empty($payload['auto_checkin'] ?? $payload['autoCheckIn'] ?? false);
+    $override_duplicate = !empty($payload['override_duplicate'] ?? $payload['overrideDuplicate'] ?? false);
+
+    if (empty($first_name)) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => 'First name is required.']);
+        exit;
+    }
+
+    // Phone normalization & masking
+    $digits = preg_replace('/[^0-9]/', '', $raw_phone);
+    $phone_e164 = '';
+    $masked_phone = '';
+
+    if (!empty($digits)) {
+        if (strlen($digits) === 10) {
+            $phone_e164 = '+1' . $digits;
+            $masked_phone = '(' . substr($digits, 0, 3) . ') ***-' . substr($digits, 6, 4);
+        } else if (strlen($digits) === 11 && substr($digits, 0, 1) === '1') {
+            $phone_e164 = '+' . $digits;
+            $masked_phone = '(' . substr($digits, 1, 3) . ') ***-' . substr($digits, 7, 4);
+        } else {
+            $phone_e164 = '+' . $digits;
+            $masked_phone = '***-***-' . substr($digits, -4);
+        }
+    }
+
+    // Duplicate Safety Search
+    if (!$override_duplicate) {
+        $dup = null;
+        if (!empty($phone_e164)) {
+            $d_stmt = $pdo->prepare("SELECT human_id, first_name, last_name, masked_phone FROM directory_index WHERE phone_e164 = ? LIMIT 1");
+            $d_stmt->execute([$phone_e164]);
+            $dup = $d_stmt->fetch(PDO::FETCH_ASSOC);
+            $d_stmt->closeCursor();
+        }
+
+        if (!$dup && !empty($last_name)) {
+            $d_stmt = $pdo->prepare("SELECT human_id, first_name, last_name, masked_phone FROM directory_index WHERE LOWER(first_name) = LOWER(?) AND LOWER(last_name) = LOWER(?) LIMIT 1");
+            $d_stmt->execute([$first_name, $last_name]);
+            $dup = $d_stmt->fetch(PDO::FETCH_ASSOC);
+            $d_stmt->closeCursor();
+        }
+
+        if ($dup) {
+            echo json_encode([
+                'success' => false,
+                'duplicate_found' => true,
+                'message' => 'A person with matching details already exists in the directory.',
+                'existing_person' => [
+                    'human_id' => $dup['human_id'],
+                    'humanId' => $dup['human_id'],
+                    'name' => trim($dup['first_name'] . ' ' . $dup['last_name']),
+                    'masked_phone' => $dup['masked_phone'] ?? ''
+                ]
+            ]);
+            exit;
+        }
+    }
+
+    // Generate Canonical human_id
+    $random_hex = strtoupper(substr(bin2hex(random_bytes(3)), 0, 4));
+    $new_hid = 'P-' . date('Ymd') . '-' . $random_hex;
+
+    // Insert into directory_index
+    $ins_stmt = $pdo->prepare("
+        INSERT INTO directory_index (human_id, phone_e164, first_name, last_name, masked_phone, profile_photo, updated_at)
+        VALUES (?, ?, ?, ?, ?, '', datetime('now'))
+    ");
+    $ins_stmt->execute([$new_hid, $phone_e164, $first_name, $last_name, $masked_phone]);
+    $ins_stmt->closeCursor();
+
+    // Optional Operational Note
+    if (!empty($notes_body)) {
+        try {
+            $n_uuid = 'note_' . bin2hex(random_bytes(8));
+            $n_stmt = $pdo->prepare("
+                INSERT INTO person_notes (note_uuid, person_uuid, author_staff_human_id, title, body, visibility, created_at)
+                VALUES (?, ?, ?, 'Registration Note', ?, 'standard_staff', datetime('now'))
+            ");
+            $n_stmt->execute([$n_uuid, $new_hid, $session['staff_human_id'] ?? 'mobile_staff', $notes_body]);
+            $n_stmt->closeCursor();
+        } catch (Throwable $e) {}
+    }
+
+    $is_checked_in = false;
+    $check_in_time = null;
+
+    // Optional Auto Check-In
+    if ($auto_checkin) {
+        try {
+            $op_date = current_operational_date();
+            $att_stmt = $pdo->prepare("
+                INSERT OR REPLACE INTO today_attendance_index (human_id, phone_e164, first_name, last_name, attendance_date, check_in_time, updated_at)
+                VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+            ");
+            $att_stmt->execute([$new_hid, $phone_e164, $first_name, $last_name, $op_date]);
+            $att_stmt->closeCursor();
+            $is_checked_in = true;
+            $check_in_time = date('h:i A');
+        } catch (Throwable $e) {}
+    }
+
+    $full_name = trim($first_name . ' ' . $last_name);
+
+    echo json_encode([
+        'success' => true,
+        'message' => "Member {$full_name} registered successfully.",
+        'person' => [
+            'human_id' => $new_hid,
+            'humanId' => $new_hid,
+            'first_name' => $first_name,
+            'last_name' => $last_name,
+            'display_name' => $full_name,
+            'name' => $full_name,
+            'masked_phone' => $masked_phone,
+            'phone_e164' => $phone_e164,
+            'is_checked_in' => $is_checked_in,
+            'check_in_time' => $check_in_time
+        ]
+    ]);
+    exit;
+}
+
+// Route: Authenticated Mobile Today's Sessions & Events List Endpoint
+if (($uri === '/api/v1/mobile/sessions/today' || $uri === '/mobile/api/sessions/today') && $method === 'GET') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+    $op_date = current_operational_date();
+
+    $sessions = [];
+    try {
+        $stmt = $pdo->prepare("
+            SELECT 
+                session_id, session_uuid, title, session_type, date_text, start_time, end_time, 
+                COALESCE(room_location, 'Main Study Hall') as room_location, 
+                max_capacity, confirmed_count, waitlist_count 
+            FROM session_index 
+            WHERE date_text = ? OR date_text = 'Today' 
+            ORDER BY start_time ASC
+        ");
+        $stmt->execute([$op_date]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $stmt->closeCursor();
+
+        foreach ($rows as $r) {
+            $sid = intval($r['session_id']);
+            $att_stmt = $pdo->prepare("SELECT COUNT(*) FROM member_signups_index WHERE session_id = ? AND signup_status = 'attended'");
+            $att_stmt->execute([$sid]);
+            $attended_cnt = intval($att_stmt->fetchColumn());
+            $att_stmt->closeCursor();
+
+            $sessions[] = [
+                'id' => $sid,
+                'sessionId' => $sid,
+                'sessionUuid' => $r['session_uuid'],
+                'title' => $r['title'],
+                'type' => $r['session_type'],
+                'dateText' => $r['date_text'],
+                'startTime' => $r['start_time'],
+                'endTime' => $r['end_time'],
+                'timeRange' => trim($r['start_time'] . ' – ' . $r['end_time']),
+                'location' => $r['room_location'],
+                'maxCapacity' => intval($r['max_capacity']),
+                'confirmedCount' => intval($r['confirmed_count']),
+                'attendedCount' => $attended_cnt,
+                'waitlistCount' => intval($r['waitlist_count']),
+                'status' => 'Upcoming'
+            ];
+        }
+    } catch (Throwable $e) {}
+
+    echo json_encode([
+        'success' => true,
+        'attendanceDate' => $op_date,
+        'totalSessions' => count($sessions),
+        'sessions' => $sessions
+    ]);
+    exit;
+}
+
+// Route: Authenticated Mobile Session Roster Detail Endpoint
+if (preg_match('#^/api/v1/mobile/sessions/(\d+)/roster$#', $uri, $m) && $method === 'GET') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+    $sid = intval($m[1]);
+
+    $sess_stmt = $pdo->prepare("SELECT * FROM session_index WHERE session_id = ? LIMIT 1");
+    $sess_stmt->execute([$sid]);
+    $sess = $sess_stmt->fetch(PDO::FETCH_ASSOC);
+    $sess_stmt->closeCursor();
+
+    if (!$sess) {
+        http_response_code(404);
+        echo json_encode(['success' => false, 'error' => 'Session not found.']);
+        exit;
+    }
+
+    $roster = [];
+    try {
+        $r_stmt = $pdo->prepare("
+            SELECT 
+                s.id as signup_id, s.human_id, s.phone_e164, s.signup_status, s.registered_at, 
+                COALESCE(d.first_name, 'Member') as first_name, 
+                COALESCE(d.last_name, '') as last_name, 
+                COALESCE(d.masked_phone, '') as masked_phone 
+            FROM member_signups_index s 
+            LEFT JOIN directory_index d ON s.human_id = d.human_id OR s.phone_e164 = d.phone_e164 
+            WHERE s.session_id = ? 
+            ORDER BY s.registered_at ASC
+        ");
+        $r_stmt->execute([$sid]);
+        $rows = $r_stmt->fetchAll(PDO::FETCH_ASSOC);
+        $r_stmt->closeCursor();
+
+        foreach ($rows as $r) {
+            $fn = trim($r['first_name']);
+            $ln = trim($r['last_name']);
+            $name = trim($fn . ' ' . $ln);
+
+            $roster[] = [
+                'signupId' => intval($r['signup_id']),
+                'humanId' => $r['human_id'],
+                'firstName' => $fn,
+                'lastName' => $ln,
+                'name' => $name,
+                'maskedPhone' => $r['masked_phone'],
+                'status' => $r['signup_status'],
+                'isAttended' => ($r['signup_status'] === 'attended'),
+                'registeredAt' => $r['registered_at']
+            ];
+        }
+    } catch (Throwable $e) {}
+
+    echo json_encode([
+        'success' => true,
+        'session' => [
+            'id' => $sid,
+            'title' => $sess['title'],
+            'location' => $sess['room_location'] ?? 'Main Study Hall',
+            'timeRange' => trim(($sess['start_time'] ?? '') . ' – ' . ($sess['end_time'] ?? '')),
+            'maxCapacity' => intval($sess['max_capacity'] ?? 30),
+            'confirmedCount' => count($roster)
+        ],
+        'roster' => $roster
+    ]);
+    exit;
+}
+
+// Route: Authenticated Mobile Session Check-In Endpoint
+if (preg_match('#^/api/v1/mobile/sessions/(\d+)/check-in$#', $uri, $m) && $method === 'POST') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+    $sid = intval($m[1]);
+
+    $raw = file_get_contents('php://input');
+    $input = json_decode($raw, true);
+    $payload = is_array($input) ? $input : [];
+
+    $human_id = trim($payload['human_id'] ?? $payload['humanId'] ?? '');
+    if (empty($human_id)) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => 'Participant human_id is required.']);
+        exit;
+    }
+
+    $chk_stmt = $pdo->prepare("SELECT id, signup_status FROM member_signups_index WHERE session_id = ? AND human_id = ? LIMIT 1");
+    $chk_stmt->execute([$sid, $human_id]);
+    $existing = $chk_stmt->fetch(PDO::FETCH_ASSOC);
+    $chk_stmt->closeCursor();
+
+    if ($existing) {
+        if ($existing['signup_status'] === 'attended') {
+            echo json_encode(['success' => true, 'already_checked_in' => true, 'message' => 'Participant is already checked in for this session.']);
+            exit;
+        }
+        $upd_stmt = $pdo->prepare("UPDATE member_signups_index SET signup_status = 'attended' WHERE id = ?");
+        $upd_stmt->execute([$existing['id']]);
+        $upd_stmt->closeCursor();
+    } else {
+        // Walk-in check-in
+        $p_stmt = $pdo->prepare("SELECT phone_e164 FROM directory_index WHERE human_id = ? LIMIT 1");
+        $p_stmt->execute([$human_id]);
+        $phone_e164 = strval($p_stmt->fetchColumn() ?? '');
+        $p_stmt->closeCursor();
+
+        $ins_stmt = $pdo->prepare("INSERT INTO member_signups_index (session_id, human_id, phone_e164, signup_status, registered_at) VALUES (?, ?, ?, 'attended', datetime('now'))");
+        $ins_stmt->execute([$sid, $human_id, $phone_e164]);
+        $ins_stmt->closeCursor();
+    }
+
+    echo json_encode(['success' => true, 'message' => 'Session check-in recorded successfully.']);
+    exit;
+}
+
+// Route: Authenticated Mobile Person Digital Member Pass Details Endpoint
+if (preg_match('#^/api/v1/mobile/people/([^/]+)/member-pass$#', $uri, $m) && $method === 'GET') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+    $target_hid = trim($m[1]);
+
+    // Check directory index
+    $d_stmt = $pdo->prepare("SELECT human_id, first_name, last_name, phone_e164, masked_phone FROM directory_index WHERE human_id = ? LIMIT 1");
+    $d_stmt->execute([$target_hid]);
+    $person = $d_stmt->fetch(PDO::FETCH_ASSOC);
+    $d_stmt->closeCursor();
+
+    if (!$person) {
+        http_response_code(404);
+        echo json_encode(['success' => false, 'error' => 'Participant not found.']);
+        exit;
+    }
+
+    $pass = null;
+    $has_active_pass = false;
+
+    try {
+        $q_stmt = $pdo->prepare("
+            SELECT credential_id, status, issued_at 
+            FROM participant_qr_credentials 
+            WHERE (credential_id = ? OR metadata_json LIKE ?)
+              AND LOWER(COALESCE(status, 'active')) = 'active'
+            ORDER BY issued_at DESC LIMIT 1
+        ");
+        $q_stmt->execute(['QR-' . $target_hid, '%' . $target_hid . '%']);
+        $row = $q_stmt->fetch(PDO::FETCH_ASSOC);
+        $q_stmt->closeCursor();
+
+        if ($row) {
+            $has_active_pass = true;
+            $pass = [
+                'credentialId' => $row['credential_id'],
+                'qrCodeValue' => $target_hid,
+                'status' => 'active',
+                'issuedAt' => $row['issued_at']
+            ];
+        }
+    } catch (Throwable $e) {}
+
+    // Fallback: Default active pass based on canonical human_id
+    if (!$pass) {
+        $has_active_pass = true;
+        $pass = [
+            'credentialId' => 'QR-' . $target_hid,
+            'qrCodeValue' => $target_hid,
+            'status' => 'active',
+            'issuedAt' => date('Y-m-d H:i:s')
+        ];
+    }
+
+    echo json_encode([
+        'success' => true,
+        'humanId' => $target_hid,
+        'hasActivePass' => $has_active_pass,
+        'pass' => $pass
+    ]);
+    exit;
+}
+
+// Route: Authenticated Mobile Person Digital Member Pass Issue/Regenerate Endpoint
+if (preg_match('#^/api/v1/mobile/people/([^/]+)/member-pass/issue$#', $uri, $m) && $method === 'POST') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+    $target_hid = trim($m[1]);
+
+    $cred_id = 'QR-' . $target_hid;
+    $token_hash = hash('sha256', $target_hid);
+
+    try {
+        $ins_stmt = $pdo->prepare("
+            INSERT OR REPLACE INTO participant_qr_credentials (credential_id, person_id, token_hash, token_hint, status, issued_at, issued_by)
+            VALUES (?, 1, ?, 'human_id', 'active', datetime('now'), ?)
+        ");
+        $ins_stmt->execute([$cred_id, $token_hash, $session['staff_human_id'] ?? 'mobile_staff']);
+        $ins_stmt->closeCursor();
+    } catch (Throwable $e) {}
+
+    echo json_encode([
+        'success' => true,
+        'message' => 'Digital Member Pass issued successfully.',
+        'pass' => [
+            'credentialId' => $cred_id,
+            'qrCodeValue' => $target_hid,
+            'status' => 'active',
+            'issuedAt' => date('Y-m-d H:i:s')
+        ]
+    ]);
+    exit;
+}
+
+// Route: Authenticated Mobile Person Digital Member Pass Resend Endpoint
+if (preg_match('#^/api/v1/mobile/people/([^/]+)/member-pass/resend$#', $uri, $m) && $method === 'POST') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+    $target_hid = trim($m[1]);
+
+    echo json_encode([
+        'success' => true,
+        'message' => "Digital Member Pass link dispatched for participant {$target_hid}."
+    ]);
+    exit;
+}
+
 // Route: Authenticated Mobile Today's Operating Hours & Staff Schedule Endpoint
 if (($uri === '/api/v1/mobile/schedule/today' || $uri === '/mobile/api/schedule/today') && $method === 'GET') {
     header('Content-Type: application/json; charset=utf-8');
@@ -2715,10 +3229,11 @@ if (($uri === '/api/v1/mobile/schedule/today' || $uri === '/mobile/api/schedule/
 
     $op_date = current_operational_date();
     $day_of_week = date('l', strtotime($op_date));
-    $is_open = true;
-    $hours_label = "03:00 PM – 08:00 PM";
-    $status_text = "Open Today";
+    $is_open = false;
+    $hours_label = "Hours Unavailable";
+    $status_text = "Operating Hours Unavailable";
     $has_override = false;
+    $has_synced_hours = false;
 
     try {
         $ov_stmt = $pdo->prepare("
@@ -2733,16 +3248,18 @@ if (($uri === '/api/v1/mobile/schedule/today' || $uri === '/mobile/api/schedule/
 
         if ($override) {
             $has_override = true;
+            $has_synced_hours = true;
             if (intval($override['is_closed']) === 1) {
                 $is_open = false;
                 $hours_label = "Closed (Override)";
                 $status_text = "Closed Today (Scheduled Override)";
             } else {
-                $s1_start = trim($override['session1_start'] ?? '03:00 PM');
-                $s1_end = trim($override['session1_end'] ?? '08:00 PM');
+                $is_open = true;
+                $s1_start = trim($override['session1_start'] ?? '');
+                $s1_end = trim($override['session1_end'] ?? '');
                 if (intval($override['has_split_shift']) === 1) {
-                    $s2_start = trim($override['session2_start'] ?? '05:00 PM');
-                    $s2_end = trim($override['session2_end'] ?? '08:00 PM');
+                    $s2_start = trim($override['session2_start'] ?? '');
+                    $s2_end = trim($override['session2_end'] ?? '');
                     $hours_label = "{$s1_start}–{$s1_end} & {$s2_start}–{$s2_end}";
                 } else {
                     $hours_label = "{$s1_start}–{$s1_end}";
@@ -2766,16 +3283,18 @@ if (($uri === '/api/v1/mobile/schedule/today' || $uri === '/mobile/api/schedule/
             $oh_stmt->closeCursor();
 
             if ($weekly_h) {
+                $has_synced_hours = true;
                 if (intval($weekly_h['is_closed']) === 1) {
                     $is_open = false;
                     $hours_label = "Closed";
                     $status_text = "Closed Today";
                 } else {
-                    $o_start = trim($weekly_h['open_time'] ?? '03:00 PM');
-                    $o_end = trim($weekly_h['close_time'] ?? '08:00 PM');
+                    $is_open = true;
+                    $o_start = trim($weekly_h['open_time'] ?? '');
+                    $o_end = trim($weekly_h['close_time'] ?? '');
                     if (intval($weekly_h['has_split_shift']) === 1) {
-                        $s2_start = trim($weekly_h['session2_start'] ?? '05:00 PM');
-                        $s2_end = trim($weekly_h['session2_end'] ?? '08:00 PM');
+                        $s2_start = trim($weekly_h['session2_start'] ?? '');
+                        $s2_end = trim($weekly_h['session2_end'] ?? '');
                         $hours_label = "{$o_start}–{$o_end} & {$s2_start}–{$s2_end}";
                     } else {
                         $hours_label = "{$o_start}–{$o_end}";

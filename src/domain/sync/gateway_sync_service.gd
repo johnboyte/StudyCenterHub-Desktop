@@ -288,6 +288,37 @@ func publish_session_index(callback: Callable = Callable()) -> void:
 		if callback.is_valid():
 			callback.call({"success": false, "error": "Parent node not in tree"})
 
+func publish_operating_hours(callback: Callable = Callable()) -> void:
+	if not db: return
+
+	var oh_res = db.execute("SELECT id, day_of_week, open_time, close_time, is_closed, has_split_shift, session2_start, session2_end FROM center_open_hours;")
+	var open_hours = oh_res["data"] if oh_res["success"] else []
+
+	var ov_res = db.execute("SELECT override_date, is_closed, session1_start, session1_end, has_split_shift, session2_start, session2_end FROM center_hour_overrides;")
+	var overrides = ov_res["data"] if ov_res["success"] else []
+
+	var gateway_url = get_gateway_url()
+	var api_key = get_sync_api_key()
+	var url = gateway_url + "/api/v1/sync/operating-hours"
+	var headers = [
+		"Content-Type: application/json",
+		"x-sync-api-key: " + api_key
+	]
+	var body = JSON.stringify({ "open_hours": open_hours, "overrides": overrides })
+
+	var req = HTTPRequest.new()
+	if parent_node and parent_node.is_inside_tree():
+		parent_node.add_child(req)
+		req.request_completed.connect(func(_res: int, resp_code: int, _h: PackedStringArray, _b: PackedByteArray):
+			req.queue_free()
+			if callback.is_valid():
+				callback.call({"success": resp_code == 200})
+		, CONNECT_ONE_SHOT)
+		req.request(url, headers, HTTPClient.METHOD_POST, body)
+	else:
+		if callback.is_valid():
+			callback.call({"success": false, "error": "Parent node not in tree"})
+
 func push_acknowledgements_now(callback: Callable = Callable()) -> void:
 	_push_acknowledgements(func(res: Dictionary):
 		if callback.is_valid():

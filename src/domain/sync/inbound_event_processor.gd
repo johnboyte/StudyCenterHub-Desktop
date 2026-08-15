@@ -88,6 +88,10 @@ func _process_next_event(events: Array, index: int, processed_count: int, callba
 		print("[Processor] Processing scanner.checkin event ", event_id)
 		_process_scanner_checkin(event_id, payload)
 		_process_next_event(events, index + 1, processed_count + 1, callback)
+	elif event_type == "mobile.checkout":
+		print("[Processor] Processing mobile.checkout event ", event_id)
+		_process_mobile_checkout(event_id, payload)
+		_process_next_event(events, index + 1, processed_count + 1, callback)
 	elif event_type == "twilio.sms":
 		print("[Processor] Processing SMS event ", event_id)
 		_process_sms(event_id, payload)
@@ -505,6 +509,17 @@ func _process_scanner_checkin(event_id: int, payload: Dictionary) -> void:
 	# 3. Record attendance check-in atomically using AttendanceService
 	var att_svc = AttendanceServiceScript.new(db)
 	att_svc.record_check_in_atomic(person_dict, "NETUM DS2800 Scanner", scanner_id, null, mode_val, "John Boyte")
+
+	db.execute("UPDATE inbound_event_queue SET processed = 1 WHERE id = ?;", [event_id])
+
+func _process_mobile_checkout(event_id: int, payload: Dictionary) -> void:
+	var target_hid = str(payload.get("human_id", payload.get("humanId", ""))).strip_edges()
+	var today_str = Time.get_date_string_from_system()
+	var time_str = Time.get_time_string_from_system()
+
+	if target_hid != "":
+		# Record check-out time in attendance_log for today
+		db.execute("UPDATE attendance_log SET check_out_time = ? WHERE (human_id = ? OR person_uuid = ?) AND check_in_date = ? AND (check_out_time IS NULL OR check_out_time = '');", [time_str, target_hid, target_hid, today_str])
 
 	db.execute("UPDATE inbound_event_queue SET processed = 1 WHERE id = ?;", [event_id])
 
