@@ -948,6 +948,237 @@ if ($uri === '/api/v1/sync/session-index' && $method === 'POST') {
     exit;
 }
 
+function ensure_shift_notes_table($pdo) {
+    $pdo->exec("CREATE TABLE IF NOT EXISTS shift_notes_index (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        note_uuid TEXT UNIQUE NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT 'Operational',
+        urgency_level TEXT NOT NULL DEFAULT 'normal',
+        author_human_id TEXT NOT NULL,
+        author_name TEXT NOT NULL,
+        privacy_level TEXT NOT NULL DEFAULT 'operational',
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );");
+}
+
+// Route: GET /api/v1/mobile/communications/shift-notes
+if (($uri === '/api/v1/mobile/communications/shift-notes' || $uri === '/mobile/api/communications/shift-notes') && $method === 'GET') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+    ensure_shift_notes_table($pdo);
+
+    $stmt = $pdo->prepare("
+        SELECT 
+            note_uuid as id, title, body, category, urgency_level,
+            author_human_id, author_name, created_at
+        FROM shift_notes_index
+        WHERE LOWER(privacy_level) NOT IN ('private', 'pastoral')
+        ORDER BY created_at DESC
+        LIMIT 50
+    ");
+    $stmt->execute();
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $notes = [];
+    foreach ($rows as $row) {
+        $notes[] = [
+            'id' => strval($row['id']),
+            'title' => strval($row['title']),
+            'body' => strval($row['body']),
+            'category' => strval($row['category']),
+            'urgencyLevel' => strval($row['urgency_level']),
+            'authorHumanId' => strval($row['author_human_id']),
+            'authorName' => strval($row['author_name']),
+            'createdAt' => strval($row['created_at']),
+        ];
+    }
+
+    echo json_encode([
+        'success' => true,
+        'notes' => $notes
+    ]);
+    exit;
+}
+
+// Route: POST /api/v1/mobile/communications/shift-notes
+if (($uri === '/api/v1/mobile/communications/shift-notes' || $uri === '/mobile/api/communications/shift-notes') && $method === 'POST') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+    ensure_shift_notes_table($pdo);
+
+    $raw = file_get_contents('php://input');
+    $input = json_decode($raw, true);
+
+    $title = is_array($input) ? trim($input['title'] ?? '') : '';
+    $body = is_array($input) ? trim($input['body'] ?? '') : '';
+    $category = is_array($input) ? trim($input['category'] ?? 'Operational') : 'Operational';
+    $urgency = is_array($input) ? trim($input['urgencyLevel'] ?? $input['urgency_level'] ?? 'normal') : 'normal';
+
+    if (empty($title) || empty($body)) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => 'Title and note body are required for shift handoff.']);
+        exit;
+    }
+
+    $uuid = 'note_' . bin2hex(random_bytes(8));
+    $author_hid = strval($session['human_id'] ?? 'SYSTEM');
+    $author_name = strval($session['display_name'] ?? 'Staff Member');
+    $created_at = gmdate('Y-m-d H:i:s');
+
+    $stmt = $pdo->prepare("
+        INSERT INTO shift_notes_index 
+        (note_uuid, title, body, category, urgency_level, author_human_id, author_name, privacy_level, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'operational', ?)
+    ");
+    $stmt->execute([$uuid, $title, $body, $category, $urgency, $author_hid, $author_name, $created_at]);
+
+    echo json_encode([
+        'success' => true,
+        'message' => 'Shift handoff note created successfully',
+        'note' => [
+            'id' => $uuid,
+            'title' => $title,
+            'body' => $body,
+            'category' => $category,
+            'urgencyLevel' => $urgency,
+            'authorHumanId' => $author_hid,
+            'authorName' => $author_name,
+            'createdAt' => $created_at
+        ]
+    ]);
+    exit;
+}
+
+function ensure_inbox_messages_table($pdo) {
+    $pdo->exec("CREATE TABLE IF NOT EXISTS inbox_messages_index (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        msg_uuid TEXT UNIQUE NOT NULL,
+        type TEXT NOT NULL DEFAULT 'sms',
+        sender_name TEXT NOT NULL,
+        sender_contact TEXT NOT NULL,
+        message_body TEXT NOT NULL,
+        is_read INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );");
+}
+
+// Route: GET /api/v1/mobile/communications/inbox
+if (($uri === '/api/v1/mobile/communications/inbox' || $uri === '/mobile/api/communications/inbox') && $method === 'GET') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+    ensure_inbox_messages_table($pdo);
+
+    $stmt = $pdo->prepare("
+        SELECT 
+            msg_uuid as id, type, sender_name, sender_contact,
+            message_body, is_read, created_at
+        FROM inbox_messages_index
+        ORDER BY created_at DESC
+        LIMIT 50
+    ");
+    $stmt->execute();
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $unread_count = 0;
+    $items = [];
+    foreach ($rows as $r) {
+        $is_r = intval($r['is_read']) === 1;
+        if (!$is_r) $unread_count++;
+        $items[] = [
+            'id' => strval($r['id']),
+            'type' => strval($r['type']),
+            'senderName' => strval($r['sender_name']),
+            'senderContact' => strval($r['sender_contact']),
+            'messageBody' => strval($r['message_body']),
+            'isRead' => $is_r,
+            'createdAt' => strval($r['created_at'])
+        ];
+    }
+
+    echo json_encode([
+        'success' => true,
+        'unreadCount' => $unread_count,
+        'items' => $items
+    ]);
+    exit;
+}
+
+// Route: POST /api/v1/mobile/communications/inbox/mark-read
+if (($uri === '/api/v1/mobile/communications/inbox/mark-read' || $uri === '/mobile/api/communications/inbox/mark-read') && $method === 'POST') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+    ensure_inbox_messages_table($pdo);
+
+    $raw = file_get_contents('php://input');
+    $input = json_decode($raw, true);
+    $msg_id = is_array($input) ? trim($input['id'] ?? '') : '';
+
+    if (!empty($msg_id)) {
+        $stmt = $pdo->prepare("UPDATE inbox_messages_index SET is_read = 1 WHERE msg_uuid = ?");
+        $stmt->execute([$msg_id]);
+    }
+
+    echo json_encode(['success' => true]);
+    exit;
+}
+
+// Route: POST /api/v1/mobile/communications/inbox/reply
+if (($uri === '/api/v1/mobile/communications/inbox/reply' || $uri === '/mobile/api/communications/inbox/reply') && $method === 'POST') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+    ensure_inbox_messages_table($pdo);
+
+    $raw = file_get_contents('php://input');
+    $input = json_decode($raw, true);
+    $msg_id = is_array($input) ? trim($input['messageId'] ?? '') : '';
+    $reply_text = is_array($input) ? trim($input['replyText'] ?? '') : '';
+    $recipient = is_array($input) ? trim($input['recipientContact'] ?? '') : '';
+
+    if (empty($reply_text)) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => 'Reply text is required.']);
+        exit;
+    }
+
+    $uuid = 'reply_' . bin2hex(random_bytes(8));
+    $created_at = gmdate('Y-m-d H:i:s');
+    $author_name = strval($session['display_name'] ?? 'Staff Member');
+
+    $stmt = $pdo->prepare("
+        INSERT INTO inbox_messages_index
+        (msg_uuid, type, sender_name, sender_contact, message_body, is_read, created_at)
+        VALUES (?, 'sms_reply', ?, ?, ?, 1, ?)
+    ");
+    $stmt->execute([$uuid, 'Me (' . $author_name . ')', $recipient, $reply_text, $created_at]);
+
+    echo json_encode([
+        'success' => true,
+        'message' => 'Reply recorded and queued for outbound dispatch.',
+        'reply' => [
+            'id' => $uuid,
+            'type' => 'sms_reply',
+            'senderName' => 'Me (' . $author_name . ')',
+            'senderContact' => $recipient,
+            'messageBody' => $reply_text,
+            'isRead' => true,
+            'createdAt' => $created_at
+        ]
+    ]);
+    exit;
+}
+
 // Route: Public Sessions List API (Public Member Browser)
 if (($uri === '/api/v1/public/sessions' || $uri === '/public/api/sessions') && ($method === 'GET' || $method === 'POST')) {
     header('Content-Type: application/json; charset=utf-8');
