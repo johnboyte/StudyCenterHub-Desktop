@@ -2666,6 +2666,46 @@ if (preg_match('#^/(api/v1/mobile|mobile/api)/people/([^/]+)$#', $uri, $m) && $m
     exit;
 }
 
+// Route: Authenticated Mobile Person Attendance History Endpoint (Bounded Recent 30 Visits)
+if (preg_match('#^/api/v1/mobile/people/([^/]+)/attendance-history$#', $uri, $m) && $method === 'GET') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+    $target_hid = trim($m[1]);
+
+    $history = [];
+    try {
+        $stmt = $pdo->prepare("
+            SELECT attendance_date, check_in_time, check_out_time, status 
+            FROM attendance_history_index 
+            WHERE human_id = ? 
+            ORDER BY attendance_date DESC, check_in_time DESC 
+            LIMIT 30
+        ");
+        $stmt->execute([$target_hid]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $stmt->closeCursor();
+
+        foreach ($rows as $r) {
+            $history[] = [
+                'attendanceDate' => strval($r['attendance_date']),
+                'checkInTime' => strval($r['check_in_time']),
+                'checkOutTime' => $r['check_out_time'] ? strval($r['check_out_time']) : null,
+                'status' => strval($r['status'] ?? 'Present'),
+            ];
+        }
+    } catch (Throwable $e) {}
+
+    echo json_encode([
+        'success' => true,
+        'humanId' => $target_hid,
+        'totalVisits' => count($history),
+        'history' => $history
+    ]);
+    exit;
+}
+
 // Route: Authenticated Mobile Today's Operating Hours & Staff Schedule Endpoint
 if (($uri === '/api/v1/mobile/schedule/today' || $uri === '/mobile/api/schedule/today') && $method === 'GET') {
     header('Content-Type: application/json; charset=utf-8');
