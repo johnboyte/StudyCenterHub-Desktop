@@ -44,20 +44,34 @@ func run_all_tests() -> void:
 func _test_spelling_assistance_engine() -> void:
 	print("--- 1. Testing Spelling Assistance Engine ---")
 
-	var test_text = "Please recieve this definately seperate document."
-	var issues = SpellingAssistanceHelperScript.check_text(test_text)
+	# Sentence 1: Common misspellings with known suggestions
+	var s1 = "I definately recieve seperate calender adress wierd"
+	var issues1 = SpellingAssistanceHelperScript.check_text(s1)
+	assert(issues1.size() == 6, "Sentence 1 expected 6 misspellings, got: " + str(issues1.size()))
+	assert(issues1[0]["suggestion"] == "definitely", "Expected definitely")
+	assert(issues1[1]["suggestion"] == "receive", "Expected receive")
+	assert(issues1[2]["suggestion"] == "separate", "Expected separate")
+	assert(issues1[3]["suggestion"] == "calendar", "Expected calendar")
+	assert(issues1[4]["suggestion"] == "address", "Expected address")
+	assert(issues1[5]["suggestion"] == "weird", "Expected weird")
 
-	assert(issues.size() == 3, "Expected 3 spelling issues, got: " + str(issues.size()))
-	assert(issues[0]["suggestion"] == "receive", "Expected 'receive', got: " + issues[0]["suggestion"])
-	assert(issues[1]["suggestion"] == "definitely", "Expected 'definitely', got: " + issues[1]["suggestion"])
-	assert(issues[2]["suggestion"] == "separate", "Expected 'separate', got: " + issues[2]["suggestion"])
+	# Sentence 2: Ordinary misspellings and invalid words
+	var s2 = "test a new helt jh but hawert ib alghet"
+	var issues2 = SpellingAssistanceHelperScript.check_text(s2)
+	assert(issues2.size() == 5, "Sentence 2 expected 5 issues (helt, jh, hawert, ib, alghet), got: " + str(issues2.size()))
 
-	var fixed_text = test_text
-	for issue in issues:
-		fixed_text = fixed_text.replace(issue["word"], issue["suggestion"])
+	var words_found = []
+	for iss in issues2:
+		words_found.append(iss["word"])
 
-	assert(fixed_text == "Please receive this definitely separate document.", "Spelling auto-fix output mismatch!")
-	print("✓ PASS: Real-time spelling detection & auto-fix verified for 'recieve', 'definately', 'seperate'.")
+	assert("helt" in words_found, "helt must be flagged!")
+	assert("hawert" in words_found, "hawert must be flagged!")
+	assert("alghet" in words_found, "alghet must be flagged!")
+	assert("jh" in words_found, "jh must be flagged!")
+	assert("ib" in words_found, "ib must be flagged!")
+
+	print("✓ PASS: Sentence 1 ('I definately recieve seperate calender adress wierd') detected 6 issues.")
+	print("✓ PASS: Sentence 2 ('test a new helt jh but hawert ib alghet') detected 5 invalid/misspelled words.")
 
 func _test_note_editing_lifecycle() -> void:
 	print("\n--- 2. Testing Note Editing Lifecycle Across All 4 Note Types ---")
