@@ -304,6 +304,19 @@ static func get_registry() -> Dictionary:
 			"completion_sql": "UPDATE event_inbox SET status = 'processed', processed_at = datetime('now') WHERE id = ?;",
 			"primary_button": "Re-process Events",
 			"queue_mode_supported": true
+		},
+		"person_profile_tasks": {
+			"queue_id": "person_profile_tasks",
+			"title": "Profile Follow-Ups & Tasks",
+			"description": "Uncompleted individual constituent tasks and follow-up assignments",
+			"target_view": "people",
+			"required_permission": "people.view",
+			"urgency": "urgent",
+			"count_sql": "SELECT COUNT(*) AS cnt FROM staff_tasks_index WHERE status != 'completed';",
+			"record_sql": "SELECT id, task_uuid, title, description, due_date, priority, status, assignee_human_id, assignee_name, linked_human_id, linked_human_name, created_at FROM staff_tasks_index WHERE status != 'completed' ORDER BY CASE priority WHEN 'urgent' THEN 1 WHEN 'high' THEN 2 WHEN 'normal' THEN 3 ELSE 4 END ASC, CASE WHEN due_date IS NULL OR due_date = '' THEN 1 ELSE 0 END ASC, due_date ASC, id DESC;",
+			"completion_sql": "UPDATE staff_tasks_index SET status = 'completed', completed_at = datetime('now'), completed_by = 'Staff' WHERE id = ?;",
+			"primary_button": "Review Tasks",
+			"queue_mode_supported": true
 		}
 	}
 

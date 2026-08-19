@@ -102,13 +102,85 @@ var pathway_attendance_expanded_map: Dictionary = {}
 @onready var history_section: VBoxContainer = $MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/WorkspaceScroll/SectionStack/HistorySection
 var _photo_cache: Dictionary = {}
 
+var current_sort_by: String = "first_name" # "first_name" or "last_name"
+var sort_container: HBoxContainer = null
+var btn_sort_first: Button = null
+var btn_sort_last: Button = null
+
 func _ready() -> void:
 	_init_debounce_timer()
 	_ensure_onready_nodes()
 	if not read_service:
 		_init_read_service()
+	_setup_sort_bar()
 	_connect_signals()
 	call_deferred("refresh_view")
+
+func _setup_sort_bar() -> void:
+	var sub_header = get_node_or_null("MarginContainer/VBoxContainer/SubHeaderBar") as HBoxContainer
+	if not sub_header: return
+	if sub_header.has_node("SortHBox"): return
+
+	sort_container = HBoxContainer.new()
+	sort_container.name = "SortHBox"
+	sort_container.add_theme_constant_override("separation", 6)
+
+	var lbl_sort = Label.new()
+	lbl_sort.text = "SORT BY:"
+	lbl_sort.add_theme_font_size_override("font_size", 12)
+	lbl_sort.add_theme_color_override("font_color", Color(0.60, 0.68, 0.78, 1.0))
+	sort_container.add_child(lbl_sort)
+
+	btn_sort_first = Button.new()
+	btn_sort_first.text = "First Name"
+	btn_sort_first.custom_minimum_size = Vector2(85, 28)
+	btn_sort_first.add_theme_font_size_override("font_size", 12)
+	btn_sort_first.pressed.connect(func(): select_sort_by("first_name"))
+	sort_container.add_child(btn_sort_first)
+
+	btn_sort_last = Button.new()
+	btn_sort_last.text = "Last Name"
+	btn_sort_last.custom_minimum_size = Vector2(85, 28)
+	btn_sort_last.add_theme_font_size_override("font_size", 12)
+	btn_sort_last.pressed.connect(func(): select_sort_by("last_name"))
+	sort_container.add_child(btn_sort_last)
+
+	sub_header.add_child(sort_container)
+	if sub_header.has_method("move_child") and results_count_label:
+		sub_header.move_child(sort_container, sub_header.get_child_count() - 2)
+
+	_update_sort_button_styles()
+
+func select_sort_by(sort_mode: String) -> void:
+	if current_sort_by == sort_mode: return
+	current_sort_by = sort_mode
+	_update_sort_button_styles()
+	refresh_view()
+
+func _update_sort_button_styles() -> void:
+	if not btn_sort_first or not btn_sort_last: return
+	var primary_col = _get_active_theme_color()
+
+	var active_st = StyleBoxFlat.new()
+	active_st.bg_color = primary_col
+	active_st.corner_radius_top_left = 4; active_st.corner_radius_top_right = 4; active_st.corner_radius_bottom_left = 4; active_st.corner_radius_bottom_right = 4
+	active_st.content_margin_left = 8; active_st.content_margin_right = 8; active_st.content_margin_top = 4; active_st.content_margin_bottom = 4
+
+	var inactive_st = StyleBoxFlat.new()
+	inactive_st.bg_color = Color(0.20, 0.26, 0.36, 1.0)
+	inactive_st.corner_radius_top_left = 4; inactive_st.corner_radius_top_right = 4; inactive_st.corner_radius_bottom_left = 4; inactive_st.corner_radius_bottom_right = 4
+	inactive_st.content_margin_left = 8; inactive_st.content_margin_right = 8; inactive_st.content_margin_top = 4; inactive_st.content_margin_bottom = 4
+
+	if current_sort_by == "first_name":
+		btn_sort_first.add_theme_stylebox_override("normal", active_st)
+		btn_sort_first.add_theme_color_override("font_color", Color(1, 1, 1, 1))
+		btn_sort_last.add_theme_stylebox_override("normal", inactive_st)
+		btn_sort_last.add_theme_color_override("font_color", Color(0.70, 0.78, 0.88, 1.0))
+	else:
+		btn_sort_last.add_theme_stylebox_override("normal", active_st)
+		btn_sort_last.add_theme_color_override("font_color", Color(1, 1, 1, 1))
+		btn_sort_first.add_theme_stylebox_override("normal", inactive_st)
+		btn_sort_first.add_theme_color_override("font_color", Color(0.70, 0.78, 0.88, 1.0))
 
 func _find_app_shell() -> Node:
 	var curr: Node = self
@@ -554,6 +626,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func refresh_view() -> void:
 	_ensure_onready_nodes()
+	_setup_sort_bar()
 	var roster_scroll = get_node_or_null("MarginContainer/VBoxContainer/MainSplit/RosterPanel/RosterScroll") as ScrollContainer
 	var workspace_scroll = get_node_or_null("MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/WorkspaceScroll") as ScrollContainer
 	var saved_r_scroll = roster_scroll.scroll_vertical if roster_scroll else 0
@@ -676,7 +749,7 @@ func _update_filter_button_styles() -> void:
 			btn.flat = (k != current_filter)
 
 func _fetch_roster_data() -> void:
-	var options = {}
+	var options = {"sort_by": current_sort_by}
 	if current_filter != "all":
 		options["status"] = current_filter
 
@@ -685,13 +758,13 @@ func _fetch_roster_data() -> void:
 		res = read_service.search_people(current_query, options)
 	else:
 		if current_filter == "all":
-			res = read_service.list_people()
+			res = read_service.list_people(options)
 		elif current_filter == "active":
-			res = read_service.list_active_people()
+			res = read_service.list_active_people(options)
 		elif current_filter == "pending":
-			res = read_service.list_pending_people()
+			res = read_service.list_pending_people(options)
 		elif current_filter == "inactive":
-			res = read_service.list_inactive_people()
+			res = read_service.list_inactive_people(options)
 
 	if not res.get("success", false):
 		_show_view_state("error")
@@ -877,6 +950,25 @@ func select_person_by_id(person_id: int) -> void:
 		if int(p.get("id", 0)) == person_id:
 			select_person_by_index(i)
 			return
+
+func select_person_by_uuid(p_uuid: String) -> void:
+	if p_uuid.is_empty(): return
+	if visible_people.size() == 0:
+		_fetch_roster_data()
+	for i in range(visible_people.size()):
+		var p = visible_people[i]
+		if str(p.get("person_uuid", "")) == p_uuid or str(p.get("human_id", "")) == p_uuid:
+			select_person_by_index(i)
+			return
+
+func receive_navigation_context(params: Dictionary) -> void:
+	var p_uuid = str(params.get("person_uuid", params.get("linked_human_id", params.get("human_id", ""))))
+	if not p_uuid.is_empty():
+		select_person_by_uuid(p_uuid)
+
+	var tab = str(params.get("tab", ""))
+	if tab == "notes" or tab == "notes_tasks" or tab == "tasks":
+		select_workspace_tab("notes")
 
 func select_person_by_index(index: int) -> void:
 	if index < 0 or index >= visible_people.size():
@@ -1722,6 +1814,7 @@ func _populate_notes_section(p: Dictionary) -> void:
 			db.execute("INSERT INTO person_notes (note_uuid, person_uuid, title, body, visibility, created_at, updated_at) VALUES (?, ?, ?, ?, 'standard_staff', ?, ?);",
 				[note_uuid, person_uuid, cat_name, note_text, timestamp, timestamp])
 			body_edit.text = ""
+			_trigger_gateway_sync()
 			refresh_view()
 	)
 	comp_box.add_child(btn_save_note)
@@ -1819,7 +1912,323 @@ func _populate_notes_section(p: Dictionary) -> void:
 	hist_box.add_child(notes_list_vbox)
 
 	notes_main_vbox.add_child(_create_card("Notes Journal History", hist_box))
+
+	# ==========================================================================
+	# 3. PERSON FOLLOW-UPS & TASKS CARD (PD-008 & Staff Tasks Subsystem)
+	# ==========================================================================
+	var tasks_box = VBoxContainer.new()
+	tasks_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	tasks_box.add_theme_constant_override("separation", 14)
+
+	var t_hdr_hbox = HBoxContainer.new()
+	t_hdr_hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+	var t_title_lbl = Label.new()
+	t_title_lbl.text = "Person Follow-Ups & Tasks"
+	t_title_lbl.add_theme_font_size_override("font_size", 20)
+	t_title_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	t_hdr_hbox.add_child(t_title_lbl)
+
+	var btn_add_task = Button.new()
+	btn_add_task.text = "➕ Add Follow-Up / Task"
+	_style_dark_card_button(btn_add_task)
+	btn_add_task.custom_minimum_size = Vector2(180, 38)
+	btn_add_task.add_theme_font_size_override("font_size", 14)
+	t_hdr_hbox.add_child(btn_add_task)
+	tasks_box.add_child(t_hdr_hbox)
+
+	var add_task_vbox = VBoxContainer.new()
+	add_task_vbox.visible = false
+	add_task_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	add_task_vbox.add_theme_constant_override("separation", 10)
+
+	var task_title_edit = LineEdit.new()
+	task_title_edit.placeholder_text = "Task Title (e.g. Call parent regarding registration)"
+	task_title_edit.caret_blink = true
+	task_title_edit.add_theme_color_override("caret_color", Color(0.12, 0.16, 0.22, 1.0))
+	task_title_edit.custom_minimum_size = Vector2(0, 42)
+	add_task_vbox.add_child(task_title_edit)
+
+	var task_desc_edit = TextEdit.new()
+	task_desc_edit.placeholder_text = "Description / notes for this follow-up..."
+	task_desc_edit.caret_blink = true
+	task_desc_edit.add_theme_color_override("caret_color", Color(0.12, 0.16, 0.22, 1.0))
+	task_desc_edit.custom_minimum_size = Vector2(0, 80)
+	add_task_vbox.add_child(task_desc_edit)
+
+	var meta_row = HBoxContainer.new()
+	meta_row.add_theme_constant_override("separation", 12)
+
+	var due_vbox = VBoxContainer.new()
+	due_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var due_lbl = Label.new()
+	due_lbl.text = "DUE DATE (MM/DD/YYYY)"
+	due_lbl.add_theme_font_size_override("font_size", 12)
+	due_lbl.add_theme_color_override("font_color", Color(0.70, 0.78, 0.88, 1.0))
+	var due_edit = LineEdit.new()
+	due_edit.placeholder_text = "MM/DD/YYYY"
+	due_edit.caret_blink = true
+	due_edit.add_theme_color_override("caret_color", Color(0.12, 0.16, 0.22, 1.0))
+	due_edit.custom_minimum_size = Vector2(0, 38)
+
+	due_edit.focus_exited.connect(func():
+		var txt = due_edit.text.strip_edges()
+		if txt != "":
+			due_edit.text = _format_ui_date(txt)
+	)
+
+	due_vbox.add_child(due_lbl)
+	due_vbox.add_child(due_edit)
+	meta_row.add_child(due_vbox)
+
+	var prio_vbox = VBoxContainer.new()
+	prio_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var prio_lbl = Label.new()
+	prio_lbl.text = "PRIORITY"
+	prio_lbl.add_theme_font_size_override("font_size", 12)
+	prio_lbl.add_theme_color_override("font_color", Color(0.70, 0.78, 0.88, 1.0))
+	var prio_dropdown = OptionButton.new()
+	prio_dropdown.add_item("Normal", 0)
+	prio_dropdown.add_item("High", 1)
+	prio_dropdown.add_item("Urgent", 2)
+	prio_dropdown.add_item("Low", 3)
+	prio_dropdown.custom_minimum_size = Vector2(0, 38)
+	prio_vbox.add_child(prio_lbl)
+	prio_vbox.add_child(prio_dropdown)
+	meta_row.add_child(prio_vbox)
+
+	add_task_vbox.add_child(meta_row)
+
+	var btn_row = HBoxContainer.new()
+	btn_row.add_theme_constant_override("separation", 10)
+
+	var btn_save_task = Button.new()
+	btn_save_task.text = "💾 Save Task"
+	_style_dark_card_button(btn_save_task)
+	btn_save_task.custom_minimum_size = Vector2(140, 38)
+	btn_row.add_child(btn_save_task)
+
+	var btn_cancel_task = Button.new()
+	btn_cancel_task.text = "Cancel"
+	_style_dark_card_button(btn_cancel_task)
+	btn_cancel_task.custom_minimum_size = Vector2(100, 38)
+	btn_cancel_task.pressed.connect(func(): add_task_vbox.visible = false)
+	btn_row.add_child(btn_cancel_task)
+
+	add_task_vbox.add_child(btn_row)
+	tasks_box.add_child(add_task_vbox)
+
+	btn_add_task.pressed.connect(func():
+		add_task_vbox.visible = not add_task_vbox.visible
+	)
+
+	btn_save_task.pressed.connect(func():
+		var t_title = task_title_edit.text.strip_edges()
+		if t_title == "":
+			return
+
+		var t_desc = task_desc_edit.text.strip_edges()
+		var raw_due = due_edit.text.strip_edges()
+		var due_formatted = _format_ui_date(raw_due)
+		var iso_due = _to_iso_date(due_formatted)
+		var prio_str = prio_dropdown.get_item_text(prio_dropdown.selected).to_lower()
+
+		var task_uuid = "task_" + str(Time.get_ticks_msec()) + "_" + str(randi() % 10000)
+		var p_name = (_clean_str(p.get("first_name", "")) + " " + _clean_str(p.get("last_name", ""))).strip_edges()
+		var p_hid = _clean_str(p.get("human_id", p.get("person_uuid", "")))
+
+		db.execute("""
+			CREATE TABLE IF NOT EXISTS staff_tasks_index (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				task_uuid TEXT UNIQUE NOT NULL,
+				title TEXT NOT NULL,
+				description TEXT DEFAULT '',
+				due_date TEXT NOT NULL,
+				priority TEXT NOT NULL DEFAULT 'normal',
+				status TEXT NOT NULL DEFAULT 'open',
+				assignee_human_id TEXT,
+				assignee_name TEXT DEFAULT '',
+				linked_human_id TEXT,
+				linked_human_name TEXT DEFAULT '',
+				created_at TEXT NOT NULL DEFAULT (datetime('now')),
+				completed_at TEXT DEFAULT NULL,
+				completed_by TEXT DEFAULT NULL,
+				updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+			);
+		""")
+
+		db.execute("""
+			INSERT INTO staff_tasks_index (
+				task_uuid, title, description, due_date, priority, status,
+				assignee_name, linked_human_id, linked_human_name, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, 'open', 'Staff', ?, ?, datetime('now'), datetime('now'));
+		""", [task_uuid, t_title, t_desc, iso_due, prio_str, p_hid, p_name])
+
+		task_title_edit.text = ""
+		task_desc_edit.text = ""
+		due_edit.text = ""
+		add_task_vbox.visible = false
+
+		_trigger_gateway_sync()
+		refresh_view()
+	)
+
+	var tasks_list_vbox = VBoxContainer.new()
+	tasks_list_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	tasks_list_vbox.add_theme_constant_override("separation", 10)
+
+	var p_hid = _clean_str(p.get("human_id", p.get("person_uuid", "")))
+	var p_uuid = _clean_str(p.get("person_uuid", ""))
+
+	db.execute("""
+		CREATE TABLE IF NOT EXISTS staff_tasks_index (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			task_uuid TEXT UNIQUE NOT NULL,
+			title TEXT NOT NULL,
+			description TEXT DEFAULT '',
+			due_date TEXT NOT NULL,
+			priority TEXT NOT NULL DEFAULT 'normal',
+			status TEXT NOT NULL DEFAULT 'open',
+			assignee_human_id TEXT,
+			assignee_name TEXT DEFAULT '',
+			linked_human_id TEXT,
+			linked_human_name TEXT DEFAULT '',
+			created_at TEXT NOT NULL DEFAULT (datetime('now')),
+			completed_at TEXT DEFAULT NULL,
+			completed_by TEXT DEFAULT NULL,
+			updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+		);
+	""")
+
+	var t_res = db.execute("""
+		SELECT * FROM staff_tasks_index
+		WHERE (linked_human_id = ? OR linked_human_id = ?)
+		ORDER BY CASE status WHEN 'open' THEN 1 WHEN 'in_progress' THEN 2 ELSE 3 END,
+		         CASE priority WHEN 'urgent' THEN 1 WHEN 'high' THEN 2 WHEN 'normal' THEN 3 ELSE 4 END,
+		         due_date ASC, id DESC;
+	""", [p_hid, p_uuid])
+
+	var person_tasks = t_res.get("data", []) if t_res.get("success", false) else []
+
+	if person_tasks.size() == 0:
+		tasks_list_vbox.add_child(_create_empty_label("No follow-ups or tasks linked to this profile."))
+	else:
+		for t_row in person_tasks:
+			var t_card = PanelContainer.new()
+			var t_style = StyleBoxFlat.new()
+			var is_comp = (str(t_row.get("status", "")).to_lower() == "completed")
+			t_style.bg_color = Color(0.14, 0.20, 0.28, 1.0) if not is_comp else Color(0.12, 0.16, 0.22, 1.0)
+			t_style.border_width_left = 1; t_style.border_width_top = 1; t_style.border_width_right = 1; t_style.border_width_bottom = 1
+			t_style.border_color = Color(0.24, 0.32, 0.44, 1.0)
+			t_style.corner_radius_top_left = 8; t_style.corner_radius_top_right = 8; t_style.corner_radius_bottom_left = 8; t_style.corner_radius_bottom_right = 8
+			t_style.content_margin_left = 12; t_style.content_margin_top = 10; t_style.content_margin_right = 12; t_style.content_margin_bottom = 10
+			t_card.add_theme_stylebox_override("panel", t_style)
+
+			var tc_vbox = VBoxContainer.new()
+			tc_vbox.add_theme_constant_override("separation", 6)
+
+			var tc_top = HBoxContainer.new()
+			tc_top.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+			var tc_title = Label.new()
+			tc_title.text = ( "✓ " if is_comp else "📌 " ) + str(t_row.get("title", ""))
+			tc_title.add_theme_font_size_override("font_size", 16)
+			tc_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			tc_title.add_theme_color_override("font_color", Color(0.92, 0.96, 1.0) if not is_comp else Color(0.55, 0.65, 0.75))
+			tc_top.add_child(tc_title)
+
+			var prio_txt = str(t_row.get("priority", "normal")).to_upper()
+			var prio_lbl = Label.new()
+			prio_lbl.text = " [" + prio_txt + "] "
+			prio_lbl.add_theme_font_size_override("font_size", 13)
+			prio_lbl.add_theme_color_override("font_color", Color(0.95, 0.45, 0.25) if prio_txt == "URGENT" else (Color(0.95, 0.70, 0.25) if prio_txt == "HIGH" else Color(0.40, 0.75, 0.95)))
+			tc_top.add_child(prio_lbl)
+
+			tc_vbox.add_child(tc_top)
+
+			var desc_txt = str(t_row.get("description", "")).strip_edges()
+			if desc_txt != "":
+				var tc_desc = Label.new()
+				tc_desc.text = desc_txt
+				tc_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+				tc_desc.add_theme_font_size_override("font_size", 14)
+				tc_desc.add_theme_color_override("font_color", Color(0.75, 0.82, 0.92))
+				tc_vbox.add_child(tc_desc)
+
+			var meta_str = "Due: " + str(t_row.get("due_date", "No date")) + " • Assignee: " + str(t_row.get("assignee_name", "Unassigned"))
+			if is_comp:
+				meta_str += " • Completed: " + str(t_row.get("completed_at", "")) + " by " + str(t_row.get("completed_by", "Staff"))
+			var tc_meta = Label.new()
+			tc_meta.text = meta_str
+			tc_meta.add_theme_font_size_override("font_size", 12)
+			tc_meta.add_theme_color_override("font_color", Color(0.55, 0.65, 0.78))
+			tc_vbox.add_child(tc_meta)
+
+			if not is_comp:
+				var tc_act_row = HBoxContainer.new()
+				var btn_done = Button.new()
+				btn_done.text = "✓ Mark Complete"
+				_style_dark_card_button(btn_done)
+				btn_done.add_theme_font_size_override("font_size", 13)
+				var task_id = t_row.get("id")
+				var t_uuid = str(t_row.get("task_uuid", ""))
+				btn_done.pressed.connect(func():
+					db.execute("""
+						UPDATE staff_tasks_index
+						SET status = 'completed', completed_at = datetime('now'), completed_by = 'Staff', updated_at = datetime('now')
+						WHERE id = ? OR task_uuid = ?;
+					""", [task_id, t_uuid])
+					_trigger_gateway_sync()
+					refresh_view()
+				)
+				tc_act_row.add_child(btn_done)
+				tc_vbox.add_child(tc_act_row)
+
+			t_card.add_child(tc_vbox)
+			tasks_list_vbox.add_child(t_card)
+
+	tasks_box.add_child(tasks_list_vbox)
+	notes_main_vbox.add_child(_create_card("PERSON FOLLOW-UPS & TASKS", tasks_box))
 	notes_section.add_child(notes_main_vbox)
+
+func _format_ui_date(raw_text: String) -> String:
+	var s = raw_text.strip_edges().replace("-", "/").replace(".", "/")
+	if s.is_empty():
+		return Time.get_date_string_from_system()
+	if s.contains("/"):
+		var parts = s.split("/")
+		if parts.size() == 3:
+			var m = parts[0].pad_zeros(2)
+			var d = parts[1].pad_zeros(2)
+			var y = parts[2]
+			if y.length() == 2: y = "20" + y
+			return m + "/" + d + "/" + y
+	var digits = ""
+	for c in s:
+		if c >= '0' and c <= '9':
+			digits += c
+	if digits.length() == 8:
+		return digits.substr(0, 2) + "/" + digits.substr(2, 2) + "/" + digits.substr(4, 4)
+	elif digits.length() == 6:
+		var y = digits.substr(4, 2)
+		var y_full = "19" + y if y.to_int() > 30 else "20" + y
+		return digits.substr(0, 2) + "/" + digits.substr(2, 2) + "/" + y_full
+	return s
+
+func _to_iso_date(ui_date: String) -> String:
+	var s = _format_ui_date(ui_date)
+	if s.contains("/"):
+		var parts = s.split("/")
+		if parts.size() == 3:
+			return "%04d-%02d-%02d" % [parts[2].to_int(), parts[0].to_int(), parts[1].to_int()]
+	return s
+
+func _trigger_gateway_sync() -> void:
+	var parent = get_parent()
+	while parent and not ("db" in parent and parent.has_method("switch_view")):
+		parent = parent.get_parent()
+	if parent and "gateway_sync" in parent and parent.gateway_sync:
+		parent.gateway_sync.sync_now(func(_res): pass)
 
 func _populate_participation_section(p: Dictionary, att_history: Array) -> void:
 	if not participation_section: return

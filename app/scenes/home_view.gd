@@ -357,6 +357,77 @@ func _populate_needs_attention_card(card: PanelContainer) -> void:
 				})
 				card_item.action_requested.connect(_on_card_action)
 
+				if qid == "person_profile_tasks" and count > 0:
+					var db = app_shell.db if (app_shell and "db" in app_shell) else null
+					if db:
+						var task_res = db.execute("""
+							SELECT id, task_uuid, title, description, due_date, priority, status, assignee_name, linked_human_id, linked_human_name
+							FROM staff_tasks_index
+							WHERE status != 'completed'
+							ORDER BY CASE priority WHEN 'urgent' THEN 1 WHEN 'high' THEN 2 WHEN 'normal' THEN 3 ELSE 4 END ASC,
+							         CASE WHEN due_date IS NULL OR due_date = '' THEN 1 ELSE 0 END ASC,
+							         due_date ASC, id DESC;
+						""")
+						if task_res["success"] and task_res["data"].size() > 0:
+							var task_items_vbox = VBoxContainer.new()
+							task_items_vbox.add_theme_constant_override("separation", 6)
+							for t_row in task_res["data"]:
+								var t_panel = PanelContainer.new()
+								var t_style = StyleBoxFlat.new()
+								t_style.bg_color = Color(0.97, 0.98, 1.0, 1.0)
+								t_style.border_width_left = 3
+								var prio_str = str(t_row.get("priority", "normal")).to_lower()
+								t_style.border_color = Color(0.86, 0.15, 0.15, 1.0) if prio_str == "urgent" else (Color(0.85, 0.47, 0.02, 1.0) if prio_str == "high" else Color(0.15, 0.39, 0.92, 1.0))
+								t_style.corner_radius_top_left = 6; t_style.corner_radius_top_right = 6; t_style.corner_radius_bottom_left = 6; t_style.corner_radius_bottom_right = 6
+								t_style.content_margin_left = 12; t_style.content_margin_top = 8; t_style.content_margin_right = 12; t_style.content_margin_bottom = 8
+								t_panel.add_theme_stylebox_override("panel", t_style)
+
+								var item_hbox = HBoxContainer.new()
+								item_hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+								item_hbox.add_theme_constant_override("separation", 10)
+
+								var info_vbox = VBoxContainer.new()
+								info_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+								var headline_lbl = Label.new()
+								var p_name = str(t_row.get("linked_human_name", "Constituent"))
+								if p_name.is_empty(): p_name = "Constituent (" + str(t_row.get("linked_human_id", "")) + ")"
+								headline_lbl.text = p_name + ": " + str(t_row.get("title", "Task"))
+								headline_lbl.add_theme_font_size_override("font_size", 14)
+								headline_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
+								info_vbox.add_child(headline_lbl)
+
+								var meta_lbl = Label.new()
+								var due_str = str(t_row.get("due_date", ""))
+								if due_str.is_empty(): due_str = "No due date"
+								var ass_str = str(t_row.get("assignee_name", ""))
+								if ass_str.is_empty(): ass_str = "Unassigned"
+								meta_lbl.text = "Due: " + due_str + " • Priority: " + prio_str.to_upper() + " • Assignee: " + ass_str + " • Status: " + str(t_row.get("status", "open")).to_upper()
+								meta_lbl.add_theme_font_size_override("font_size", 12)
+								meta_lbl.add_theme_color_override("font_color", Color(0.40, 0.46, 0.54, 1.0))
+								info_vbox.add_child(meta_lbl)
+
+								item_hbox.add_child(info_vbox)
+
+								var btn_open = Button.new()
+								btn_open.text = "Open Profile →"
+								_style_link_button(btn_open, 13)
+								var target_hid = str(t_row.get("linked_human_id", ""))
+								btn_open.pressed.connect(func():
+									if app_shell and app_shell.has_method("switch_view"):
+										app_shell.switch_view("people", {
+											"person_uuid": target_hid,
+											"human_id": target_hid,
+											"tab": "notes_tasks"
+										})
+								)
+								item_hbox.add_child(btn_open)
+
+								t_panel.add_child(item_hbox)
+								task_items_vbox.add_child(t_panel)
+
+							cards_vbox.add_child(task_items_vbox)
+
 	# 3. View All Work Items link
 	var link_btn = Button.new()
 	link_btn.text = "View All Work Items →"

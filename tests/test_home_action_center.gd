@@ -97,8 +97,9 @@ func run_tests() -> void:
 	await process_frame
 
 	var all_cards = _get_action_cards(home)
-	if all_cards.size() != 13:
-		print("FAIL: Expected 13 cards when show_all_queues is true, got: ", all_cards.size())
+	var expected_card_count = QueueRegistry.get_registry().keys().size()
+	if all_cards.size() != expected_card_count:
+		print("FAIL: Expected %d cards when show_all_queues is true, got: %d" % [expected_card_count, all_cards.size()])
 		quit(1)
 		return
 

@@ -418,13 +418,29 @@ $config = file_exists(__DIR__ . '/config.php') ? require(__DIR__ . '/config.php'
 $sync_api_key = !empty($config['SYNC_API_KEY']) ? trim($config['SYNC_API_KEY']) : 'SCH_SYNC_KEY_PLACEHOLDER_8f3d';
 
 try {
-    // 1. Initialize SQLite Database
+    // 1. Initialize SQLite Database (Strict Fail-Closed Environment Isolation)
+    $host = strtolower($_SERVER['HTTP_HOST'] ?? '');
+    $env_header = strtolower($_SERVER['HTTP_X_ENVIRONMENT'] ?? '');
+    $env_query = strtolower($_GET['env'] ?? '');
+
     $db_dir = __DIR__ . '/database';
     if (!is_dir($db_dir)) {
         mkdir($db_dir, 0755, true);
     }
 
-    $pdo = new PDO('sqlite:' . $db_dir . '/relay.db', null, null, [
+    if (strpos($host, 'dev-gateway') !== false || $env_header === 'development' || $env_query === 'development') {
+        $db_file = $db_dir . '/relay_development.db';
+        $active_env = 'development';
+    } elseif (strpos($host, 'app.reallife-studycenter.org') !== false || $env_header === 'production' || $env_query === 'production') {
+        $db_file = $db_dir . '/relay.db';
+        $active_env = 'production';
+    } else {
+        // Fail closed fallback: default unknown hosts to dev database
+        $db_file = $db_dir . '/relay_development.db';
+        $active_env = 'development';
+    }
+
+    $pdo = new PDO('sqlite:' . $db_file, null, null, [
         PDO::ATTR_TIMEOUT => 5,
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION
     ]);
@@ -1194,6 +1210,24 @@ if (($uri === '/api/v1/mobile/tasks' || $uri === '/mobile/api/tasks') && $method
     $ins_stmt->execute([$uuid, $title, $desc, $due_date, $priority, $assignee_hid, $assignee_name, $linked_hid, $linked_name]);
     $ins_stmt->closeCursor();
 
+    ensure_inbound_event_queue_table($pdo);
+    $task_evt_payload = json_encode([
+        'task_uuid' => $uuid,
+        'title' => $title,
+        'description' => $desc,
+        'due_date' => $due_date,
+        'priority' => $priority,
+        'status' => 'open',
+        'assignee_human_id' => $assignee_hid,
+        'assignee_name' => $assignee_name,
+        'linked_human_id' => $linked_hid,
+        'linked_human_name' => $linked_name,
+        'created_at' => date('Y-m-d H:i:s')
+    ]);
+    $q_stmt = $pdo->prepare("INSERT INTO inbound_event_queue (event_type, payload_json, received_at, processed) VALUES ('mobile.task.create', ?, datetime('now'), 0)");
+    $q_stmt->execute([$task_evt_payload]);
+    $q_stmt->closeCursor();
+
     echo json_encode([
         'success' => true,
         'message' => 'Staff task created successfully.',
@@ -1266,6 +1300,16 @@ if (preg_match('#^/api/v1/mobile/tasks/([^/]+)/complete$#', $uri, $m) && $method
     $upd_stmt->execute([$by_name, $task_uuid, intval($task_uuid)]);
     $upd_stmt->closeCursor();
 
+    ensure_inbound_event_queue_table($pdo);
+    $comp_evt_payload = json_encode([
+        'task_uuid' => $task_uuid,
+        'completed_by' => $by_name,
+        'completed_at' => date('Y-m-d H:i:s')
+    ]);
+    $q_stmt = $pdo->prepare("INSERT INTO inbound_event_queue (event_type, payload_json, received_at, processed) VALUES ('mobile.task.complete', ?, datetime('now'), 0)");
+    $q_stmt->execute([$comp_evt_payload]);
+    $q_stmt->closeCursor();
+
     echo json_encode(['success' => true, 'message' => 'Task marked as completed.']);
     exit;
 }
@@ -1315,6 +1359,19 @@ if (preg_match('#^/api/v1/mobile/tasks/([^/]+)/update$#', $uri, $m) && $method =
     $upd_stmt = $pdo->prepare($sql);
     $upd_stmt->execute($params);
     $upd_stmt->closeCursor();
+
+    ensure_inbound_event_queue_table($pdo);
+    $upd_evt_payload = json_encode([
+        'task_uuid' => $task_uuid,
+        'title' => $payload['title'] ?? null,
+        'description' => $payload['description'] ?? null,
+        'due_date' => $due_date,
+        'priority' => $priority,
+        'status' => $status
+    ]);
+    $q_stmt = $pdo->prepare("INSERT INTO inbound_event_queue (event_type, payload_json, received_at, processed) VALUES ('mobile.task.update', ?, datetime('now'), 0)");
+    $q_stmt->execute([$upd_evt_payload]);
+    $q_stmt->closeCursor();
 
     echo json_encode(['success' => true, 'message' => 'Task updated successfully.']);
     exit;
@@ -1482,8 +1539,8 @@ if (($uri === '/api/v1/mobile/staff/me' || $uri === '/mobile/api/staff/me') && $
     exit;
 }
 
-// Route: GET /api/v1/mobile/communications/shift-notes
-if (($uri === '/api/v1/mobile/communications/shift-notes' || $uri === '/mobile/api/communications/shift-notes') && $method === 'GET') {
+// Route: GET /api/v1/mobile/communications/shift-notes (and shift-briefings)
+if (($uri === '/api/v1/mobile/communications/shift-notes' || $uri === '/mobile/api/communications/shift-notes' || $uri === '/api/v1/mobile/communications/shift-briefings') && $method === 'GET') {
     header('Content-Type: application/json; charset=utf-8');
     header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 
@@ -1492,9 +1549,7 @@ if (($uri === '/api/v1/mobile/communications/shift-notes' || $uri === '/mobile/a
 
     $stmt = $pdo->prepare("
         SELECT 
-            briefing_uuid as id, ('Shift Briefing - ' || shift_date) as title, summary_notes as body,
-            'Operational' as category, (CASE WHEN incident_count > 0 THEN 'high' ELSE 'normal' END) as urgency_level,
-            '' as author_human_id, leader_name as author_name, created_at
+            briefing_uuid as id, briefing_uuid, leader_name, shift_date, summary_notes, incident_count, status, created_at
         FROM shift_briefings
         ORDER BY created_at DESC
         LIMIT 50
@@ -1502,43 +1557,44 @@ if (($uri === '/api/v1/mobile/communications/shift-notes' || $uri === '/mobile/a
     $stmt->execute();
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    $notes = [];
+    $briefings = [];
     foreach ($rows as $row) {
-        $notes[] = [
+        $briefings[] = [
             'id' => strval($row['id']),
-            'title' => strval($row['title']),
-            'body' => strval($row['body']),
-            'category' => strval($row['category']),
-            'urgencyLevel' => strval($row['urgency_level']),
-            'authorHumanId' => strval($row['author_human_id']),
-            'authorName' => strval($row['author_name']),
-            'createdAt' => strval($row['created_at']),
+            'briefing_uuid' => strval($row['briefing_uuid']),
+            'leader_name' => strval($row['leader_name']),
+            'shift_date' => strval($row['shift_date']),
+            'summary_notes' => strval($row['summary_notes']),
+            'incident_count' => intval($row['incident_count'] ?? 0),
+            'status' => strval($row['status'] ?? 'submitted'),
+            'created_at' => strval($row['created_at']),
         ];
     }
 
     echo json_encode([
         'success' => true,
-        'notes' => $notes
+        'notes' => $briefings,
+        'briefings' => $briefings
     ]);
     exit;
 }
 
-// Route: POST /api/v1/mobile/communications/shift-notes
-if (($uri === '/api/v1/mobile/communications/shift-notes' || $uri === '/mobile/api/communications/shift-notes') && $method === 'POST') {
+// Route: POST /api/v1/mobile/communications/shift-notes (and shift-briefings)
+if (($uri === '/api/v1/mobile/communications/shift-notes' || $uri === '/mobile/api/communications/shift-notes' || $uri === '/api/v1/mobile/communications/shift-briefings') && $method === 'POST') {
     header('Content-Type: application/json; charset=utf-8');
     header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 
     $session = verify_mobile_session($pdo);
     ensure_shift_briefings_table($pdo);
+    ensure_inbound_event_queue_table($pdo);
 
     $raw = file_get_contents('php://input');
     $input = json_decode($raw, true);
 
-    $body = is_array($input) ? trim($input['body'] ?? $input['summary_notes'] ?? '') : '';
-    $title = is_array($input) ? trim($input['title'] ?? '') : '';
-    $summary = !empty($title) ? ($title . ": " . $body) : $body;
+    $summary = is_array($input) ? trim($input['summary_notes'] ?? $input['body'] ?? '') : '';
     $shift_date = is_array($input) && !empty($input['shift_date']) ? trim($input['shift_date']) : current_operational_date();
-    $incidents = is_array($input) && !empty($input['incident_count']) ? intval($input['incident_count']) : 0;
+    $incidents = is_array($input) && isset($input['incident_count']) ? intval($input['incident_count']) : 0;
+    $leader_name = is_array($input) && !empty($input['leader_name']) ? trim($input['leader_name']) : strval($session['display_name'] ?? 'Staff Member');
 
     if (empty($summary)) {
         http_response_code(400);
@@ -1547,7 +1603,6 @@ if (($uri === '/api/v1/mobile/communications/shift-notes' || $uri === '/mobile/a
     }
 
     $uuid = 'brief_mob_' . bin2hex(random_bytes(8));
-    $leader_name = strval($session['display_name'] ?? 'Staff Member');
     $created_at = gmdate('Y-m-d H:i:s');
 
     $stmt = $pdo->prepare("
@@ -1557,18 +1612,104 @@ if (($uri === '/api/v1/mobile/communications/shift-notes' || $uri === '/mobile/a
     ");
     $stmt->execute([$uuid, $leader_name, $shift_date, $summary, $incidents, $created_at]);
 
+    $evt_payload = json_encode([
+        'briefing_uuid' => $uuid,
+        'leader_name' => $leader_name,
+        'shift_date' => $shift_date,
+        'summary_notes' => $summary,
+        'incident_count' => $incidents,
+        'status' => 'submitted',
+        'created_at' => $created_at,
+    ]);
+    $q_stmt = $pdo->prepare("INSERT INTO inbound_event_queue (event_type, payload_json, received_at, processed) VALUES ('mobile.shift_briefing.create', ?, datetime('now'), 0)");
+    $q_stmt->execute([$evt_payload]);
+
     echo json_encode([
         'success' => true,
         'message' => 'Shift briefing handoff saved to Desktop shift_briefings table.',
-        'note' => [
+        'briefing' => [
             'id' => $uuid,
-            'title' => 'Shift Briefing - ' . $shift_date,
-            'body' => $summary,
-            'category' => 'Operational',
-            'urgencyLevel' => $incidents > 0 ? 'high' : 'normal',
-            'authorName' => $leader_name,
-            'createdAt' => $created_at
+            'briefing_uuid' => $uuid,
+            'leader_name' => $leader_name,
+            'shift_date' => $shift_date,
+            'summary_notes' => $summary,
+            'incident_count' => $incidents,
+            'status' => 'submitted',
+            'created_at' => $created_at,
         ]
+    ]);
+    exit;
+}
+
+// Route: UPDATE /api/v1/mobile/communications/shift-notes/{id}
+if ((preg_match('#^/api/v1/mobile/communications/shift-notes/([^/]+)(/update)?$#', $uri, $m) || preg_match('#^/api/v1/mobile/communications/shift-briefings/([^/]+)(/update)?$#', $uri, $m)) && ($method === 'PUT' || $method === 'POST')) {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+    ensure_shift_briefings_table($pdo);
+    ensure_inbound_event_queue_table($pdo);
+
+    $id = trim($m[1]);
+    $raw = file_get_contents('php://input');
+    $input = json_decode($raw, true);
+
+    $summary = is_array($input) ? trim($input['summary_notes'] ?? $input['body'] ?? '') : '';
+    $shift_date = is_array($input) && !empty($input['shift_date']) ? trim($input['shift_date']) : current_operational_date();
+    $incidents = is_array($input) && isset($input['incident_count']) ? intval($input['incident_count']) : 0;
+
+    if (empty($summary)) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => 'Summary notes are required for shift briefing update.']);
+        exit;
+    }
+
+    $stmt = $pdo->prepare("
+        UPDATE shift_briefings 
+        SET summary_notes = ?, shift_date = ?, incident_count = ?
+        WHERE briefing_uuid = ? OR id = ?
+    ");
+    $stmt->execute([$summary, $shift_date, $incidents, $id, intval($id)]);
+
+    $evt_payload = json_encode([
+        'briefing_uuid' => $id,
+        'shift_date' => $shift_date,
+        'summary_notes' => $summary,
+        'incident_count' => $incidents,
+    ]);
+    $q_stmt = $pdo->prepare("INSERT INTO inbound_event_queue (event_type, payload_json, received_at, processed) VALUES ('mobile.shift_briefing.update', ?, datetime('now'), 0)");
+    $q_stmt->execute([$evt_payload]);
+
+    echo json_encode([
+        'success' => true,
+        'message' => 'Shift briefing updated successfully.'
+    ]);
+    exit;
+}
+
+// Route: DELETE /api/v1/mobile/communications/shift-notes/{id}
+if ((preg_match('#^/api/v1/mobile/communications/shift-notes/([^/]+)(/delete)?$#', $uri, $m) || preg_match('#^/api/v1/mobile/communications/shift-briefings/([^/]+)(/delete)?$#', $uri, $m)) && ($method === 'DELETE' || $method === 'POST')) {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+    ensure_shift_briefings_table($pdo);
+    ensure_inbound_event_queue_table($pdo);
+
+    $id = trim($m[1]);
+
+    $stmt = $pdo->prepare("DELETE FROM shift_briefings WHERE briefing_uuid = ? OR id = ?");
+    $stmt->execute([$id, intval($id)]);
+
+    $evt_payload = json_encode([
+        'briefing_uuid' => $id,
+    ]);
+    $q_stmt = $pdo->prepare("INSERT INTO inbound_event_queue (event_type, payload_json, received_at, processed) VALUES ('mobile.shift_briefing.delete', ?, datetime('now'), 0)");
+    $q_stmt->execute([$evt_payload]);
+
+    echo json_encode([
+        'success' => true,
+        'message' => 'Shift briefing deleted successfully.'
     ]);
     exit;
 }
@@ -1877,11 +2018,13 @@ if ($uri === '/api/v1/sync/directory-index' && $method === 'POST') {
     // Ensure columns exist on target table
     try { $pdo->exec("ALTER TABLE directory_index ADD COLUMN last_name TEXT DEFAULT ''"); } catch (Throwable $e) {}
     try { $pdo->exec("ALTER TABLE directory_index ADD COLUMN profile_photo TEXT DEFAULT ''"); } catch (Throwable $e) {}
+    try { $pdo->exec("ALTER TABLE directory_index ADD COLUMN person_uuid TEXT DEFAULT ''"); } catch (Throwable $e) {}
 
     $stmt = $pdo->prepare("
-        INSERT INTO directory_index (human_id, phone_e164, first_name, last_name, masked_phone, profile_photo, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+        INSERT INTO directory_index (human_id, person_uuid, phone_e164, first_name, last_name, masked_phone, profile_photo, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
         ON CONFLICT(human_id) DO UPDATE SET
+            person_uuid = excluded.person_uuid,
             phone_e164 = excluded.phone_e164,
             first_name = excluded.first_name,
             last_name = excluded.last_name,
@@ -1893,20 +2036,23 @@ if ($uri === '/api/v1/sync/directory-index' && $method === 'POST') {
     $count = 0;
     $failed_count = 0;
     $errors = [];
+    $published_hids = [];
 
     foreach ($members as $m) {
         $hid = trim($m['human_id'] ?? '');
         $fn = trim($m['first_name'] ?? '');
         $ln = trim($m['last_name'] ?? '');
         $photo = trim($m['profile_photo'] ?? '');
+        $puuid = trim($m['person_uuid'] ?? '');
         $raw_p = $m['phone'] ?? $m['phone_e164'] ?? '';
         $e164 = normalize_phone_e164_php($raw_p);
         $mp = mask_phone_php($raw_p);
 
         if ($hid !== '' && $fn !== '') {
             try {
-                $stmt->execute([$hid, $e164, $fn, $ln, $mp, $photo]);
+                $stmt->execute([$hid, $puuid, $e164, $fn, $ln, $mp, $photo]);
                 $count++;
+                $published_hids[] = $hid;
             } catch (Throwable $e) {
                 $failed_count++;
                 $errors[] = get_class($e) . ": " . $e->getMessage();
@@ -1914,11 +2060,33 @@ if ($uri === '/api/v1/sync/directory-index' && $method === 'POST') {
         }
     }
 
+    // Safe Authoritative Snapshot Pruning:
+    // Remove stale cloud directory_index rows that are NOT in published Desktop snapshot AND NOT in pending inbound queue
+    $pruned_count = 0;
+    if ($count > 0 && !empty($published_hids)) {
+        try {
+            $in_placeholders = implode(',', array_fill(0, count($published_hids), '?'));
+            $prune_stmt = $pdo->prepare("
+                DELETE FROM directory_index 
+                WHERE human_id NOT IN ({$in_placeholders})
+                  AND human_id NOT IN (
+                      SELECT JSON_EXTRACT(payload_json, '$.humanId') FROM inbound_event_queue WHERE processed = 0 AND payload_json LIKE '%humanId%'
+                      UNION
+                      SELECT JSON_EXTRACT(payload_json, '$.human_id') FROM inbound_event_queue WHERE processed = 0 AND payload_json LIKE '%human_id%'
+                  )
+            ");
+            $prune_stmt->execute($published_hids);
+            $pruned_count = $prune_stmt->rowCount();
+            $prune_stmt->closeCursor();
+        } catch (Throwable $e) {}
+    }
+
     $is_success = ($failed_count === 0);
     http_response_code($is_success ? 200 : 500);
     echo json_encode([
         'success' => $is_success,
         'synced_count' => $count,
+        'pruned_count' => $pruned_count,
         'failed_count' => $failed_count,
         'errors' => $errors
     ]);
@@ -2160,10 +2328,21 @@ if ($uri === '/api/v1/sync/staff-credentials-index' && $method === 'POST') {
 
     $raw = file_get_contents('php://input');
     $input = json_decode($raw, true);
-    $staff = is_array($input) && isset($input['staff']) ? $input['staff'] : [];
+    $staff = is_array($input) && isset($input['staff']) && is_array($input['staff']) ? $input['staff'] : [];
+
+    // FAIL-SAFE: An empty staff payload MUST NOT erase existing staff credentials!
+    if (empty($staff)) {
+        echo json_encode([
+            'success' => true,
+            'message' => 'Empty staff payload received. Preserved existing staff credentials (fail-safe active).',
+            'synced_count' => 0
+        ]);
+        exit;
+    }
 
     $pdo->beginTransaction();
     $pdo->exec("DELETE FROM staff_credentials_index;");
+    $pdo->exec("DELETE FROM staff_auth_rate_limits;");
     $stmt = $pdo->prepare("INSERT OR REPLACE INTO staff_credentials_index (human_id, display_name, email, role, pin_hash, credential_version, capabilities_json, status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))");
 
     $count = 0;
@@ -2515,7 +2694,11 @@ if (($uri === '/api/v1/mobile/attendance/today' || $uri === '/mobile/api/attenda
             t.updated_at as check_in_time
         FROM today_attendance_index t
         LEFT JOIN directory_index d 
-               ON (t.human_id = d.human_id OR (t.phone_e164 = d.phone_e164 AND t.phone_e164 != ''))
+               ON (
+                   t.human_id = d.human_id 
+                OR (d.person_uuid IS NOT NULL AND d.person_uuid != '' AND t.human_id = d.person_uuid)
+                OR (t.phone_e164 IS NOT NULL AND t.phone_e164 != '' AND t.phone_e164 = d.phone_e164)
+               )
         WHERE t.attendance_date = ?
         ORDER BY t.updated_at DESC
     ");
@@ -3009,9 +3192,10 @@ if (preg_match('#^/(api/v1/mobile|mobile/api)/people/([^/]+)/notes$#', $uri, $m)
             FROM person_notes pn
             WHERE pn.person_uuid = ?
               AND pn.is_deleted = 0
+              AND COALESCE(pn.note_type_uuid, 'nt_general') = 'nt_general'
               AND LOWER(COALESCE(pn.visibility, 'standard_staff')) NOT IN ('sensitive_pastoral', 'pastoral', 'confidential', 'private')
             ORDER BY pn.created_at DESC
-            LIMIT 20
+            LIMIT 50
         ");
         $stmt->execute([$target_hid]);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -3090,6 +3274,20 @@ if (preg_match('#^/(api/v1/mobile|mobile/api)/people/([^/]+)/notes$#', $uri, $m)
     ");
     $stmt->execute([$note_uuid, $target_hid, $title, $body, $now_str, $now_str]);
     $stmt->closeCursor();
+
+    ensure_inbound_event_queue_table($pdo);
+    $note_evt_payload = json_encode([
+        'note_uuid' => $note_uuid,
+        'person_uuid' => $target_hid,
+        'note_type_uuid' => 'nt_general',
+        'title' => $title,
+        'body' => $body,
+        'visibility' => 'standard_staff',
+        'created_at' => $now_str
+    ]);
+    $q_stmt = $pdo->prepare("INSERT INTO inbound_event_queue (event_type, payload_json, received_at, processed) VALUES ('mobile.note.create', ?, datetime('now'), 0)");
+    $q_stmt->execute([$note_evt_payload]);
+    $q_stmt->closeCursor();
 
     echo json_encode([
         'success' => true,
@@ -3696,18 +3894,48 @@ if (preg_match('#^/api/v1/mobile/sessions/(\d+)/check-in$#', $uri, $m) && $metho
 }
 
 // Route: Authenticated Mobile Person Digital Member Pass Details Endpoint
+// Helper: Ensure participant_qr_credentials table has issued_by_staff_human_id column
+if (!function_exists('ensure_participant_qr_credentials_table')) {
+    function ensure_participant_qr_credentials_table($pdo) {
+        try {
+            $pdo->exec("
+                CREATE TABLE IF NOT EXISTS participant_qr_credentials (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    credential_id TEXT UNIQUE NOT NULL,
+                    person_id INTEGER NOT NULL,
+                    token_hash TEXT NOT NULL,
+                    token_hint TEXT,
+                    status TEXT DEFAULT 'active',
+                    issued_at TEXT NOT NULL,
+                    issued_by_staff_human_id TEXT DEFAULT NULL
+                );
+            ");
+            $pdo->exec("ALTER TABLE participant_qr_credentials ADD COLUMN issued_by_staff_human_id TEXT DEFAULT NULL;");
+        } catch (Throwable $e) {}
+    }
+}
+
+// Route: GET /api/v1/mobile/people/{id}/member-pass
 if (preg_match('#^/api/v1/mobile/people/([^/]+)/member-pass$#', $uri, $m) && $method === 'GET') {
     header('Content-Type: application/json; charset=utf-8');
     header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 
     $session = verify_mobile_session($pdo);
+    ensure_participant_qr_credentials_table($pdo);
     $target_hid = trim($m[1]);
 
-    // Check directory index
-    $d_stmt = $pdo->prepare("SELECT human_id, first_name, last_name, phone_e164, masked_phone FROM directory_index WHERE human_id = ? LIMIT 1");
-    $d_stmt->execute([$target_hid]);
-    $person = $d_stmt->fetch(PDO::FETCH_ASSOC);
-    $d_stmt->closeCursor();
+    // Resolve person in people table or directory_index
+    $p_stmt = $pdo->prepare("SELECT id, person_uuid, human_id, first_name, last_name, qr_code_value FROM people WHERE human_id = ? OR id = ? OR person_uuid = ? LIMIT 1");
+    $p_stmt->execute([$target_hid, intval($target_hid), $target_hid]);
+    $person = $p_stmt->fetch(PDO::FETCH_ASSOC);
+    $p_stmt->closeCursor();
+
+    if (!$person) {
+        $d_stmt = $pdo->prepare("SELECT human_id, first_name, last_name FROM directory_index WHERE human_id = ? LIMIT 1");
+        $d_stmt->execute([$target_hid]);
+        $person = $d_stmt->fetch(PDO::FETCH_ASSOC);
+        $d_stmt->closeCursor();
+    }
 
     if (!$person) {
         http_response_code(404);
@@ -3715,18 +3943,22 @@ if (preg_match('#^/api/v1/mobile/people/([^/]+)/member-pass$#', $uri, $m) && $me
         exit;
     }
 
+    $person_id = isset($person['id']) ? intval($person['id']) : 0;
+    $target_hid = $person['human_id'] ?? $target_hid;
+    $qr_val = !empty($person['qr_code_value']) ? $person['qr_code_value'] : null;
+
     $pass = null;
     $has_active_pass = false;
 
-    try {
+    // Check participant_qr_credentials for active row
+    if ($person_id > 0) {
         $q_stmt = $pdo->prepare("
-            SELECT credential_id, status, issued_at 
+            SELECT credential_id, token_hash, token_hint, status, issued_at, issued_by_staff_human_id 
             FROM participant_qr_credentials 
-            WHERE (credential_id = ? OR metadata_json LIKE ?)
-              AND LOWER(COALESCE(status, 'active')) = 'active'
-            ORDER BY issued_at DESC LIMIT 1
+            WHERE person_id = ? AND LOWER(COALESCE(status, 'active')) = 'active'
+            ORDER BY id DESC LIMIT 1
         ");
-        $q_stmt->execute(['QR-' . $target_hid, '%' . $target_hid . '%']);
+        $q_stmt->execute([$person_id]);
         $row = $q_stmt->fetch(PDO::FETCH_ASSOC);
         $q_stmt->closeCursor();
 
@@ -3734,19 +3966,20 @@ if (preg_match('#^/api/v1/mobile/people/([^/]+)/member-pass$#', $uri, $m) && $me
             $has_active_pass = true;
             $pass = [
                 'credentialId' => $row['credential_id'],
-                'qrCodeValue' => $target_hid,
+                'qrCodeValue' => $row['token_hash'],
+                'tokenHint' => $row['token_hint'],
                 'status' => 'active',
-                'issuedAt' => $row['issued_at']
+                'issuedAt' => $row['issued_at'],
+                'issuedByStaffHumanId' => $row['issued_by_staff_human_id'] ?? null,
             ];
         }
-    } catch (Throwable $e) {}
+    }
 
-    // Fallback: Default active pass based on canonical human_id
-    if (!$pass) {
+    if (!$pass && !empty($qr_val)) {
         $has_active_pass = true;
         $pass = [
             'credentialId' => 'QR-' . $target_hid,
-            'qrCodeValue' => $target_hid,
+            'qrCodeValue' => $qr_val,
             'status' => 'active',
             'issuedAt' => date('Y-m-d H:i:s')
         ];
@@ -3762,33 +3995,93 @@ if (preg_match('#^/api/v1/mobile/people/([^/]+)/member-pass$#', $uri, $m) && $me
 }
 
 // Route: Authenticated Mobile Person Digital Member Pass Issue/Regenerate Endpoint
-if (preg_match('#^/api/v1/mobile/people/([^/]+)/member-pass/issue$#', $uri, $m) && $method === 'POST') {
+if ((preg_match('#^/api/v1/mobile/people/([^/]+)/member-pass/issue$#', $uri, $m) || preg_match('#^/api/v1/mobile/people/([^/]+)/member-pass/replace$#', $uri, $m) || preg_match('#^/api/v1/mobile/people/([^/]+)/member-pass/reissue$#', $uri, $m)) && $method === 'POST') {
     header('Content-Type: application/json; charset=utf-8');
     header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 
     $session = verify_mobile_session($pdo);
+    ensure_participant_qr_credentials_table($pdo);
+    ensure_inbound_event_queue_table($pdo);
+
     $target_hid = trim($m[1]);
+    $staff_hid = strval($session['human_id'] ?? $session['staff_human_id'] ?? 'P-20260813-F9C7');
 
-    $cred_id = 'QR-' . $target_hid;
-    $token_hash = hash('sha256', $target_hid);
+    // Find person
+    $p_stmt = $pdo->prepare("SELECT id, person_uuid, human_id, first_name, last_name FROM people WHERE human_id = ? OR id = ? OR person_uuid = ? LIMIT 1");
+    $p_stmt->execute([$target_hid, intval($target_hid), $target_hid]);
+    $person = $p_stmt->fetch(PDO::FETCH_ASSOC);
+    $p_stmt->closeCursor();
 
-    try {
-        $ins_stmt = $pdo->prepare("
-            INSERT OR REPLACE INTO participant_qr_credentials (credential_id, person_id, token_hash, token_hint, status, issued_at, issued_by)
-            VALUES (?, 1, ?, 'human_id', 'active', datetime('now'), ?)
-        ");
-        $ins_stmt->execute([$cred_id, $token_hash, $session['staff_human_id'] ?? 'mobile_staff']);
-        $ins_stmt->closeCursor();
-    } catch (Throwable $e) {}
+    if (!$person) {
+        $d_stmt = $pdo->prepare("SELECT id, person_uuid, human_id, first_name, last_name FROM people WHERE human_id = ? LIMIT 1");
+        $d_stmt->execute([$target_hid]);
+        $person = $d_stmt->fetch(PDO::FETCH_ASSOC);
+        $d_stmt->closeCursor();
+    }
+
+    if (!$person) {
+        http_response_code(404);
+        echo json_encode(['success' => false, 'error' => 'Participant not found in database.']);
+        exit;
+    }
+
+    $person_id = intval($person['id']);
+    $person_uuid = strval($person['person_uuid'] ?? '');
+    $resolved_hid = strval($person['human_id']);
+
+    // 1. Revoke existing active credentials
+    $rev_stmt = $pdo->prepare("UPDATE participant_qr_credentials SET status = 'revoked' WHERE person_id = ? AND status = 'active'");
+    $rev_stmt->execute([$person_id]);
+    $rev_stmt->closeCursor();
+
+    // 2. Generate secure token & hash
+    $raw_token = bin2hex(random_bytes(32));
+    $token_hash = hash('sha256', $raw_token);
+    $token_hint = 'Pass ***' . substr($token_hash, -4);
+    $cred_id = 'QRCR-' . round(microtime(true) * 1000000) . '-' . rand(1000, 9999);
+    $created_at = gmdate('Y-m-d H:i:s');
+
+    // 3. Insert new credential
+    $ins_stmt = $pdo->prepare("
+        INSERT INTO participant_qr_credentials 
+        (credential_id, person_id, token_hash, token_hint, status, issued_at, issued_by_staff_human_id)
+        VALUES (?, ?, ?, ?, 'active', ?, ?)
+    ");
+    $ins_stmt->execute([$cred_id, $person_id, $token_hash, $token_hint, $created_at, $staff_hid]);
+    $ins_stmt->closeCursor();
+
+    // 4. Update people table qr_code_value
+    $upd_stmt = $pdo->prepare("UPDATE people SET qr_code_value = ? WHERE id = ?");
+    $upd_stmt->execute([$token_hash, $person_id]);
+    $upd_stmt->closeCursor();
+
+    // 5. Enqueue inbound sync event for Desktop
+    $evt_payload = json_encode([
+        'credential_id' => $cred_id,
+        'person_id' => $person_id,
+        'person_uuid' => $person_uuid,
+        'human_id' => $resolved_hid,
+        'token_hash' => $token_hash,
+        'token_hint' => $token_hint,
+        'status' => 'active',
+        'issued_at' => $created_at,
+        'issued_by_staff_human_id' => $staff_hid,
+    ]);
+    $q_stmt = $pdo->prepare("INSERT INTO inbound_event_queue (event_type, payload_json, received_at, processed) VALUES ('mobile.qr_credential.issued', ?, datetime('now'), 0)");
+    $q_stmt->execute([$evt_payload]);
+    $q_stmt->closeCursor();
 
     echo json_encode([
         'success' => true,
-        'message' => 'Digital Member Pass issued successfully.',
+        'message' => 'Digital Member Pass QR generated successfully.',
+        'hasActivePass' => true,
         'pass' => [
             'credentialId' => $cred_id,
-            'qrCodeValue' => $target_hid,
+            'qrCodeValue' => $token_hash,
+            'tokenHint' => $token_hint,
             'status' => 'active',
-            'issuedAt' => date('Y-m-d H:i:s')
+            'issuedAt' => $created_at,
+            'issuedByStaffHumanId' => $staff_hid
         ]
     ]);
     exit;
@@ -6592,6 +6885,140 @@ if ($uri === '/api/v1/sync/ivr-config') {
     
     file_put_contents(__DIR__ . '/database/ivr_config.json', json_encode($ivr_config, JSON_PRETTY_PRINT));
     echo json_encode(["success" => true, "message" => "IVR configuration cached successfully."]);
+    exit;
+}
+
+// Route: Sync Person Notes (Desktop -> Gateway)
+if ($uri === '/api/v1/sync/person-notes' && $method === 'POST') {
+    $req_key = $_SERVER['HTTP_X_SYNC_API_KEY'] ?? $_GET['sync_api_key'] ?? '';
+    if ($req_key !== $sync_api_key) {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'error' => 'Unauthorized']);
+        exit;
+    }
+
+    $input = json_decode(file_get_contents('php://input'), true);
+    $notes = is_array($input) && isset($input['notes']) ? $input['notes'] : [];
+
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS person_notes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            note_uuid TEXT UNIQUE,
+            person_id INTEGER DEFAULT 0,
+            person_uuid TEXT NOT NULL,
+            note_type_uuid TEXT DEFAULT 'nt_general',
+            title TEXT DEFAULT 'Staff Note',
+            body TEXT NOT NULL,
+            visibility TEXT DEFAULT 'standard_staff',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            is_deleted INTEGER DEFAULT 0
+        )
+    ");
+
+    $count = 0;
+    $stmt = $pdo->prepare("
+        INSERT INTO person_notes (note_uuid, person_uuid, note_type_uuid, title, body, visibility, created_at, updated_at, is_deleted)
+        VALUES (?, ?, ?, ?, ?, 'standard_staff', ?, ?, 0)
+        ON CONFLICT(note_uuid) DO UPDATE SET
+            title = excluded.title,
+            body = excluded.body,
+            updated_at = excluded.updated_at,
+            is_deleted = excluded.is_deleted
+    ");
+
+    foreach ($notes as $n) {
+        $n_uuid = trim($n['note_uuid'] ?? '');
+        $p_uuid = trim($n['person_uuid'] ?? $n['human_id'] ?? '');
+        $t_uuid = trim($n['note_type_uuid'] ?? 'nt_general');
+        $title = trim($n['title'] ?? 'General Note');
+        $body = trim($n['body'] ?? '');
+        $vis = strtolower(trim($n['visibility'] ?? 'standard_staff'));
+        $created = trim($n['created_at'] ?? date('Y-m-d H:i:s'));
+        $updated = trim($n['updated_at'] ?? $created);
+
+        // Privacy check: only sync General / standard_staff notes to Gateway
+        if (in_array($vis, ['sensitive_pastoral', 'pastoral', 'confidential', 'private'])) {
+            continue;
+        }
+        if ($t_uuid !== 'nt_general' && $title !== 'General' && $title !== 'General Note' && $title !== 'Administrative') {
+            continue;
+        }
+
+        if (!empty($n_uuid) && !empty($p_uuid) && !empty($body)) {
+            $stmt->execute([$n_uuid, $p_uuid, 'nt_general', $title, $body, $created, $updated]);
+            $count++;
+        }
+    }
+    $stmt->closeCursor();
+
+    echo json_encode(['success' => true, 'synced_count' => $count]);
+    exit;
+}
+
+// Route: Sync Staff Tasks (Desktop -> Gateway)
+if ($uri === '/api/v1/sync/staff-tasks' && $method === 'POST') {
+    $req_key = $_SERVER['HTTP_X_SYNC_API_KEY'] ?? $_GET['sync_api_key'] ?? '';
+    if ($req_key !== $sync_api_key) {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'error' => 'Unauthorized']);
+        exit;
+    }
+
+    ensure_staff_tasks_table($pdo);
+
+    $input = json_decode(file_get_contents('php://input'), true);
+    $tasks = is_array($input) && isset($input['tasks']) ? $input['tasks'] : [];
+
+    $count = 0;
+    $stmt = $pdo->prepare("
+        INSERT INTO staff_tasks_index (
+            task_uuid, title, description, due_date, priority, status,
+            assignee_human_id, assignee_name, linked_human_id, linked_human_name,
+            created_at, completed_at, completed_by, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')), ?, ?, datetime('now'))
+        ON CONFLICT(task_uuid) DO UPDATE SET
+            title = excluded.title,
+            description = excluded.description,
+            due_date = excluded.due_date,
+            priority = excluded.priority,
+            status = excluded.status,
+            assignee_human_id = excluded.assignee_human_id,
+            assignee_name = excluded.assignee_name,
+            linked_human_id = excluded.linked_human_id,
+            linked_human_name = excluded.linked_human_name,
+            completed_at = excluded.completed_at,
+            completed_by = excluded.completed_by,
+            updated_at = datetime('now')
+    ");
+
+    foreach ($tasks as $t) {
+        $t_uuid = trim($t['task_uuid'] ?? $t['id'] ?? '');
+        $title = trim($t['title'] ?? '');
+        $desc = trim($t['description'] ?? '');
+        $due = trim($t['due_date'] ?? $t['dueDate'] ?? date('Y-m-d'));
+        $prio = strtolower(trim($t['priority'] ?? 'normal'));
+        $status = strtolower(trim($t['status'] ?? 'open'));
+        $ass_hid = trim($t['assignee_human_id'] ?? $t['assigneeHumanId'] ?? '');
+        $ass_name = trim($t['assignee_name'] ?? $t['assigneeName'] ?? '');
+        $lnk_hid = trim($t['linked_human_id'] ?? $t['linkedHumanId'] ?? '');
+        $lnk_name = trim($t['linked_human_name'] ?? $t['linkedHumanName'] ?? '');
+        $created = trim($t['created_at'] ?? $t['createdAt'] ?? date('Y-m-d H:i:s'));
+        $completed_at = trim($t['completed_at'] ?? $t['completedAt'] ?? '');
+        $completed_by = trim($t['completed_by'] ?? $t['completedBy'] ?? '');
+
+        if (!empty($t_uuid) && !empty($title)) {
+            $stmt->execute([
+                $t_uuid, $title, $desc, $due, $prio, $status,
+                $ass_hid, $ass_name, $lnk_hid, $lnk_name,
+                $created, (!empty($completed_at) ? $completed_at : null), (!empty($completed_by) ? $completed_by : null)
+            ]);
+            $count++;
+        }
+    }
+    $stmt->closeCursor();
+
+    echo json_encode(['success' => true, 'synced_count' => $count]);
     exit;
 }
 

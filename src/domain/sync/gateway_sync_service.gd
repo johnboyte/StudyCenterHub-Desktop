@@ -6,6 +6,8 @@ extends RefCounted
 ## and automatically publishing IVR configurations from local SQLite.
 ## Complies with permanent design rules: relay has minimal durable state.
 
+const SQLiteDatabaseScript = preload("res://src/infrastructure/database/sqlite_database.gd")
+
 var db: RefCounted
 var http_client: HTTPRequest
 var parent_node: Node
@@ -22,7 +24,16 @@ func _init(database: RefCounted, caller_node: Node) -> void:
 func get_gateway_url() -> String:
 	var res = db.execute("SELECT setting_value FROM app_settings WHERE setting_key = 'GATEWAY_SERVER_URL' LIMIT 1;")
 	if res["success"] and res["data"].size() > 0:
-		return str(res["data"][0]["setting_value"]).strip_edges()
+		var custom_url = str(res["data"][0]["setting_value"]).strip_edges()
+		if custom_url != "":
+			return custom_url
+	var env = SQLiteDatabaseScript.resolve_environment(
+		OS.get_environment("STUDYCENTERHUB_ENV"),
+		OS.get_executable_path(),
+		OS.get_cmdline_args()
+	)
+	if env == "development":
+		return "https://dev-gateway.reallife-studycenter.org"
 	return "https://app.reallife-studycenter.org"
 
 func get_sync_api_key() -> String:
@@ -95,6 +106,196 @@ func _process_inbound_event(evt: Dictionary) -> void:
 		const TwilioGatewayScript = preload("res://src/infrastructure/messaging/twilio_gateway_service.gd")
 		var twilio = TwilioGatewayScript.new(db)
 		twilio.process_twilio_webhook_payload(payload)
+	elif evt_type in ["mobile.shift_briefing.create", "mobile.shift_briefing_created", "shift_briefing.create"]:
+		_handle_shift_briefing_create(payload)
+	elif evt_type in ["mobile.shift_briefing.update", "mobile.shift_briefing_updated", "shift_briefing.update"]:
+		_handle_shift_briefing_update(payload)
+	elif evt_type in ["mobile.shift_briefing.delete", "mobile.shift_briefing_deleted", "shift_briefing.delete"]:
+		_handle_shift_briefing_delete(payload)
+	elif evt_type in ["mobile.qr_credential.issued", "qr_credential_issued"]:
+		_handle_qr_credential_issued(payload)
+	elif evt_type in ["mobile.note.create", "mobile.note_created", "note.create"]:
+		_handle_mobile_note_create(payload)
+	elif evt_type in ["mobile.task.create", "mobile.task_created", "task.create"]:
+		_handle_mobile_task_create(payload)
+	elif evt_type in ["mobile.task.update", "mobile.task_updated", "task.update"]:
+		_handle_mobile_task_update(payload)
+	elif evt_type in ["mobile.task.complete", "mobile.task_completed", "task.complete"]:
+		_handle_mobile_task_complete(payload)
+
+func _handle_mobile_note_create(payload: Dictionary) -> void:
+	var note_uuid = str(payload.get("note_uuid", payload.get("id", "")))
+	var person_uuid = str(payload.get("person_uuid", payload.get("human_id", "")))
+	var body = str(payload.get("body", ""))
+	var title = str(payload.get("title", "General Note"))
+	var created_at = str(payload.get("created_at", Time.get_datetime_string_from_system()))
+	var visibility = str(payload.get("visibility", "standard_staff"))
+
+	if note_uuid == "" or person_uuid == "" or body == "":
+		return
+
+	if visibility.to_lower() in ["sensitive_pastoral", "pastoral", "confidential", "private"]:
+		return
+
+	var person_id = 0
+	var p_res = db.execute("SELECT id FROM people WHERE person_uuid = ? OR human_id = ? LIMIT 1;", [person_uuid, person_uuid])
+	if p_res["success"] and p_res["data"].size() > 0:
+		person_id = int(p_res["data"][0]["id"])
+
+	db.execute("""
+		INSERT INTO person_notes (note_uuid, person_id, person_uuid, note_type_uuid, title, body, visibility, created_at, updated_at, is_deleted)
+		VALUES (?, ?, ?, 'nt_general', ?, ?, 'standard_staff', ?, ?, 0)
+		ON CONFLICT(note_uuid) DO UPDATE SET
+			title = excluded.title,
+			body = excluded.body,
+			updated_at = excluded.updated_at,
+			is_deleted = excluded.is_deleted;
+	""", [note_uuid, person_id, person_uuid, title, body, created_at, created_at])
+
+func _handle_mobile_task_create(payload: Dictionary) -> void:
+	var task_uuid = str(payload.get("task_uuid", payload.get("id", "")))
+	var title = str(payload.get("title", ""))
+	if task_uuid == "" or title == "":
+		return
+
+	var desc = str(payload.get("description", ""))
+	var due_date = str(payload.get("due_date", payload.get("dueDate", Time.get_date_string_from_system())))
+	var priority = str(payload.get("priority", "normal")).to_lower()
+	var status = str(payload.get("status", "open")).to_lower()
+	var assignee_hid = str(payload.get("assignee_human_id", payload.get("assigneeHumanId", "")))
+	var assignee_name = str(payload.get("assignee_name", payload.get("assigneeName", "")))
+	var linked_hid = str(payload.get("linked_human_id", payload.get("linkedHumanId", "")))
+	var linked_name = str(payload.get("linked_human_name", payload.get("linkedHumanName", "")))
+	var created_at = str(payload.get("created_at", payload.get("createdAt", Time.get_datetime_string_from_system())))
+
+	db.execute("""
+		INSERT INTO staff_tasks_index (
+			task_uuid, title, description, due_date, priority, status,
+			assignee_human_id, assignee_name, linked_human_id, linked_human_name,
+			created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+		ON CONFLICT(task_uuid) DO UPDATE SET
+			title = excluded.title,
+			description = excluded.description,
+			due_date = excluded.due_date,
+			priority = excluded.priority,
+			status = excluded.status,
+			assignee_human_id = excluded.assignee_human_id,
+			assignee_name = excluded.assignee_name,
+			linked_human_id = excluded.linked_human_id,
+			linked_human_name = excluded.linked_human_name,
+			updated_at = datetime('now');
+	""", [task_uuid, title, desc, due_date, priority, status, assignee_hid, assignee_name, linked_hid, linked_name, created_at])
+
+func _handle_mobile_task_update(payload: Dictionary) -> void:
+	var task_uuid = str(payload.get("task_uuid", payload.get("id", "")))
+	if task_uuid == "":
+		return
+
+	var title = payload.get("title")
+	var desc = payload.get("description")
+	var due_date = payload.get("due_date", payload.get("dueDate"))
+	var priority = payload.get("priority")
+	var status = payload.get("status")
+
+	var upd_fields = ["updated_at = datetime('now')"]
+	var params = []
+
+	if title != null:
+		upd_fields.append("title = ?")
+		params.append(str(title))
+	if desc != null:
+		upd_fields.append("description = ?")
+		params.append(str(desc))
+	if due_date != null:
+		upd_fields.append("due_date = ?")
+		params.append(str(due_date))
+	if priority != null:
+		upd_fields.append("priority = ?")
+		params.append(str(priority).to_lower())
+	if status != null:
+		upd_fields.append("status = ?")
+		params.append(str(status).to_lower())
+		if str(status).to_lower() == "completed":
+			upd_fields.append("completed_at = datetime('now')")
+
+	params.append(task_uuid)
+	var sql = "UPDATE staff_tasks_index SET " + ", ".join(upd_fields) + " WHERE task_uuid = ?;"
+	db.execute(sql, params)
+
+func _handle_mobile_task_complete(payload: Dictionary) -> void:
+	var task_uuid = str(payload.get("task_uuid", payload.get("id", "")))
+	if task_uuid == "":
+		return
+
+	var completed_by = str(payload.get("completed_by", "Staff"))
+	var completed_at = str(payload.get("completed_at", Time.get_datetime_string_from_system()))
+
+	db.execute("""
+		UPDATE staff_tasks_index
+		SET status = 'completed', completed_at = ?, completed_by = ?, updated_at = datetime('now')
+		WHERE task_uuid = ?;
+	""", [completed_at, completed_by, task_uuid])
+
+func _handle_qr_credential_issued(payload: Dictionary) -> void:
+	var cred_id = str(payload.get("credential_id", ""))
+	var person_id = int(payload.get("person_id", 0))
+	var human_id = str(payload.get("human_id", ""))
+	var token_hash = str(payload.get("token_hash", ""))
+	var token_hint = str(payload.get("token_hint", ""))
+	var issued_at = str(payload.get("issued_at", ""))
+	var staff_hid = str(payload.get("issued_by_staff_human_id", ""))
+
+	db.execute("ALTER TABLE participant_qr_credentials ADD COLUMN issued_by_staff_human_id TEXT DEFAULT NULL;")
+
+	if person_id == 0 and human_id != "":
+		var p_res = db.execute("SELECT id FROM people WHERE human_id = ? LIMIT 1;", [human_id])
+		if p_res["success"] and p_res["data"].size() > 0:
+			person_id = int(p_res["data"][0]["id"])
+
+	if person_id > 0:
+		db.execute("UPDATE participant_qr_credentials SET status = 'revoked' WHERE person_id = ? AND status = 'active';", [person_id])
+		db.execute("INSERT OR REPLACE INTO participant_qr_credentials (credential_id, person_id, token_hash, token_hint, status, issued_at, issued_by_staff_human_id) VALUES (?, ?, ?, ?, 'active', ?, ?);", [cred_id, person_id, token_hash, token_hint, issued_at, staff_hid])
+		db.execute("UPDATE people SET qr_code_value = ? WHERE id = ?;", [token_hash, person_id])
+
+func _handle_shift_briefing_create(payload: Dictionary) -> void:
+	var uuid = str(payload.get("briefing_uuid", payload.get("id", "")))
+	if uuid == "":
+		return
+	var leader = str(payload.get("leader_name", "Staff Member"))
+	var date_text = str(payload.get("shift_date", ""))
+	var notes = str(payload.get("summary_notes", ""))
+	var incidents = int(payload.get("incident_count", 0))
+	var status = str(payload.get("status", "submitted"))
+	var created_at = str(payload.get("created_at", ""))
+
+	db.execute(
+		"INSERT INTO shift_briefings (briefing_uuid, leader_name, shift_date, summary_notes, incident_count, status, created_at) VALUES (?, ?, ?, ?, ?, ?, COALESCE(NULLIF(?, ''), datetime('now'))) ON CONFLICT(briefing_uuid) DO UPDATE SET leader_name = excluded.leader_name, shift_date = excluded.shift_date, summary_notes = excluded.summary_notes, incident_count = excluded.incident_count, status = excluded.status;",
+		[uuid, leader, date_text, notes, incidents, status, created_at]
+	)
+
+func _handle_shift_briefing_update(payload: Dictionary) -> void:
+	var uuid = str(payload.get("briefing_uuid", payload.get("id", "")))
+	if uuid == "":
+		return
+	var date_text = str(payload.get("shift_date", ""))
+	var notes = str(payload.get("summary_notes", ""))
+	var incidents = int(payload.get("incident_count", 0))
+
+	db.execute(
+		"UPDATE shift_briefings SET summary_notes = ?, shift_date = ?, incident_count = ? WHERE briefing_uuid = ?;",
+		[notes, date_text, incidents, uuid]
+	)
+
+func _handle_shift_briefing_delete(payload: Dictionary) -> void:
+	var uuid = str(payload.get("briefing_uuid", payload.get("id", "")))
+	if uuid == "":
+		return
+
+	db.execute(
+		"DELETE FROM shift_briefings WHERE briefing_uuid = ?;",
+		[uuid]
+	)
 
 func _push_acknowledgements(callback: Callable, inserted_count: int) -> void:
 	# Find processed events to acknowledge on relay
@@ -136,11 +337,110 @@ func _push_acknowledgements(callback: Callable, inserted_count: int) -> void:
 		publish_directory_index()
 		publish_today_attendance_index()
 		publish_staff_credentials_index()
+		publish_person_notes()
+		publish_staff_tasks()
 		if response_code == 200:
 			callback.call({"success": true, "inserted_count": inserted_count, "ack_count": event_ids.size()})
 		else:
 			callback.call({"success": true, "inserted_count": inserted_count, "error": "Pull complete, ack response failed: " + str(response_code)})
 	, CONNECT_ONE_SHOT)
+
+func publish_person_notes(callback: Callable = Callable()) -> void:
+	if not db:
+		if callback.is_valid(): callback.call({"success": false, "error": "Database unavailable"})
+		return
+
+	var res = db.execute("""
+		SELECT note_uuid, person_uuid, note_type_uuid, title, body, visibility, created_at, updated_at
+		FROM person_notes
+		WHERE is_deleted = 0
+		  AND (note_type_uuid = 'nt_general' OR title = 'General' OR title = 'General Note' OR title = 'Administrative')
+		  AND LOWER(COALESCE(visibility, 'standard_staff')) NOT IN ('sensitive_pastoral', 'pastoral', 'confidential', 'private');
+	""")
+
+	var notes = []
+	if res["success"]:
+		notes = res["data"]
+
+	var gateway_url = get_gateway_url()
+	var api_key = get_sync_api_key()
+	var url = gateway_url + "/api/v1/sync/person-notes"
+	var headers = [
+		"Content-Type: application/json",
+		"x-sync-api-key: " + api_key
+	]
+	var body = JSON.stringify({ "notes": notes })
+
+	var req = HTTPRequest.new()
+	if parent_node and parent_node.is_inside_tree():
+		parent_node.add_child(req)
+		req.request_completed.connect(func(_res: int, resp_code: int, _h: PackedStringArray, _b: PackedByteArray):
+			req.queue_free()
+			if callback.is_valid():
+				callback.call({"success": resp_code == 200, "synced_count": notes.size()})
+		, CONNECT_ONE_SHOT)
+		req.request(url, headers, HTTPClient.METHOD_POST, body)
+	else:
+		if callback.is_valid():
+			callback.call({"success": false, "error": "Parent node not in scene tree"})
+
+func publish_staff_tasks(callback: Callable = Callable()) -> void:
+	if not db:
+		if callback.is_valid(): callback.call({"success": false, "error": "Database unavailable"})
+		return
+
+	db.execute("""
+		CREATE TABLE IF NOT EXISTS staff_tasks_index (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			task_uuid TEXT UNIQUE NOT NULL,
+			title TEXT NOT NULL,
+			description TEXT DEFAULT '',
+			due_date TEXT NOT NULL,
+			priority TEXT NOT NULL DEFAULT 'normal',
+			status TEXT NOT NULL DEFAULT 'open',
+			assignee_human_id TEXT,
+			assignee_name TEXT DEFAULT '',
+			linked_human_id TEXT,
+			linked_human_name TEXT DEFAULT '',
+			created_at TEXT NOT NULL DEFAULT (datetime('now')),
+			completed_at TEXT DEFAULT NULL,
+			completed_by TEXT DEFAULT NULL,
+			updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+		);
+	""")
+
+	var res = db.execute("""
+		SELECT task_uuid, title, description, due_date, priority, status,
+		       assignee_human_id, assignee_name, linked_human_id, linked_human_name,
+		       created_at, completed_at, completed_by, updated_at
+		FROM staff_tasks_index;
+	""")
+
+	var tasks = []
+	if res["success"]:
+		tasks = res["data"]
+
+	var gateway_url = get_gateway_url()
+	var api_key = get_sync_api_key()
+	var url = gateway_url + "/api/v1/sync/staff-tasks"
+	var headers = [
+		"Content-Type: application/json",
+		"x-sync-api-key: " + api_key
+	]
+	var body = JSON.stringify({ "tasks": tasks })
+
+	var req = HTTPRequest.new()
+	if parent_node and parent_node.is_inside_tree():
+		parent_node.add_child(req)
+		req.request_completed.connect(func(_res: int, resp_code: int, _h: PackedStringArray, _b: PackedByteArray):
+			req.queue_free()
+			if callback.is_valid():
+				callback.call({"success": resp_code == 200, "synced_count": tasks.size()})
+		, CONNECT_ONE_SHOT)
+		req.request(url, headers, HTTPClient.METHOD_POST, body)
+	else:
+		if callback.is_valid():
+			callback.call({"success": false, "error": "Parent node not in scene tree"})
 
 func publish_today_attendance_index(callback: Callable = Callable()) -> void:
 	var today_date = Time.get_date_string_from_system()
