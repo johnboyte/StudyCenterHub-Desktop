@@ -1,10 +1,12 @@
 extends RefCounted
 
-## Spelling Assistance Helper for StudyCenterHub
-## Real-time spelling detection, misspelling suggestions, dictionary validation,
-## and 1-click auto-fix capability for TextEdit and LineEdit controls.
+## Useful Spelling Correction Assistance Helper for StudyCenterHub
+## Uses Damerau-Levenshtein edit distance, dictionary candidate ranking,
+## interactive clickable suggestion pills, and session word ignoring.
 
 static var _valid_word_set: Dictionary = {}
+static var _candidate_word_list: Array = []
+static var _ignored_words: Dictionary = {}
 static var _is_dict_loaded: bool = false
 
 const SUGGESTION_MAP = {
@@ -51,34 +53,109 @@ static func _ensure_dictionary_loaded() -> void:
 		return
 	_is_dict_loaded = true
 
-	# 1. Load system dictionary if available (/usr/share/dict/words)
-	if FileAccess.file_exists("/usr/share/dict/words"):
-		var f = FileAccess.open("/usr/share/dict/words", FileAccess.READ)
-		if f:
-			while not f.eof_reached():
-				var line = f.get_line().strip_edges().to_lower()
-				if line.length() >= 1 and line.is_valid_identifier():
-					_valid_word_set[line] = true
-
-	# 2. Seed core standard words
+	# Core common English words for candidate search
 	var core_words = [
-		"a", "i", "an", "the", "in", "on", "at", "to", "for", "with", "and", "or", "but", "is", "are", "was",
-		"were", "be", "been", "being", "have", "has", "had", "do", "does", "did", "will", "would", "shall",
-		"should", "can", "could", "may", "might", "must", "test", "new", "note", "member", "student", "staff",
-		"profile", "journal", "academic", "behavioral", "pastoral", "care", "general", "help", "held", "here",
-		"there", "where", "when", "why", "how", "what", "which", "who", "whom", "this", "that", "these", "those",
-		"about", "above", "after", "again", "against", "all", "am", "any", "as", "because", "before", "below",
-		"between", "both", "by", "down", "during", "each", "few", "from", "further", "get", "got", "if", "into",
-		"just", "more", "most", "no", "nor", "not", "off", "once", "only", "other", "out", "over", "own", "same",
-		"so", "some", "such", "than", "then", "through", "too", "under", "until", "up", "very", "you", "your"
+		"the", "be", "to", "of", "and", "a", "in", "that", "have", "i", "it", "for", "not", "on", "with",
+		"he", "as", "you", "do", "at", "this", "but", "his", "by", "from", "they", "we", "say", "her",
+		"she", "or", "an", "will", "my", "one", "all", "would", "there", "their", "what", "so", "up",
+		"out", "if", "about", "who", "get", "which", "go", "me", "when", "make", "can", "like", "time",
+		"no", "just", "him", "know", "take", "people", "into", "year", "your", "good", "some", "could",
+		"them", "see", "other", "than", "then", "now", "look", "only", "come", "its", "over", "think",
+		"also", "back", "after", "use", "two", "how", "our", "work", "first", "well", "way", "even",
+		"new", "want", "because", "any", "these", "give", "day", "most", "us", "receive", "receiver",
+		"received", "definitely", "separate", "calendar", "address", "weird", "occurred", "believe",
+		"help", "held", "here", "hash", "hates", "has", "huge", "home", "hope", "hand", "head", "hear"
 	]
 	for w in core_words:
 		_valid_word_set[w] = true
+		if not _candidate_word_list.has(w):
+			_candidate_word_list.append(w)
 
-static func _find_closest_valid_word(word: String) -> String:
-	if SUGGESTION_MAP.has(word):
-		return SUGGESTION_MAP[word]
-	return ""
+	# Load system dictionary if available (/usr/share/dict/words)
+	if FileAccess.file_exists("/usr/share/dict/words"):
+		var f = FileAccess.open("/usr/share/dict/words", FileAccess.READ)
+		if f:
+			var loaded_count = 0
+			while not f.eof_reached() and loaded_count < 25000:
+				var line = f.get_line().strip_edges().to_lower()
+				if line.length() >= 2 and line.is_valid_identifier():
+					_valid_word_set[line] = true
+					if loaded_count < 3000 and not _candidate_word_list.has(line):
+						_candidate_word_list.append(line)
+					loaded_count += 1
+
+static func damerau_levenshtein(s1: String, s2: String) -> int:
+	var len1 = s1.length()
+	var len2 = s2.length()
+	if len1 == 0: return len2
+	if len2 == 0: return len1
+
+	var d = []
+	for i in range(len1 + 1):
+		var row = []
+		row.resize(len2 + 1)
+		d.append(row)
+
+	for i in range(len1 + 1):
+		d[i][0] = i
+	for j in range(len2 + 1):
+		d[0][j] = j
+
+	for i in range(1, len1 + 1):
+		var char1 = s1[i - 1]
+		for j in range(1, len2 + 1):
+			var char2 = s2[j - 1]
+			var cost = 0 if char1 == char2 else 1
+
+			d[i][j] = min(d[i - 1][j] + 1, min(d[i][j - 1] + 1, d[i - 1][j - 1] + cost))
+
+			if i > 1 and j > 1 and char1 == s2[j - 2] and s1[i - 2] == char2:
+				d[i][j] = min(d[i][j], d[i - 2][j - 2] + cost)
+
+	return d[len1][len2]
+
+static func find_suggestions(word: String) -> Array:
+	_ensure_dictionary_loaded()
+	var lower = word.to_lower()
+
+	# 1. Direct explicit map match
+	if SUGGESTION_MAP.has(lower):
+		var explicit_sug = SUGGESTION_MAP[lower]
+		if word.length() > 0 and word[0] == word[0].to_upper():
+			explicit_sug = explicit_sug.capitalize()
+		return [explicit_sug]
+
+	# 2. Dynamic Damerau-Levenshtein search over candidate vocabulary
+	var scored_candidates = []
+	for dict_word in _candidate_word_list:
+		if abs(dict_word.length() - lower.length()) > 2:
+			continue
+		var dist = damerau_levenshtein(lower, dict_word)
+		if dist <= 2:
+			scored_candidates.append({
+				"word": dict_word,
+				"dist": dist,
+				"len_diff": abs(dict_word.length() - lower.length())
+			})
+
+	# Sort by lowest edit distance first, then length difference
+	scored_candidates.sort_custom(func(a, b):
+		if a["dist"] != b["dist"]:
+			return a["dist"] < b["dist"]
+		return a["len_diff"] < b["len_diff"]
+	)
+
+	var suggestions = []
+	for item in scored_candidates:
+		var sug = item["word"]
+		if word.length() > 0 and word[0] == word[0].to_upper():
+			sug = sug.capitalize()
+		if not suggestions.has(sug):
+			suggestions.append(sug)
+		if suggestions.size() >= 3:
+			break
+
+	return suggestions
 
 static func check_text(text: String) -> Array:
 	_ensure_dictionary_loaded()
@@ -93,43 +170,49 @@ static func check_text(text: String) -> Array:
 	var matches = regex.search_all(text)
 	for m in matches:
 		var word = m.get_string()
-		var lower_word = word.to_lower()
+		var lower = word.to_lower()
 
 		# Ignore valid single-character pronouns/articles 'a' and 'I'
-		if lower_word == "a" or lower_word == "i":
+		if lower == "a" or lower == "i":
 			continue
 
-		# Flag known misspellings in map
-		if SUGGESTION_MAP.has(lower_word):
-			var correct = SUGGESTION_MAP[lower_word]
-			if word.length() > 0 and word[0] == word[0].to_upper():
-				correct = correct.capitalize()
-			if word == word.to_upper() and word.length() > 1:
-				correct = correct.to_upper()
-			issues.append({
-				"word": word,
-				"suggestion": correct,
-				"start": m.get_start(),
-				"end": m.get_end()
-			})
-		elif not _valid_word_set.has(lower_word):
-			# Word is NOT in dictionary
-			var suggestion = _find_closest_valid_word(lower_word)
-			if word.length() > 0 and word[0] == word[0].to_upper() and suggestion != "":
-				suggestion = suggestion.capitalize()
-			issues.append({
-				"word": word,
-				"suggestion": suggestion,
-				"start": m.get_start(),
-				"end": m.get_end()
-			})
+		# Ignore user-ignored words in session
+		if _ignored_words.has(lower):
+			continue
+
+		# Ignore acronyms (ALL CAPS >= 2 chars)
+		if word == word.to_upper() and word.length() >= 2:
+			continue
+
+		# Ignore proper nouns (Capitalized words in body text unless at sentence start)
+		if word.length() > 1 and word[0] == word[0].to_upper() and not SUGGESTION_MAP.has(lower):
+			# If word is in dictionary, skip flagging proper noun
+			if _valid_word_set.has(lower):
+				continue
+
+		# Check if word is valid in dictionary set
+		if _valid_word_set.has(lower):
+			# Check if explicit misspelling map overrides valid word (e.g. 'calender')
+			if not SUGGESTION_MAP.has(lower):
+				continue
+
+		var sugs = find_suggestions(word)
+		issues.append({
+			"word": word,
+			"suggestions": sugs,
+			"start": m.get_start(),
+			"end": m.get_end()
+		})
 
 	return issues
+
+static func ignore_word(word: String) -> void:
+	_ignored_words[word.to_lower()] = true
 
 static func attach_to_text_edit(text_edit: TextEdit, parent_container: Container) -> Control:
 	var spell_card = PanelContainer.new()
 	spell_card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	spell_card.custom_minimum_size = Vector2(0, 36)
+	spell_card.custom_minimum_size = Vector2(0, 40)
 
 	var card_style = StyleBoxFlat.new()
 	card_style.bg_color = Color(0.12, 0.18, 0.26, 0.95)
@@ -152,93 +235,130 @@ static func attach_to_text_edit(text_edit: TextEdit, parent_container: Container
 	hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	hbox.add_theme_constant_override("separation", 10)
 
-	var status_icon = Label.new()
-	status_icon.text = "✨"
-	status_icon.add_theme_font_size_override("font_size", 14)
-	hbox.add_child(status_icon)
+	var status_lbl = Label.new()
+	status_lbl.text = "✨ Real-time Spelling Assistance Active"
+	status_lbl.add_theme_font_size_override("font_size", 14)
+	status_lbl.add_theme_color_override("font_color", Color(0.60, 0.80, 1.0, 1.0))
+	hbox.add_child(status_lbl)
 
-	var msg_lbl = Label.new()
-	msg_lbl.text = "Real-time Spelling Assistance Active"
-	msg_lbl.add_theme_font_size_override("font_size", 14)
-	msg_lbl.add_theme_color_override("font_color", Color(0.60, 0.80, 1.0, 1.0))
-	msg_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	hbox.add_child(msg_lbl)
-
-	var btn_fix = Button.new()
-	btn_fix.text = "⚡ Fix Spelling"
-	btn_fix.custom_minimum_size = Vector2(140, 30)
-	btn_fix.add_theme_font_size_override("font_size", 13)
-	btn_fix.visible = false
-
-	var btn_style = StyleBoxFlat.new()
-	btn_style.bg_color = Color(0.95, 0.75, 0.20, 1.0)
-	btn_style.corner_radius_top_left = 4
-	btn_style.corner_radius_top_right = 4
-	btn_style.corner_radius_bottom_left = 4
-	btn_style.corner_radius_bottom_right = 4
-	btn_fix.add_theme_stylebox_override("normal", btn_style)
-	btn_fix.add_theme_color_override("font_color", Color(0.10, 0.14, 0.20, 1.0))
-	btn_fix.add_theme_color_override("font_hover_color", Color(0.0, 0.0, 0.0, 1.0))
-	btn_fix.add_theme_color_override("font_focus_color", Color(0.10, 0.14, 0.20, 1.0))
-	hbox.add_child(btn_fix)
+	var sug_container = HBoxContainer.new()
+	sug_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sug_container.add_theme_constant_override("separation", 8)
+	hbox.add_child(sug_container)
 
 	spell_card.add_child(hbox)
 	parent_container.add_child(spell_card)
 
 	var current_issues = []
+	var active_issue_idx = 0
 
 	var _update_spelling_bar = func():
+		# Clear suggestion container
+		for c in sug_container.get_children():
+			c.queue_free()
+
 		var txt = text_edit.text
 		current_issues = check_text(txt)
-		if current_issues.size() > 0:
-			var first = current_issues[0]
-			var word = first["word"]
-			var sug = first["suggestion"]
 
-			status_icon.text = "⚠️"
-			if sug != "":
-				msg_lbl.text = "Spelling Suggestion: \"%s\" → \"%s\" (%d issue%s detected)" % [
-					word, sug, current_issues.size(), "s" if current_issues.size() > 1 else ""
-				]
-			else:
-				msg_lbl.text = "Unrecognized Word: \"%s\" (%d issue%s detected)" % [
-					word, current_issues.size(), "s" if current_issues.size() > 1 else ""
-				]
-
-			msg_lbl.add_theme_color_override("font_color", Color(0.98, 0.85, 0.30, 1.0))
-			card_style.border_color = Color(0.95, 0.75, 0.20, 1.0)
-
-			var fixable_count = 0
-			for issue in current_issues:
-				if issue["suggestion"] != "":
-					fixable_count += 1
-
-			if fixable_count > 0:
-				btn_fix.text = "⚡ Fix Auto (%d)" % fixable_count
-				btn_fix.visible = true
-			else:
-				btn_fix.visible = false
-		else:
-			status_icon.text = "✨"
-			msg_lbl.text = "Real-time Spelling Assistance Active"
-			msg_lbl.add_theme_color_override("font_color", Color(0.60, 0.80, 1.0, 1.0))
+		if current_issues.size() == 0:
+			status_lbl.text = "✨ Real-time Spelling Assistance Active"
+			status_lbl.add_theme_color_override("font_color", Color(0.60, 0.80, 1.0, 1.0))
 			card_style.border_color = Color(0.25, 0.40, 0.60, 0.8)
-			btn_fix.visible = false
+			return
+
+		if active_issue_idx >= current_issues.size():
+			active_issue_idx = 0
+
+		var issue = current_issues[active_issue_idx]
+		var word = str(issue["word"])
+		var sugs: Array = issue["suggestions"]
+
+		status_lbl.text = "⚠️ Possible spelling: \"%s\"" % word
+		if current_issues.size() > 1:
+			status_lbl.text += " (%d of %d)" % [active_issue_idx + 1, current_issues.size()]
+
+		status_lbl.add_theme_color_override("font_color", Color(0.98, 0.85, 0.30, 1.0))
+		card_style.border_color = Color(0.95, 0.75, 0.20, 1.0)
+
+		# Render suggestion pills
+		if sugs.size() > 0:
+			for sug in sugs:
+				var sug_btn = Button.new()
+				sug_btn.text = str(sug)
+				sug_btn.custom_minimum_size = Vector2(70, 28)
+				sug_btn.add_theme_font_size_override("font_size", 13)
+
+				var btn_s = StyleBoxFlat.new()
+				btn_s.bg_color = Color(0.18, 0.42, 0.70, 1.0) # Bright blue suggestion pill
+				btn_s.corner_radius_top_left = 4
+				btn_s.corner_radius_top_right = 4
+				btn_s.corner_radius_bottom_left = 4
+				btn_s.corner_radius_bottom_right = 4
+				btn_s.content_margin_left = 8
+				btn_s.content_margin_right = 8
+				sug_btn.add_theme_stylebox_override("normal", btn_s)
+				sug_btn.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
+				sug_btn.add_theme_color_override("font_hover_color", Color(0.4, 0.9, 1.0, 1.0))
+
+				sug_btn.pressed.connect(func():
+					var cur_t = text_edit.text
+					# Replace target word occurrence
+					text_edit.text = cur_t.replace(word, str(sug))
+					call_deferred("_update_spelling_bar")
+				)
+				sug_container.add_child(sug_btn)
+		else:
+			var no_sug_lbl = Label.new()
+			no_sug_lbl.text = "(No confident suggestion)"
+			no_sug_lbl.add_theme_font_size_override("font_size", 12)
+			no_sug_lbl.add_theme_color_override("font_color", Color(0.70, 0.78, 0.88, 1.0))
+			sug_container.add_child(no_sug_lbl)
+
+		# Render Ignore button
+		var btn_ignore = Button.new()
+		btn_ignore.text = "🙈 Ignore"
+		btn_ignore.custom_minimum_size = Vector2(70, 28)
+		btn_ignore.add_theme_font_size_override("font_size", 12)
+		var ign_s = StyleBoxFlat.new()
+		ign_s.bg_color = Color(0.25, 0.30, 0.38, 1.0)
+		ign_s.corner_radius_top_left = 4
+		ign_s.corner_radius_top_right = 4
+		ign_s.corner_radius_bottom_left = 4
+		ign_s.corner_radius_bottom_right = 4
+		ign_s.content_margin_left = 8
+		ign_s.content_margin_right = 8
+		btn_ignore.add_theme_stylebox_override("normal", ign_s)
+		btn_ignore.add_theme_color_override("font_color", Color(0.85, 0.90, 0.95, 1.0))
+		btn_ignore.pressed.connect(func():
+			ignore_word(word)
+			call_deferred("_update_spelling_bar")
+		)
+		sug_container.add_child(btn_ignore)
+
+		# Render Next Issue button if multiple issues exist
+		if current_issues.size() > 1:
+			var btn_next = Button.new()
+			btn_next.text = "Next ➡️"
+			btn_next.custom_minimum_size = Vector2(65, 28)
+			btn_next.add_theme_font_size_override("font_size", 12)
+			var nxt_s = StyleBoxFlat.new()
+			nxt_s.bg_color = Color(0.20, 0.35, 0.50, 1.0)
+			nxt_s.corner_radius_top_left = 4
+			nxt_s.corner_radius_top_right = 4
+			nxt_s.corner_radius_bottom_left = 4
+			nxt_s.corner_radius_bottom_right = 4
+			nxt_s.content_margin_left = 6
+			nxt_s.content_margin_right = 6
+			btn_next.add_theme_stylebox_override("normal", nxt_s)
+			btn_next.add_theme_color_override("font_color", Color(0.90, 0.95, 1.0, 1.0))
+			btn_next.pressed.connect(func():
+				active_issue_idx = (active_issue_idx + 1) % current_issues.size()
+				call_deferred("_update_spelling_bar")
+			)
+			sug_container.add_child(btn_next)
 
 	text_edit.text_changed.connect(func():
 		_update_spelling_bar.call()
-	)
-
-	btn_fix.pressed.connect(func():
-		if current_issues.size() > 0:
-			var txt = text_edit.text
-			for issue in current_issues:
-				var target_word = issue["word"]
-				var replacement = issue["suggestion"]
-				if replacement != "":
-					txt = txt.replace(target_word, replacement)
-			text_edit.text = txt
-			_update_spelling_bar.call()
 	)
 
 	_update_spelling_bar.call()

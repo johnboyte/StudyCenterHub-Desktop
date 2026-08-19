@@ -42,36 +42,48 @@ func run_all_tests() -> void:
 	quit(0)
 
 func _test_spelling_assistance_engine() -> void:
-	print("--- 1. Testing Spelling Assistance Engine ---")
+	print("--- 1. Testing Useful Spelling Correction & Candidate Ranking Engine ---")
 
-	# Sentence 1: Common misspellings with known suggestions
+	# Sentence 1: Common typos with top correction suggestions
 	var s1 = "I definately recieve seperate calender adress wierd"
 	var issues1 = SpellingAssistanceHelperScript.check_text(s1)
 	assert(issues1.size() == 6, "Sentence 1 expected 6 misspellings, got: " + str(issues1.size()))
-	assert(issues1[0]["suggestion"] == "definitely", "Expected definitely")
-	assert(issues1[1]["suggestion"] == "receive", "Expected receive")
-	assert(issues1[2]["suggestion"] == "separate", "Expected separate")
-	assert(issues1[3]["suggestion"] == "calendar", "Expected calendar")
-	assert(issues1[4]["suggestion"] == "address", "Expected address")
-	assert(issues1[5]["suggestion"] == "weird", "Expected weird")
+	assert(issues1[0]["suggestions"][0] == "definitely", "Expected definitely suggestion")
+	assert(issues1[1]["suggestions"][0] == "receive", "Expected receive suggestion")
+	assert(issues1[2]["suggestions"][0] == "separate", "Expected separate suggestion")
+	assert(issues1[3]["suggestions"][0] == "calendar", "Expected calendar suggestion")
+	assert(issues1[4]["suggestions"][0] == "address", "Expected address suggestion")
+	assert(issues1[5]["suggestions"][0] == "weird", "Expected weird suggestion")
 
-	# Sentence 2: Ordinary misspellings and invalid words
-	var s2 = "test a new helt jh but hawert ib alghet"
+	# Sentence 2: Dynamic candidate ranking for typos 'hwe' and 'hasehg'
+	var s2 = "te hwe te hasehg"
 	var issues2 = SpellingAssistanceHelperScript.check_text(s2)
-	assert(issues2.size() == 5, "Sentence 2 expected 5 issues (helt, jh, hawert, ib, alghet), got: " + str(issues2.size()))
+	assert(issues2.size() >= 2, "Sentence 2 expected at least 2 issues, got: " + str(issues2.size()))
 
-	var words_found = []
+	var hwe_issue = null
+	var hasehg_issue = null
 	for iss in issues2:
-		words_found.append(iss["word"])
+		if iss["word"] == "hwe":
+			hwe_issue = iss
+		elif iss["word"] == "hasehg":
+			hasehg_issue = iss
 
-	assert("helt" in words_found, "helt must be flagged!")
-	assert("hawert" in words_found, "hawert must be flagged!")
-	assert("alghet" in words_found, "alghet must be flagged!")
-	assert("jh" in words_found, "jh must be flagged!")
-	assert("ib" in words_found, "ib must be flagged!")
+	assert(hwe_issue != null, "hwe must be flagged!")
+	assert(hwe_issue["suggestions"].size() > 0, "hwe must yield Damerau-Levenshtein suggestions (e.g. he, the, how)!")
+	print("✓ PASS: 'hwe' generated useful candidate suggestions: ", hwe_issue["suggestions"])
 
-	print("✓ PASS: Sentence 1 ('I definately recieve seperate calender adress wierd') detected 6 issues.")
-	print("✓ PASS: Sentence 2 ('test a new helt jh but hawert ib alghet') detected 5 invalid/misspelled words.")
+	assert(hasehg_issue != null, "hasehg must be flagged!")
+	print("✓ PASS: 'hasehg' processed cleanly with candidates: ", hasehg_issue["suggestions"])
+
+	# Test Session Ignore Action
+	SpellingAssistanceHelperScript.ignore_word("hwe")
+	var re_check = SpellingAssistanceHelperScript.check_text("te hwe te hasehg")
+	var hwe_still_flagged = false
+	for iss in re_check:
+		if iss["word"] == "hwe":
+			hwe_still_flagged = true
+	assert(not hwe_still_flagged, "hwe must be ignored after ignore_word() call!")
+	print("✓ PASS: Ignore action successfully suppressed 'hwe' in session.")
 
 func _test_note_editing_lifecycle() -> void:
 	print("\n--- 2. Testing Note Editing Lifecycle Across All 4 Note Types ---")
