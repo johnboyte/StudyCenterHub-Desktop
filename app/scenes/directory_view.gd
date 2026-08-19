@@ -24,6 +24,7 @@ const PersonRegistrationValidatorScript = preload("res://src/domain/directory/pe
 const StaffMobileServiceScript = preload("res://src/domain/directory/staff_mobile_service.gd")
 const StaffMobileDialogScript = preload("res://src/ui/components/staff_mobile_provisioning_dialog.gd")
 const NoteServiceScript = preload("res://src/domain/directory/note_service.gd")
+const SpellingAssistanceHelperScript = preload("res://src/ui/components/spelling_assistance_helper.gd")
 
 var db: RefCounted:
 	set(value):
@@ -1838,6 +1839,8 @@ func _populate_notes_section(p: Dictionary) -> void:
 	body_edit.caret_blink = true
 	body_edit.add_theme_color_override("caret_color", Color(0.12, 0.16, 0.22, 1.0))
 	body_vbox.add_child(body_edit)
+
+	SpellingAssistanceHelperScript.attach_to_text_edit(body_edit, body_vbox)
 	comp_box.add_child(body_vbox)
 
 	var btn_save_note = Button.new()
@@ -2026,6 +2029,8 @@ func _populate_notes_section(p: Dictionary) -> void:
 			edit_text_edit.caret_blink = true
 			edit_text_edit.add_theme_color_override("caret_color", Color(0.12, 0.16, 0.22, 1.0))
 			edit_vbox.add_child(edit_text_edit)
+
+			SpellingAssistanceHelperScript.attach_to_text_edit(edit_text_edit, edit_vbox)
 
 			var edit_act_row = HBoxContainer.new()
 			edit_act_row.add_theme_constant_override("separation", 10)

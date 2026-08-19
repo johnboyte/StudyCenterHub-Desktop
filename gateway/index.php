@@ -3190,14 +3190,14 @@ if (preg_match('#^/(api/v1/mobile|mobile/api)/people/([^/]+)/notes$#', $uri, $m)
                 pn.body,
                 pn.created_at
             FROM person_notes pn
-            WHERE pn.person_uuid = ?
+            WHERE (pn.person_uuid = ? OR (pn.human_id IS NOT NULL AND pn.human_id = ? AND pn.human_id != ''))
               AND pn.is_deleted = 0
               AND COALESCE(pn.note_type_uuid, 'nt_general') = 'nt_general'
               AND LOWER(COALESCE(pn.visibility, 'standard_staff')) NOT IN ('sensitive_pastoral', 'pastoral', 'confidential', 'private')
             ORDER BY pn.created_at DESC
             LIMIT 50
         ");
-        $stmt->execute([$target_hid]);
+        $stmt->execute([$target_hid, $target_hid]);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         $stmt->closeCursor();
 
@@ -3486,13 +3486,13 @@ if (preg_match('#^/(api/v1/mobile|mobile/api)/people/([^/]+)$#', $uri, $m) && $m
         $pn_stmt = $pdo->prepare("
             SELECT note_uuid, title, body, created_at 
             FROM person_notes 
-            WHERE person_uuid = ? 
+            WHERE (person_uuid = ? OR (human_id IS NOT NULL AND human_id = ? AND human_id != ''))
               AND is_deleted = 0 
               AND LOWER(COALESCE(visibility, 'standard_staff')) NOT IN ('sensitive_pastoral', 'pastoral', 'confidential', 'private')
             ORDER BY created_at DESC 
             LIMIT 20
         ");
-        $pn_stmt->execute([$target_hid]);
+        $pn_stmt->execute([$target_hid, $target_hid]);
         $pn_rows = $pn_stmt->fetchAll(PDO::FETCH_ASSOC);
         $pn_stmt->closeCursor();
 
@@ -6962,7 +6962,7 @@ if ($uri === '/api/v1/sync/ivr-config') {
 }
 
 // Route: Sync Person Notes (Desktop -> Gateway)
-if ($uri === '/api/v1/sync/person-notes' && $method === 'POST') {
+if ((preg_match('#^/(api/v1/sync|sync)/person-notes$#', $uri)) && $method === 'POST') {
     $req_key = $_SERVER['HTTP_X_SYNC_API_KEY'] ?? $_GET['sync_api_key'] ?? '';
     if ($req_key !== $sync_api_key) {
         http_response_code(401);
@@ -6979,6 +6979,7 @@ if ($uri === '/api/v1/sync/person-notes' && $method === 'POST') {
             note_uuid TEXT UNIQUE,
             person_id INTEGER DEFAULT 0,
             person_uuid TEXT NOT NULL,
+            human_id TEXT DEFAULT '',
             note_type_uuid TEXT DEFAULT 'nt_general',
             title TEXT DEFAULT 'Staff Note',
             body TEXT NOT NULL,
@@ -6989,11 +6990,17 @@ if ($uri === '/api/v1/sync/person-notes' && $method === 'POST') {
         )
     ");
 
+    try {
+        $pdo->exec("ALTER TABLE person_notes ADD COLUMN human_id TEXT DEFAULT ''");
+    } catch (Throwable $e) {}
+
     $count = 0;
     $stmt = $pdo->prepare("
-        INSERT INTO person_notes (note_uuid, person_uuid, note_type_uuid, title, body, visibility, created_at, updated_at, is_deleted)
-        VALUES (?, ?, ?, ?, ?, 'standard_staff', ?, ?, 0)
+        INSERT INTO person_notes (note_uuid, person_uuid, human_id, note_type_uuid, title, body, visibility, created_at, updated_at, is_deleted)
+        VALUES (?, ?, ?, ?, ?, ?, 'standard_staff', ?, ?, 0)
         ON CONFLICT(note_uuid) DO UPDATE SET
+            person_uuid = excluded.person_uuid,
+            human_id = excluded.human_id,
             title = excluded.title,
             body = excluded.body,
             updated_at = excluded.updated_at,
@@ -7002,7 +7009,11 @@ if ($uri === '/api/v1/sync/person-notes' && $method === 'POST') {
 
     foreach ($notes as $n) {
         $n_uuid = trim($n['note_uuid'] ?? '');
-        $p_uuid = trim($n['person_uuid'] ?? $n['human_id'] ?? '');
+        $p_uuid = trim($n['person_uuid'] ?? '');
+        $h_id = trim($n['human_id'] ?? '');
+        if (empty($p_uuid) && !empty($h_id)) { $p_uuid = $h_id; }
+        if (empty($h_id) && !empty($p_uuid)) { $h_id = $p_uuid; }
+
         $t_uuid = trim($n['note_type_uuid'] ?? 'nt_general');
         $title = trim($n['title'] ?? 'General Note');
         $body = trim($n['body'] ?? '');
@@ -7010,18 +7021,16 @@ if ($uri === '/api/v1/sync/person-notes' && $method === 'POST') {
         $created = trim($n['created_at'] ?? date('Y-m-d H:i:s'));
         $updated = trim($n['updated_at'] ?? $created);
 
-        // Privacy check: only sync General / standard_staff notes to Gateway
         if (in_array($vis, ['sensitive_pastoral', 'pastoral', 'confidential', 'private'])) {
             continue;
         }
-        if ($t_uuid !== 'nt_general' && $title !== 'General' && $title !== 'General Note' && $title !== 'Administrative') {
+
+        if (empty($n_uuid) || empty($p_uuid) || empty($body)) {
             continue;
         }
 
-        if (!empty($n_uuid) && !empty($p_uuid) && !empty($body)) {
-            $stmt->execute([$n_uuid, $p_uuid, 'nt_general', $title, $body, $created, $updated]);
-            $count++;
-        }
+        $stmt->execute([$n_uuid, $p_uuid, $h_id, $t_uuid, $title, $body, $created, $updated]);
+        $count++;
     }
     $stmt->closeCursor();
 

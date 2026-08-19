@@ -368,11 +368,12 @@ func publish_person_notes(callback: Callable = Callable()) -> void:
 		return
 
 	var res = db.execute("""
-		SELECT note_uuid, person_uuid, note_type_uuid, title, body, visibility, created_at, updated_at
-		FROM person_notes
-		WHERE is_deleted = 0
-		  AND (note_type_uuid = 'nt_general' OR title = 'General' OR title = 'General Note' OR title = 'Administrative')
-		  AND LOWER(COALESCE(visibility, 'standard_staff')) NOT IN ('sensitive_pastoral', 'pastoral', 'confidential', 'private');
+		SELECT pn.note_uuid, pn.person_uuid, p.human_id, pn.note_type_uuid, pn.title, pn.body, pn.visibility, pn.created_at, pn.updated_at
+		FROM person_notes pn
+		LEFT JOIN people p ON (pn.person_id = p.id OR pn.person_uuid = p.person_uuid OR pn.person_uuid = p.human_id)
+		WHERE pn.is_deleted = 0
+		  AND (pn.note_type_uuid = 'nt_general' OR pn.title = 'General' OR pn.title = 'General Note' OR pn.title = 'Administrative')
+		  AND LOWER(COALESCE(pn.visibility, 'standard_staff')) NOT IN ('sensitive_pastoral', 'pastoral', 'confidential', 'private');
 	""")
 
 	var notes = []
