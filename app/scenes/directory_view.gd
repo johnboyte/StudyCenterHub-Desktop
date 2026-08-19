@@ -23,6 +23,7 @@ const UnifiedPathwaysServiceScript = preload("res://src/domain/pathways/unified_
 const PersonRegistrationValidatorScript = preload("res://src/domain/directory/person_registration_validator.gd")
 const StaffMobileServiceScript = preload("res://src/domain/directory/staff_mobile_service.gd")
 const StaffMobileDialogScript = preload("res://src/ui/components/staff_mobile_provisioning_dialog.gd")
+const NoteServiceScript = preload("res://src/domain/directory/note_service.gd")
 
 var db: RefCounted:
 	set(value):
@@ -30,11 +31,13 @@ var db: RefCounted:
 		if db:
 			read_service = DirectoryReadServiceScript.new(db)
 			unified_pathways_service = UnifiedPathwaysServiceScript.new(db)
+			note_service = NoteServiceScript.new(db)
 			if is_node_ready():
 				call_deferred("refresh_view")
 
 var read_service: RefCounted
 var unified_pathways_service: RefCounted
+var note_service: RefCounted
 var app_shell: Node = null
 
 var current_filter: String = "all" # "all", "active", "pending", "inactive"
@@ -256,6 +259,14 @@ func receive_navigation_context(params: Dictionary) -> void:
 	if params.has("person_id"):
 		var pid = int(params["person_id"])
 		call_deferred("select_person_by_id", pid)
+
+	var p_uuid = str(params.get("person_uuid", params.get("linked_human_id", params.get("human_id", ""))))
+	if not p_uuid.is_empty():
+		call_deferred("select_person_by_uuid", p_uuid)
+
+	var tab = str(params.get("tab", ""))
+	if tab == "notes" or tab == "notes_tasks" or tab == "tasks":
+		call_deferred("select_workspace_tab", "notes")
 
 	if params.get("queue_mode", false) == true:
 		var qid = params.get("queue_id", "")
@@ -960,15 +971,6 @@ func select_person_by_uuid(p_uuid: String) -> void:
 		if str(p.get("person_uuid", "")) == p_uuid or str(p.get("human_id", "")) == p_uuid:
 			select_person_by_index(i)
 			return
-
-func receive_navigation_context(params: Dictionary) -> void:
-	var p_uuid = str(params.get("person_uuid", params.get("linked_human_id", params.get("human_id", ""))))
-	if not p_uuid.is_empty():
-		select_person_by_uuid(p_uuid)
-
-	var tab = str(params.get("tab", ""))
-	if tab == "notes" or tab == "notes_tasks" or tab == "tasks":
-		select_workspace_tab("notes")
 
 func select_person_by_index(index: int) -> void:
 	if index < 0 or index >= visible_people.size():
@@ -1751,10 +1753,43 @@ func _populate_notes_section(p: Dictionary) -> void:
 	if not notes_section: return
 
 	var person_uuid = _clean_str(p.get("person_uuid", ""))
+	var person_id = int(p.get("id", 0))
+	var human_id = _clean_str(p.get("human_id", ""))
+
+	if db and (person_uuid == "" or person_id == 0):
+		var p_lookup = db.execute("SELECT id, person_uuid FROM people WHERE id = ? OR human_id = ? OR person_uuid = ? LIMIT 1;", [person_id, human_id, person_uuid])
+		if p_lookup.get("success", false) and p_lookup.get("data", []).size() > 0:
+			var p_row = p_lookup["data"][0]
+			if person_uuid == "":
+				person_uuid = _clean_str(p_row.get("person_uuid", ""))
+			if person_id == 0:
+				person_id = int(p_row.get("id", 0))
 
 	var notes_main_vbox = VBoxContainer.new()
 	notes_main_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	notes_main_vbox.add_theme_constant_override("separation", 18)
+
+	if db and not note_service:
+		note_service = NoteServiceScript.new(db)
+
+	var active_types = []
+	if note_service:
+		var t_res = note_service.get_note_types()
+		if t_res.get("success", false):
+			active_types = t_res.get("note_types", [])
+
+	if active_types.size() == 0 and db:
+		var raw_t = db.execute("SELECT * FROM note_types WHERE is_active = 1 ORDER BY display_order ASC, name ASC;")
+		if raw_t.get("success", false):
+			active_types = raw_t.get("data", [])
+
+	if active_types.size() == 0:
+		active_types = [
+			{"type_uuid": "nt_general", "name": "General Note"},
+			{"type_uuid": "nt_academic", "name": "Academic Note"},
+			{"type_uuid": "nt_behavioral", "name": "Behavioral Note"},
+			{"type_uuid": "nt_pastoral", "name": "Pastoral Care Note"}
+		]
 
 	# 1. Add Journal Note Card (Composer)
 	var comp_box = VBoxContainer.new()
@@ -1770,21 +1805,23 @@ func _populate_notes_section(p: Dictionary) -> void:
 	cat_lbl.add_theme_color_override("font_color", Color(0.70, 0.78, 0.88, 1.0))
 
 	var cat_dropdown = OptionButton.new()
-	cat_dropdown.add_item("Administrative", 0)
-	cat_dropdown.add_item("Pastoral / Care", 1)
-	cat_dropdown.add_item("Pathway", 2)
-	cat_dropdown.add_item("Staff Only", 3)
-	cat_dropdown.add_item("Mentor", 4)
-	cat_dropdown.add_item("General", 5)
 	cat_dropdown.custom_minimum_size = Vector2(0, 44)
 	cat_dropdown.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	cat_dropdown.add_theme_font_size_override("font_size", 16)
+
+	for idx in range(active_types.size()):
+		var nt_item = active_types[idx]
+		var t_name = str(nt_item.get("name", "General Note"))
+		var t_uuid = str(nt_item.get("type_uuid", "nt_general"))
+		cat_dropdown.add_item(t_name, idx)
+		cat_dropdown.set_item_metadata(idx, t_uuid)
+
 	cat_vbox.add_child(cat_lbl)
 	cat_vbox.add_child(cat_dropdown)
 	comp_box.add_child(cat_vbox)
 
 	var cat_sub = Label.new()
-	cat_sub.text = "Administrative is the default category."
+	cat_sub.text = "Select a note category for this constituent journal entry."
 	cat_sub.add_theme_font_size_override("font_size", 14)
 	cat_sub.add_theme_color_override("font_color", Color(0.70, 0.78, 0.88, 1.0))
 	comp_box.add_child(cat_sub)
@@ -1798,6 +1835,8 @@ func _populate_notes_section(p: Dictionary) -> void:
 	body_edit.custom_minimum_size = Vector2(0, 120)
 	body_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	body_edit.add_theme_font_size_override("font_size", 16)
+	body_edit.caret_blink = true
+	body_edit.add_theme_color_override("caret_color", Color(0.12, 0.16, 0.22, 1.0))
 	body_vbox.add_child(body_edit)
 	comp_box.add_child(body_vbox)
 
@@ -1805,16 +1844,59 @@ func _populate_notes_section(p: Dictionary) -> void:
 	btn_save_note.text = "➕ Save Note"
 	btn_save_note.custom_minimum_size = Vector2(200, 44)
 	btn_save_note.add_theme_font_size_override("font_size", 16)
+	_style_dark_card_button(btn_save_note)
+
 	btn_save_note.pressed.connect(func():
 		var note_text = body_edit.text.strip_edges()
-		if note_text != "" and db and person_uuid != "":
-			var cat_name = cat_dropdown.get_item_text(cat_dropdown.selected)
-			var note_uuid = "note_" + str(Time.get_ticks_msec())
+		if note_text == "":
+			return
+
+		if person_uuid == "":
+			print("[NoteSaveError] Unable to resolve person_uuid for saving note.")
+			return
+
+		var sel_idx = cat_dropdown.selected
+		var note_type_uuid = "nt_general"
+		var note_title = "General Note"
+		if sel_idx >= 0 and sel_idx < cat_dropdown.item_count:
+			note_type_uuid = str(cat_dropdown.get_item_metadata(sel_idx))
+			note_title = cat_dropdown.get_item_text(sel_idx)
+
+		var vis = "standard_staff"
+		if note_type_uuid == "nt_pastoral" or note_title.to_lower().contains("pastoral"):
+			vis = "sensitive_pastoral"
+
+		var save_success = false
+		if note_service:
+			var create_res = note_service.create_person_note({
+				"person_uuid": person_uuid,
+				"note_type_uuid": note_type_uuid,
+				"title": note_title,
+				"body": note_text,
+				"visibility": vis
+			})
+			save_success = create_res.get("success", false)
+			if not save_success:
+				print("[NoteSaveServiceError] ", create_res.get("error", ""))
+
+		if not save_success and db:
+			var note_uuid = "note_" + str(Time.get_ticks_msec()) + "_" + str(randi() % 10000)
 			var timestamp = Time.get_datetime_string_from_system()
-			db.execute("INSERT INTO person_notes (note_uuid, person_uuid, title, body, visibility, created_at, updated_at) VALUES (?, ?, ?, ?, 'standard_staff', ?, ?);",
-				[note_uuid, person_uuid, cat_name, note_text, timestamp, timestamp])
+			if person_id == 0:
+				var p_lookup = db.execute("SELECT id FROM people WHERE person_uuid = ? LIMIT 1;", [person_uuid])
+				if p_lookup.get("success", false) and p_lookup.get("data", []).size() > 0:
+					person_id = int(p_lookup["data"][0]["id"])
+
+			var ins_res = db.execute("""
+				INSERT INTO person_notes (note_uuid, person_id, person_uuid, note_type_uuid, title, body, visibility, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+			""", [note_uuid, person_id, person_uuid, note_type_uuid, note_title, note_text, vis, timestamp, timestamp])
+			save_success = ins_res.get("success", false)
+
+		if save_success:
 			body_edit.text = ""
-			_trigger_gateway_sync()
+			if note_type_uuid == "nt_general":
+				_trigger_gateway_sync()
 			refresh_view()
 	)
 	comp_box.add_child(btn_save_note)
@@ -1843,13 +1925,15 @@ func _populate_notes_section(p: Dictionary) -> void:
 	hdr_hbox.add_child(hist_title)
 
 	var filter_dropdown = OptionButton.new()
-	filter_dropdown.add_item("All", 0)
-	filter_dropdown.add_item("Administrative", 1)
-	filter_dropdown.add_item("Pastoral / Care", 2)
-	filter_dropdown.add_item("Pathway", 3)
-	filter_dropdown.add_item("Staff Only", 4)
-	filter_dropdown.add_item("Mentor", 5)
-	filter_dropdown.add_item("General", 6)
+	filter_dropdown.add_item("All Note Types", 0)
+	filter_dropdown.set_item_metadata(0, "All")
+	for idx in range(active_types.size()):
+		var nt_item = active_types[idx]
+		var t_name = str(nt_item.get("name", "General Note"))
+		var t_uuid = str(nt_item.get("type_uuid", "nt_general"))
+		filter_dropdown.add_item(t_name, idx + 1)
+		filter_dropdown.set_item_metadata(idx + 1, t_uuid)
+
 	filter_dropdown.custom_minimum_size = Vector2(180, 38)
 	filter_dropdown.add_theme_font_size_override("font_size", 14)
 	hdr_hbox.add_child(filter_dropdown)
@@ -1859,18 +1943,27 @@ func _populate_notes_section(p: Dictionary) -> void:
 	notes_list_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	notes_list_vbox.add_theme_constant_override("separation", 12)
 
-	var notes_res = db.execute("SELECT * FROM person_notes WHERE person_uuid = ? AND is_deleted = 0 ORDER BY created_at DESC, id DESC;", [person_uuid]) if db and person_uuid != "" else {"success": false, "data": []}
+	var notes_sql = """
+		SELECT pn.*, COALESCE(nt.name, pn.title) as note_type_name
+		FROM person_notes pn
+		LEFT JOIN note_types nt ON pn.note_type_uuid = nt.type_uuid
+		WHERE pn.person_uuid = ? AND pn.is_deleted = 0
+		ORDER BY pn.created_at DESC, pn.id DESC;
+	"""
+	var notes_res = db.execute(notes_sql, [person_uuid]) if db and person_uuid != "" else {"success": false, "data": []}
 	var all_notes = notes_res.get("data", []) if notes_res.get("success", false) else []
 
 	var _render_history_list = func(cat_filter: String):
 		_clear_container(notes_list_vbox)
 		var count = 0
 		for note in all_notes:
-			var note_title = str(note.get("title", "General"))
+			var n_type_uuid = str(note.get("note_type_uuid", "nt_general"))
+			var note_title = str(note.get("note_type_name", note.get("title", "General Note")))
 			var note_body = str(note.get("body", ""))
 			var note_dt = str(note.get("created_at", ""))
+			var vis = str(note.get("visibility", "standard_staff"))
 
-			if cat_filter != "All" and note_title != cat_filter:
+			if cat_filter != "All" and n_type_uuid != cat_filter and note_title != cat_filter:
 				continue
 
 			count += 1
@@ -1879,7 +1972,7 @@ func _populate_notes_section(p: Dictionary) -> void:
 			note_card.add_theme_constant_override("separation", 4)
 
 			var badge = Label.new()
-			badge.text = "[ Note Category: " + note_title + " ]"
+			badge.text = "[ Note Category: " + note_title + " (" + vis + ") ]"
 			badge.add_theme_font_size_override("font_size", 15)
 			badge.add_theme_color_override("font_color", Color(0.40, 0.85, 0.95, 1.0))
 			note_card.add_child(badge)
@@ -1901,11 +1994,11 @@ func _populate_notes_section(p: Dictionary) -> void:
 			notes_list_vbox.add_child(note_card)
 
 		if count == 0:
-			notes_list_vbox.add_child(_create_empty_label("No journal notes yet."))
+			notes_list_vbox.add_child(_create_empty_label("No journal notes yet for this category."))
 
 	filter_dropdown.item_selected.connect(func(idx: int):
-		var cat_name = filter_dropdown.get_item_text(idx)
-		_render_history_list.call(cat_name)
+		var filter_val = str(filter_dropdown.get_item_metadata(idx))
+		_render_history_list.call(filter_val)
 	)
 
 	_render_history_list.call("All")
@@ -2138,11 +2231,11 @@ func _populate_notes_section(p: Dictionary) -> void:
 			tc_top.add_child(tc_title)
 
 			var prio_txt = str(t_row.get("priority", "normal")).to_upper()
-			var prio_lbl = Label.new()
-			prio_lbl.text = " [" + prio_txt + "] "
-			prio_lbl.add_theme_font_size_override("font_size", 13)
-			prio_lbl.add_theme_color_override("font_color", Color(0.95, 0.45, 0.25) if prio_txt == "URGENT" else (Color(0.95, 0.70, 0.25) if prio_txt == "HIGH" else Color(0.40, 0.75, 0.95)))
-			tc_top.add_child(prio_lbl)
+			var tc_prio_lbl = Label.new()
+			tc_prio_lbl.text = " [" + prio_txt + "] "
+			tc_prio_lbl.add_theme_font_size_override("font_size", 13)
+			tc_prio_lbl.add_theme_color_override("font_color", Color(0.95, 0.45, 0.25) if prio_txt == "URGENT" else (Color(0.95, 0.70, 0.25) if prio_txt == "HIGH" else Color(0.40, 0.75, 0.95)))
+			tc_top.add_child(tc_prio_lbl)
 
 			tc_vbox.add_child(tc_top)
 
@@ -2198,8 +2291,8 @@ func _format_ui_date(raw_text: String) -> String:
 	if s.contains("/"):
 		var parts = s.split("/")
 		if parts.size() == 3:
-			var m = parts[0].pad_zeros(2)
-			var d = parts[1].pad_zeros(2)
+			var m = "%02d" % parts[0].to_int()
+			var d = "%02d" % parts[1].to_int()
 			var y = parts[2]
 			if y.length() == 2: y = "20" + y
 			return m + "/" + d + "/" + y
