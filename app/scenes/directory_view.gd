@@ -1988,8 +1988,26 @@ func _populate_notes_section(p: Dictionary) -> void:
 
 			var btn_edit = Button.new()
 			btn_edit.text = "✏️ Edit Note"
-			_style_dark_card_button(btn_edit)
-			btn_edit.add_theme_font_size_override("font_size", 13)
+			btn_edit.custom_minimum_size = Vector2(110, 32)
+			btn_edit.add_theme_font_size_override("font_size", 14)
+			var b_style = StyleBoxFlat.new()
+			b_style.bg_color = Color(0.18, 0.28, 0.42, 1.0)
+			b_style.border_color = Color(0.95, 0.75, 0.20, 1.0)
+			b_style.border_width_left = 1
+			b_style.border_width_top = 1
+			b_style.border_width_right = 1
+			b_style.border_width_bottom = 1
+			b_style.corner_radius_top_left = 4
+			b_style.corner_radius_top_right = 4
+			b_style.corner_radius_bottom_left = 4
+			b_style.corner_radius_bottom_right = 4
+			b_style.content_margin_left = 8
+			b_style.content_margin_right = 8
+			btn_edit.add_theme_stylebox_override("normal", b_style)
+			btn_edit.add_theme_color_override("font_color", Color(0.95, 0.75, 0.20, 1.0))
+			btn_edit.add_theme_color_override("font_hover_color", Color(1.0, 0.85, 0.30, 1.0))
+			btn_edit.add_theme_color_override("font_pressed_color", Color(0.90, 0.70, 0.10, 1.0))
+			btn_edit.add_theme_color_override("font_focus_color", Color(0.95, 0.75, 0.20, 1.0))
 			badge_hbox.add_child(btn_edit)
 			note_card.add_child(badge_hbox)
 
