@@ -1,3 +1,4 @@
+class_name SpellingAssistanceHelper
 extends RefCounted
 
 ## Useful Spelling Correction Assistance Helper for StudyCenterHub
@@ -209,7 +210,7 @@ static func check_text(text: String) -> Array:
 static func ignore_word(word: String) -> void:
 	_ignored_words[word.to_lower()] = true
 
-static func attach_to_text_edit(text_edit: TextEdit, parent_container: Container) -> Control:
+func attach_to_text_edit(text_edit: TextEdit, parent_container: Container) -> Control:
 	var spell_card = PanelContainer.new()
 	spell_card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	spell_card.custom_minimum_size = Vector2(0, 40)
@@ -251,8 +252,9 @@ static func attach_to_text_edit(text_edit: TextEdit, parent_container: Container
 
 	var current_issues = []
 	var active_issue_idx = 0
+	var _update_spelling_bar: Callable
 
-	var _update_spelling_bar = func():
+	_update_spelling_bar = func():
 		# Clear suggestion container
 		for c in sug_container.get_children():
 			c.queue_free()
@@ -304,7 +306,7 @@ static func attach_to_text_edit(text_edit: TextEdit, parent_container: Container
 					var cur_t = text_edit.text
 					# Replace target word occurrence
 					text_edit.text = cur_t.replace(word, str(sug))
-					call_deferred("_update_spelling_bar")
+					_update_spelling_bar.call_deferred()
 				)
 				sug_container.add_child(sug_btn)
 		else:
@@ -331,7 +333,7 @@ static func attach_to_text_edit(text_edit: TextEdit, parent_container: Container
 		btn_ignore.add_theme_color_override("font_color", Color(0.85, 0.90, 0.95, 1.0))
 		btn_ignore.pressed.connect(func():
 			ignore_word(word)
-			call_deferred("_update_spelling_bar")
+			_update_spelling_bar.call_deferred()
 		)
 		sug_container.add_child(btn_ignore)
 
@@ -353,7 +355,7 @@ static func attach_to_text_edit(text_edit: TextEdit, parent_container: Container
 			btn_next.add_theme_color_override("font_color", Color(0.90, 0.95, 1.0, 1.0))
 			btn_next.pressed.connect(func():
 				active_issue_idx = (active_issue_idx + 1) % current_issues.size()
-				call_deferred("_update_spelling_bar")
+				_update_spelling_bar.call_deferred()
 			)
 			sug_container.add_child(btn_next)
 
