@@ -164,6 +164,60 @@ func delete_person_note(note_uuid: String) -> Dictionary:
 
 	return {"success": true, "error": ""}
 
+## Updates an existing Person Note record without altering person_uuid, note_uuid, or created_at
+func update_person_note(note_uuid: String, update_data: Dictionary) -> Dictionary:
+	if note_uuid.strip_edges() == "":
+		return {"success": false, "error": "note_uuid is required."}
+
+	var body = String(update_data.get("body", "")).strip_edges()
+	if body == "":
+		return {"success": false, "error": "Note body content cannot be empty."}
+
+	var timestamp = _get_utc_timestamp()
+	var title = update_data.get("title", null)
+
+	var sql = "UPDATE person_notes SET body = ?, updated_at = ?"
+	var args = [body, timestamp]
+
+	if title != null and String(title).strip_edges() != "":
+		sql += ", title = ?"
+		args.append(String(title).strip_edges())
+
+	if update_data.has("note_type_uuid"):
+		sql += ", note_type_uuid = ?"
+		args.append(String(update_data["note_type_uuid"]))
+
+	if update_data.has("visibility"):
+		sql += ", visibility = ?"
+		args.append(String(update_data["visibility"]))
+
+	sql += " WHERE note_uuid = ? AND is_deleted = 0;"
+	args.append(note_uuid)
+
+	var res = db.execute(sql, args)
+	if not res["success"]:
+		return {"success": false, "error": res["error"]}
+
+	# Outbox queueing for sync (PD-001)
+	var check_outbox = db.execute("SELECT name FROM sqlite_master WHERE type='table' AND (name='outbox_sync' OR name='event_outbox');")
+	if check_outbox["success"] and check_outbox["data"].size() > 0:
+		var target_tbl = check_outbox["data"][0]["name"]
+		var outbox_uuid = "evt_note_upd_" + _generate_uuid_suffix()
+		var payload = JSON.stringify({
+			"note_uuid": note_uuid,
+			"body": body,
+			"title": title if title != null else "",
+			"updated_at": timestamp
+		})
+		if target_tbl == "outbox_sync":
+			db.execute("INSERT INTO outbox_sync (event_uuid, event_type, payload_json, created_at) VALUES (?, ?, ?, ?);",
+				[outbox_uuid, "NoteUpdated", payload, timestamp])
+		else:
+			db.execute("INSERT INTO event_outbox (event_uuid, event_type, aggregate_type, aggregate_id, payload_json, device_uuid, created_at) VALUES (?, ?, ?, ?, ?, ?, ?);",
+				[outbox_uuid, "NoteUpdated", "person_note", note_uuid, payload, "desktop_local", timestamp])
+
+	return {"success": true, "error": "", "note_uuid": note_uuid}
+
 # ==============================================================================
 # HELPER FUNCTIONS
 # ==============================================================================

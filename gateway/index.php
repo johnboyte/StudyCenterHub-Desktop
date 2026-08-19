@@ -3304,6 +3304,79 @@ if (preg_match('#^/(api/v1/mobile|mobile/api)/people/([^/]+)/notes$#', $uri, $m)
     exit;
 }
 
+// Route: Mobile Edit General Note (PUT or POST /api/v1/mobile/notes/{id}/update)
+if ((preg_match('#^/(api/v1/mobile|mobile/api)/notes/([^/]+)(/update)?$#', $uri, $m) || preg_match('#^/(api/v1/mobile|mobile/api)/people/([^/]+)/notes/([^/]+)$#', $uri, $m)) && ($method === 'PUT' || $method === 'POST')) {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+    $session = verify_mobile_session($pdo);
+    $note_uuid = !empty($m[3]) ? trim($m[3]) : trim($m[2]);
+
+    $raw = file_get_contents('php://input');
+    $input = json_decode($raw, true);
+    $payload = is_array($input) ? $input : [];
+
+    $body = trim($payload['body'] ?? $payload['note_text'] ?? $payload['text'] ?? '');
+    $title = trim($payload['title'] ?? 'General Note');
+
+    if (empty($body)) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => 'Note content body cannot be empty.']);
+        exit;
+    }
+
+    $chk_stmt = $pdo->prepare("
+        SELECT * FROM person_notes
+        WHERE note_uuid = ?
+          AND is_deleted = 0
+          AND (COALESCE(note_type_uuid, 'nt_general') = 'nt_general' OR title = 'General Note' OR title = 'General')
+          AND LOWER(COALESCE(visibility, 'standard_staff')) NOT IN ('sensitive_pastoral', 'pastoral', 'confidential', 'private')
+        LIMIT 1
+    ");
+    $chk_stmt->execute([$note_uuid]);
+    $existing = $chk_stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$existing) {
+        http_response_code(404);
+        echo json_encode(['success' => false, 'error' => 'General Note not found or restricted.']);
+        exit;
+    }
+
+    $now_str = date('Y-m-d H:i:s');
+    $up_stmt = $pdo->prepare("
+        UPDATE person_notes
+        SET body = ?, title = ?, updated_at = ?
+        WHERE note_uuid = ?
+    ");
+    $up_stmt->execute([$body, $title, $now_str, $note_uuid]);
+
+    ensure_inbound_event_queue_table($pdo);
+    $note_evt_payload = json_encode([
+        'note_uuid' => $note_uuid,
+        'person_uuid' => $existing['person_uuid'],
+        'note_type_uuid' => 'nt_general',
+        'title' => $title,
+        'body' => $body,
+        'updated_at' => $now_str
+    ]);
+    $evt_stmt = $pdo->prepare("
+        INSERT INTO inbound_event_queue (event_type, payload_json, received_at, processed)
+        VALUES ('mobile.note.update', ?, datetime('now'), 0)
+    ");
+    $evt_stmt->execute([$note_evt_payload]);
+
+    echo json_encode([
+        'success' => true,
+        'note' => [
+            'id' => $note_uuid,
+            'title' => $title,
+            'body' => $body,
+            'updated_at' => $now_str
+        ]
+    ]);
+    exit;
+}
+
 // Route: Authenticated Mobile Person Detail Profile & Attendance State Endpoint
 if (preg_match('#^/(api/v1/mobile|mobile/api)/people/([^/]+)$#', $uri, $m) && $method === 'GET') {
     header('Content-Type: application/json; charset=utf-8');

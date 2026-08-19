@@ -1962,6 +1962,7 @@ func _populate_notes_section(p: Dictionary) -> void:
 			var note_body = str(note.get("body", ""))
 			var note_dt = str(note.get("created_at", ""))
 			var vis = str(note.get("visibility", "standard_staff"))
+			var n_uuid = str(note.get("note_uuid", ""))
 
 			if cat_filter != "All" and n_type_uuid != cat_filter and note_title != cat_filter:
 				continue
@@ -1969,27 +1970,120 @@ func _populate_notes_section(p: Dictionary) -> void:
 			count += 1
 			var note_card = VBoxContainer.new()
 			note_card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			note_card.add_theme_constant_override("separation", 4)
+			note_card.add_theme_constant_override("separation", 6)
+
+			# Top HBox with Badge + Edit Button
+			var badge_hbox = HBoxContainer.new()
+			badge_hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 			var badge = Label.new()
 			badge.text = "[ Note Category: " + note_title + " (" + vis + ") ]"
 			badge.add_theme_font_size_override("font_size", 15)
 			badge.add_theme_color_override("font_color", Color(0.40, 0.85, 0.95, 1.0))
-			note_card.add_child(badge)
+			badge.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			badge_hbox.add_child(badge)
+
+			var btn_edit = Button.new()
+			btn_edit.text = "✏️ Edit Note"
+			_style_dark_card_button(btn_edit)
+			btn_edit.add_theme_font_size_override("font_size", 13)
+			badge_hbox.add_child(btn_edit)
+			note_card.add_child(badge_hbox)
+
+			# Display Body Container
+			var display_vbox = VBoxContainer.new()
+			display_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 			var lbl_b = Label.new()
 			lbl_b.text = note_body
 			lbl_b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			lbl_b.add_theme_font_size_override("font_size", 16)
 			lbl_b.add_theme_color_override("font_color", Color(0.92, 0.96, 1.0))
-			note_card.add_child(lbl_b)
+			display_vbox.add_child(lbl_b)
 
-			if note_dt != "":
-				var lbl_dt = Label.new()
-				lbl_dt.text = "Date: " + note_dt
-				lbl_dt.add_theme_font_size_override("font_size", 14)
-				lbl_dt.add_theme_color_override("font_color", Color(0.72, 0.80, 0.90))
-				note_card.add_child(lbl_dt)
+			var meta_text = "Created: " + note_dt
+			var updated_at_val = str(note.get("updated_at", ""))
+			if updated_at_val != "" and updated_at_val != note_dt:
+				meta_text += " • Updated: " + updated_at_val
+			var lbl_dt = Label.new()
+			lbl_dt.text = meta_text
+			lbl_dt.add_theme_font_size_override("font_size", 13)
+			lbl_dt.add_theme_color_override("font_color", Color(0.72, 0.80, 0.90))
+			display_vbox.add_child(lbl_dt)
+			note_card.add_child(display_vbox)
+
+			# Edit Editor Container (hidden until Edit button clicked)
+			var edit_vbox = VBoxContainer.new()
+			edit_vbox.visible = false
+			edit_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			edit_vbox.add_theme_constant_override("separation", 8)
+
+			var edit_text_edit = TextEdit.new()
+			edit_text_edit.text = note_body
+			edit_text_edit.custom_minimum_size = Vector2(0, 100)
+			edit_text_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			edit_text_edit.add_theme_font_size_override("font_size", 15)
+			edit_text_edit.caret_blink = true
+			edit_text_edit.add_theme_color_override("caret_color", Color(0.12, 0.16, 0.22, 1.0))
+			edit_vbox.add_child(edit_text_edit)
+
+			var edit_act_row = HBoxContainer.new()
+			edit_act_row.add_theme_constant_override("separation", 10)
+
+			var btn_save_edit = Button.new()
+			btn_save_edit.text = "💾 Save Edit"
+			_style_dark_card_button(btn_save_edit)
+			btn_save_edit.add_theme_font_size_override("font_size", 13)
+			edit_act_row.add_child(btn_save_edit)
+
+			var btn_cancel_edit = Button.new()
+			btn_cancel_edit.text = "Cancel"
+			_style_dark_card_button(btn_cancel_edit)
+			btn_cancel_edit.add_theme_font_size_override("font_size", 13)
+			edit_act_row.add_child(btn_cancel_edit)
+
+			edit_vbox.add_child(edit_act_row)
+			note_card.add_child(edit_vbox)
+
+			btn_edit.pressed.connect(func():
+				var is_editing = not edit_vbox.visible
+				edit_vbox.visible = is_editing
+				display_vbox.visible = not is_editing
+				if is_editing:
+					edit_text_edit.text = note_body
+					edit_text_edit.grab_focus()
+			)
+
+			btn_cancel_edit.pressed.connect(func():
+				edit_vbox.visible = false
+				display_vbox.visible = true
+			)
+
+			btn_save_edit.pressed.connect(func():
+				var updated_body = edit_text_edit.text.strip_edges()
+				if updated_body == "":
+					return
+
+				var updated = false
+				if note_service:
+					var up_res = note_service.update_person_note(n_uuid, {
+						"body": updated_body,
+						"title": note_title,
+						"note_type_uuid": n_type_uuid,
+						"visibility": vis
+					})
+					updated = up_res.get("success", false)
+
+				if not updated and db:
+					var up_sql = "UPDATE person_notes SET body = ?, updated_at = datetime('now') WHERE note_uuid = ? AND is_deleted = 0;"
+					var ins_r = db.execute(up_sql, [updated_body, n_uuid])
+					updated = ins_r.get("success", false)
+
+				if updated:
+					if n_type_uuid == "nt_general":
+						_trigger_gateway_sync()
+					refresh_view()
+			)
 
 			notes_list_vbox.add_child(note_card)
 

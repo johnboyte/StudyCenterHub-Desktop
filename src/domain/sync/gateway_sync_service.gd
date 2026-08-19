@@ -116,6 +116,8 @@ func _process_inbound_event(evt: Dictionary) -> void:
 		_handle_qr_credential_issued(payload)
 	elif evt_type in ["mobile.note.create", "mobile.note_created", "note.create"]:
 		_handle_mobile_note_create(payload)
+	elif evt_type in ["mobile.note.update", "mobile.note_updated", "note.update"]:
+		_handle_mobile_note_update(payload)
 	elif evt_type in ["mobile.task.create", "mobile.task_created", "task.create"]:
 		_handle_mobile_task_create(payload)
 	elif evt_type in ["mobile.task.update", "mobile.task_updated", "task.update"]:
@@ -151,6 +153,21 @@ func _handle_mobile_note_create(payload: Dictionary) -> void:
 			updated_at = excluded.updated_at,
 			is_deleted = excluded.is_deleted;
 	""", [note_uuid, person_id, person_uuid, title, body, created_at, created_at])
+
+func _handle_mobile_note_update(payload: Dictionary) -> void:
+	var note_uuid = str(payload.get("note_uuid", payload.get("id", "")))
+	var body = str(payload.get("body", "")).strip_edges()
+	var title = str(payload.get("title", "General Note"))
+	var updated_at = str(payload.get("updated_at", Time.get_datetime_string_from_system()))
+
+	if note_uuid == "" or body == "":
+		return
+
+	db.execute("""
+		UPDATE person_notes
+		SET body = ?, title = ?, updated_at = ?
+		WHERE note_uuid = ? AND is_deleted = 0;
+	""", [body, title, updated_at, note_uuid])
 
 func _handle_mobile_task_create(payload: Dictionary) -> void:
 	var task_uuid = str(payload.get("task_uuid", payload.get("id", "")))
