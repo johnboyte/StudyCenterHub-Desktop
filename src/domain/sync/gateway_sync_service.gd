@@ -761,11 +761,17 @@ func _compile_node_recursive(node: Dictionary, all_nodes: Array, parent_path: St
 	var script = str(node.get("script_text", "")) if node.get("script_text") != null else ""
 	var d_src = str(node.get("dynamic_source", "")) if node.get("dynamic_source") != null else ""
 	
-	# Compute dynamic scripts if flag matches (reusable shared settings)
-	if d_src == "location_directions":
-		var res = db.execute("SELECT setting_value FROM app_settings WHERE setting_key = 'PHONE_LOCATION_DIRECTIONS_TEXT' LIMIT 1;")
-		if res["success"] and res["data"].size() > 0:
-			script = str(res["data"][0]["setting_value"])
+	# Resolve dynamic and fallback script text authoritatively (custom script_text takes precedence if present)
+	if script.strip_edges() == "":
+		if d_src == "location_directions":
+			var res = db.execute("SELECT setting_value FROM app_settings WHERE setting_key = 'PHONE_LOCATION_DIRECTIONS_TEXT' LIMIT 1;")
+			if res["success"] and res["data"].size() > 0:
+				script = str(res["data"][0]["setting_value"])
+		else:
+			var node_key = "node_" + str(node["id"])
+			var sug = com_svc.generate_suggestion_for_prompt(node_key, Time.get_date_string_from_system(), Time.get_date_string_from_system())
+			if sug != "":
+				script = sug
 
 	if act_type == "staff_directory":
 		# Compile the listing text dynamically based on the active staff in database
