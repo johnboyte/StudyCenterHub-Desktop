@@ -13,6 +13,9 @@ Options -Indexes
 
 RewriteEngine On
 
+# Redirect legacy malformed upload_pass.phppass_id links to valid upload_pass.php?pass_id= URL
+RewriteRule ^upload_pass\.phppass_id=(.*)$ /upload_pass.php?pass_id=$1 [R=301,L]
+
 # Exclude existing files and folders from rewrite rules
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
