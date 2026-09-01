@@ -7218,6 +7218,34 @@ if ($uri === '/api/v1/webhooks/twilio/voice-prompt') {
     $full_key = $parent_digit ? "$parent_digit-$digits" : $digits;
     $option = $config['menu_options'][$full_key] ?? null;
     
+    if ($full_key === '1') {
+        $tz = new DateTimeZone('America/New_York');
+        $now = new DateTime('now', $tz);
+        $cur_day = $now->format('l');
+        $cur_month = $now->format('F');
+        $cur_day_num = $now->format('j');
+        $cur_date_full = $cur_day . ', ' . $cur_month . ' ' . $cur_day_num;
+
+        $daily_scripts = $config['today_daily_scripts'] ?? [];
+        $script_template = $daily_scripts[$cur_day] ?? ($option['script_text'] ?? "Today is {date_full}. Welcome to Real Life House.");
+
+        $script_text = str_replace(
+            ['{date_full}', '{weekday}', '{month}', '{day}', '{date}'],
+            [$cur_date_full, $cur_day, $cur_month, $cur_day_num, $cur_month . ' ' . $cur_day_num],
+            $script_template
+        );
+
+        if ($option) {
+            $option['script_text'] = $script_text;
+        } else {
+            $option = [
+                'action_type' => 'submenu',
+                'script_text' => $script_text,
+                'action_param' => ''
+            ];
+        }
+    }
+    
     if (!$option) {
         $action = 'https://' . $_SERVER['HTTP_HOST'] . '/api/v1/webhooks/twilio/voice-prompt';
         send_twiml("<Gather numDigits=\"1\" action=\"" . htmlspecialchars($action) . "\" method=\"POST\" timeout=\"8\">" . get_twiml_say("That selection is not valid. Please try again.", $config) . get_twiml_say($config['greeting_text'], $config) . "</Gather><Hangup/>");
@@ -7225,10 +7253,13 @@ if ($uri === '/api/v1/webhooks/twilio/voice-prompt') {
     
     if ($option['action_type'] === 'speak') {
         $action = 'https://' . $_SERVER['HTTP_HOST'] . '/api/v1/webhooks/twilio/voice-prompt?routingStep=post-speak';
+        $say_prompt = get_twiml_say($option['script_text'], $config);
+        if (stripos($option['script_text'], 'press 9') === false) {
+            $say_prompt .= get_twiml_say("To return to the main menu, press 9. Otherwise, you may simply hang up.", $config);
+        }
         send_twiml(
             "<Gather numDigits=\"1\" action=\"" . htmlspecialchars($action) . "\" method=\"POST\" timeout=\"6\">" .
-            get_twiml_say($option['script_text'], $config) .
-            get_twiml_say("To return to the main menu, press 9. Otherwise, you may simply hang up.", $config) .
+            $say_prompt .
             "</Gather>" .
             "<Hangup/>"
         );

@@ -726,6 +726,18 @@ func publish_ivr_config(callback: Callable) -> void:
 
 	phone_settings["menu_options"] = compiled_options
 
+	# Populate 7-day daily script templates map for Press 1
+	var daily_scripts = {}
+	var day_names_list = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+	for d in day_names_list:
+		var rec = com_svc.get_daily_script_record(d)
+		if int(rec.get("is_custom", 0)) == 1 and str(rec.get("custom_script", "")).strip_edges() != "":
+			daily_scripts[d] = str(rec["custom_script"])
+		else:
+			daily_scripts[d] = com_svc.get_suggested_script_for_day(d)
+	phone_settings["today_daily_scripts"] = daily_scripts
+
+
 	# Publish compiled payload to SiteGround relay cache
 	var gateway_url = get_gateway_url()
 	var api_key = get_sync_api_key()

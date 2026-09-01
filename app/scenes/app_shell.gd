@@ -64,6 +64,7 @@ var _is_syncing: bool = false
 var _weather_http_client: HTTPRequest
 
 func _ready() -> void:
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	add_to_group("app_shell")
 	_init_database()
 	

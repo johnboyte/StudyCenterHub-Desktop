@@ -355,11 +355,13 @@ func _style_input_control(control: Control, font_size: int = 18) -> void:
 	control.add_theme_color_override("font_focus_color", Color(0.08, 0.12, 0.18, 1.0))
 	control.add_theme_color_override("font_placeholder_color", Color(0.40, 0.46, 0.54, 1.0))
 
-	if control is LineEdit:
+	if control is LineEdit or control is TextEdit:
 		control.caret_blink = true
 		control.caret_blink_interval = 0.5
-		control.add_theme_color_override("caret_color", Color(0.08, 0.12, 0.18, 1.0))
-		control.add_theme_color_override("font_uneditable_color", Color(0.0, 0.0, 0.0, 1.0))
+		control.add_theme_color_override("caret_color", Color(0.12, 0.16, 0.22, 1.0))
+		control.add_theme_color_override("selection_color", Color(0.70, 0.82, 0.96, 0.6))
+		if control is LineEdit:
+			control.add_theme_color_override("font_uneditable_color", Color(0.0, 0.0, 0.0, 1.0))
 
 	var st = StyleBoxFlat.new()
 	st.bg_color = Color(0.96, 0.97, 0.99, 1.0)
@@ -374,6 +376,20 @@ func _style_input_control(control: Control, font_size: int = 18) -> void:
 	control.add_theme_stylebox_override("normal", st)
 	control.add_theme_stylebox_override("hover", st)
 	control.add_theme_stylebox_override("focus", st_focus)
+
+func _create_selectable_label(text_str: String, font_size: int = 14, text_color: Color = Color(0.12, 0.18, 0.26, 1.0)) -> RichTextLabel:
+	var rtl = RichTextLabel.new()
+	rtl.selection_enabled = true
+	rtl.focus_mode = Control.FOCUS_CLICK
+	rtl.fit_content = true
+	rtl.scroll_active = false
+	rtl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	rtl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	rtl.add_theme_font_size_override("normal_font_size", font_size)
+	rtl.add_theme_color_override("default_color", text_color)
+	rtl.text = text_str
+	return rtl
+
 
 func _style_checkbox(chk: CheckBox) -> void:
 	chk.add_theme_color_override("font_color", Color(0.12, 0.18, 0.26, 1.0))
@@ -1593,6 +1609,11 @@ func _render_ivr_tab() -> void:
 					
 					var active_s = clean_script.call(str(n.get("script_text", "")) if n.get("script_text") != null else "")
 					var suggest_s = clean_script.call(com_svc.generate_suggestion_for_prompt(n_key, selected_ivr_day, date_str))
+					
+					if n_key == "node_1":
+						active_s = clean_script.call(com_svc.get_active_script_for_day(selected_ivr_day))
+						suggest_s = clean_script.call(com_svc.get_suggested_script_for_day(selected_ivr_day))
+						
 					var is_dyn = (n_key == "main_greeting" or d_src != "" or act_type == "staff_directory" or act_type == "submenu")
 					
 					# Fallback to dynamic suggestion if database script_text is blank/null
@@ -1610,6 +1631,7 @@ func _render_ivr_tab() -> void:
 						"shared_label": "",
 						"is_dynamic": is_dyn
 					})
+
 
 		# Build Status Summary Card & Alert Box
 		var active_count = prompts.size()
@@ -1717,6 +1739,8 @@ func _render_ivr_tab() -> void:
 					settings.get("location_directions_text", "")
 				)
 				db.execute("INSERT OR REPLACE INTO app_settings (setting_key, setting_value) VALUES ('PHONE_EXPIRE_SPECIAL_MESSAGE_AT_MIDNIGHT', ?);", [exp_val])
+				var sync_svc = GatewaySyncScript.new(db, self)
+				sync_svc.publish_ivr_config(func(result): pass)
 				_render_ivr_tab()
 			)
 			spec_hbox.add_child(update_spec_btn)
@@ -1853,6 +1877,8 @@ func _render_ivr_tab() -> void:
 				confirm_d.dialog_text = "Activate these script changes?\nThis will change what callers hear for " + p_label + "."
 				confirm_d.confirmed.connect(func():
 					var text_to_save = act_edit.text
+					if p_key == "node_1":
+						com_svc.save_daily_script_template(selected_ivr_day, text_to_save, true)
 					var ok = com_svc.save_active_script(p_key, text_to_save)
 					if ok:
 						unsaved_ivr_scripts.erase(p_key)

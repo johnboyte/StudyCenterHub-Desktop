@@ -1492,7 +1492,7 @@ func generate_suggestion_for_prompt(prompt_key: String, day_name: String, date_s
 			var act_type = str(item.get("action_type", ""))
 			
 			if d_src == "today_house":
-				return generate_today_script(date_str, day_name).strip_edges()
+				return get_suggested_script_for_day(day_name).strip_edges()
 			elif d_src == "weekly_hours":
 				return generate_weekly_hours_script().strip_edges()
 			elif d_src == "upcoming_events":
@@ -1520,6 +1520,73 @@ func generate_suggestion_for_prompt(prompt_key: String, day_name: String, date_s
 			else:
 				return str(item.get("script_text", "")) if item.get("script_text") != null else ""
 	return ""
+
+func get_date_for_weekday_eastern(target_day_name: String) -> Dictionary:
+	var dt_system = Time.get_datetime_dict_from_system(false)
+	var unix_now = Time.get_unix_time_from_datetime_dict(dt_system)
+	
+	var sys_weekday = dt_system["weekday"] # 0=Sun, 1=Mon, ..., 6=Sat
+	var day_names = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+	var target_index = day_names.find(target_day_name)
+	if target_index == -1:
+		target_index = sys_weekday
+		
+	var days_diff = target_index - sys_weekday
+	var target_unix = unix_now + (days_diff * 86400)
+	var target_dt = Time.get_datetime_dict_from_unix_time(target_unix)
+	
+	var months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+	var month_name = months[target_dt["month"] - 1]
+	var day_num = target_dt["day"]
+	var date_str = "%04d-%02d-%02d" % [target_dt["year"], target_dt["month"], target_dt["day"]]
+	var date_full = "%s, %s %d" % [target_day_name, month_name, day_num]
+	
+	return {
+		"date_str": date_str,
+		"weekday": target_day_name,
+		"month_name": month_name,
+		"day_num": day_num,
+		"date_full": date_full
+	}
+
+func render_script_date_tokens(template: String, date_info: Dictionary) -> String:
+	var result = template
+	result = result.replace("{date_full}", str(date_info.get("date_full", "")))
+	result = result.replace("{weekday}", str(date_info.get("weekday", "")))
+	result = result.replace("{month}", str(date_info.get("month_name", "")))
+	result = result.replace("{day}", str(date_info.get("day_num", "")))
+	result = result.replace("{date}", str(date_info.get("month_name", "")) + " " + str(date_info.get("day_num", "")))
+	return result
+
+func get_daily_script_record(day_name: String) -> Dictionary:
+	var res = db.execute("SELECT day_of_week, custom_script, is_custom FROM ivr_daily_scripts WHERE day_of_week = ? LIMIT 1;", [day_name])
+	if res["success"] and res["data"].size() > 0:
+		return res["data"][0]
+	return {"day_of_week": day_name, "custom_script": "", "is_custom": 0}
+
+func get_active_script_for_day(day_name: String) -> String:
+	var rec = get_daily_script_record(day_name)
+	var date_info = get_date_for_weekday_eastern(day_name)
+	if int(rec.get("is_custom", 0)) == 1 and str(rec.get("custom_script", "")).strip_edges() != "":
+		return render_script_date_tokens(str(rec["custom_script"]), date_info)
+	return get_suggested_script_for_day(day_name)
+
+func get_suggested_script_for_day(day_name: String) -> String:
+	var date_info = get_date_for_weekday_eastern(day_name)
+	return generate_today_script(date_info["date_str"], day_name)
+
+func save_daily_script_template(day_name: String, script_text: String, is_custom: bool = true) -> bool:
+	var is_c = 1 if is_custom else 0
+	var res = db.execute("INSERT INTO ivr_daily_scripts (day_of_week, custom_script, is_custom, updated_at) VALUES (?, ?, ?, datetime('now')) ON CONFLICT(day_of_week) DO UPDATE SET custom_script = excluded.custom_script, is_custom = excluded.is_custom, updated_at = datetime('now');", [day_name, script_text, is_c])
+	return res["success"]
+
+func get_all_daily_scripts() -> Dictionary:
+	var days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+	var result = {}
+	for d in days:
+		result[d] = get_active_script_for_day(d)
+	return result
+
 
 func get_prompt_status(prompt_key: String, active_script: String, generated_suggestion: String) -> Dictionary:
 	var active_clean = active_script.strip_edges().replace("\r", "").replace("\n", " ")

@@ -912,9 +912,10 @@ func _setup_recent_activity_card() -> void:
 	card_recent_activity.add_child(vbox)
 
 func _style_input_control(ctrl: Control) -> void:
-	if ctrl is LineEdit:
+	if ctrl is LineEdit or ctrl is TextEdit:
 		ctrl.caret_blink = true
 		ctrl.add_theme_color_override("caret_color", Color(0.12, 0.16, 0.22, 1.0))
+		ctrl.add_theme_color_override("selection_color", Color(0.70, 0.82, 0.96, 0.6))
 		ctrl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
 		ctrl.add_theme_color_override("placeholder_color", Color(0.50, 0.55, 0.65, 1.0))
 		var st = StyleBoxFlat.new()
