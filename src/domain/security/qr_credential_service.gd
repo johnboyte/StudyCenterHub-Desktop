@@ -24,9 +24,11 @@ static func generate_token_hint(raw_token: String) -> String:
 	var h = hash_token(raw_token)
 	return "Pass ***" + h.right(4)
 
-func issue_credential(person_id: int, person_uuid: String) -> Dictionary:
+func issue_credential(person_id: int, person_uuid: String, issued_by_staff_human_id: String = "") -> Dictionary:
 	if not db:
 		return {"success": false, "error": "Database reference unavailable"}
+
+	db.execute("ALTER TABLE participant_qr_credentials ADD COLUMN issued_by_staff_human_id TEXT DEFAULT NULL;")
 
 	var raw_token = generate_secure_token()
 	var token_hash_val = hash_token(raw_token)
@@ -37,12 +39,12 @@ func issue_credential(person_id: int, person_uuid: String) -> Dictionary:
 	var revoke_sql = "UPDATE participant_qr_credentials SET status = 'revoked' WHERE person_id = ? AND status = 'active';"
 	db.execute(revoke_sql, [person_id])
 
-	# 2. Insert new credential with SHA-256 hash and hint
+	# 2. Insert new credential with SHA-256 hash, hint, and audit staff human ID
 	var insert_sql = """
-		INSERT INTO participant_qr_credentials (credential_id, person_id, token_hash, token_hint, status, issued_at)
-		VALUES (?, ?, ?, ?, 'active', datetime('now'));
+		INSERT INTO participant_qr_credentials (credential_id, person_id, token_hash, token_hint, status, issued_at, issued_by_staff_human_id)
+		VALUES (?, ?, ?, ?, 'active', datetime('now'), COALESCE(NULLIF(?, ''), 'SYSTEM'));
 	"""
-	var res = db.execute(insert_sql, [cred_id, person_id, token_hash_val, hint_val])
+	var res = db.execute(insert_sql, [cred_id, person_id, token_hash_val, hint_val, issued_by_staff_human_id])
 	if not res["success"]:
 		return {"success": false, "error": "Failed to store credential hash: " + str(res.get("error", ""))}
 

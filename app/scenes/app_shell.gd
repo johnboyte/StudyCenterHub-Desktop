@@ -83,8 +83,11 @@ func _ready() -> void:
 	_update_date_and_weather()
 	_connect_nav_signals()
 	top_header_bar.resized.connect(_adjust_content_area_offset)
-	_adjust_content_area_offset()
-	switch_view("home")
+	var init_view = OS.get_environment("STUDYCENTERHUB_INITIAL_VIEW")
+	if init_view != "":
+		switch_view(init_view)
+	else:
+		switch_view("home")
 	_start_auto_sync()
 
 func _start_auto_sync() -> void:

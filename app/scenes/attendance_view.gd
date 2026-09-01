@@ -891,19 +891,21 @@ func _refresh_dashboard() -> void:
 	var wday_name = day_names[int(date_dict["weekday"])]
 	var m_name = month_names[int(date_dict["month"]) - 1]
 
-	date_label.text = "%s, %s %d, %d" % [wday_name, m_name, date_dict["day"], date_dict["year"]]
-	btn_date_pick.text = "📅 %02d/%02d/%04d" % [date_dict["month"], date_dict["day"], date_dict["year"]]
+	if date_label: date_label.text = "%s, %s %d, %d" % [wday_name, m_name, date_dict["day"], date_dict["year"]]
+	if btn_date_pick: btn_date_pick.text = "📅 %02d/%02d/%04d" % [date_dict["month"], date_dict["day"], date_dict["year"]]
 
 	var today_str = Time.get_date_string_from_system()
-	if date_str == today_str:
-		viewing_subtitle.text = "Viewing today"
-	else:
-		viewing_subtitle.text = "Viewing " + date_str
+	if viewing_subtitle:
+		if date_str == today_str:
+			viewing_subtitle.text = "Viewing today"
+		else:
+			viewing_subtitle.text = "Viewing " + date_str
 
 	_render_metrics(date_str)
 	_render_checkin_log(date_str)
 
 func _render_metrics(date_str: String) -> void:
+	if not metrics_grid: return
 	for c in metrics_grid.get_children(): c.free()
 
 	var res = db.execute("SELECT a.id, p.primary_role FROM attendance_log a LEFT JOIN people p ON p.id = a.person_id WHERE a.check_in_date = ?;", [date_str])
@@ -972,7 +974,19 @@ func _add_metric_card(title: String, count: int, icon_str: String, bg_col: Color
 	card.add_child(vbox)
 	metrics_grid.add_child(card)
 
+var current_log_sort_by: String = "first_name" # "first_name" or "last_name"
+
+func _style_sort_button(btn: Button, is_active: bool) -> void:
+	var primary_col = _get_active_theme_color()
+	var st = StyleBoxFlat.new()
+	st.bg_color = primary_col if is_active else Color(0.20, 0.26, 0.36, 1.0)
+	st.corner_radius_top_left = 4; st.corner_radius_top_right = 4; st.corner_radius_bottom_left = 4; st.corner_radius_bottom_right = 4
+	st.content_margin_left = 8; st.content_margin_right = 8; st.content_margin_top = 4; st.content_margin_bottom = 4
+	btn.add_theme_stylebox_override("normal", st)
+	btn.add_theme_color_override("font_color", Color(1, 1, 1, 1) if is_active else Color(0.70, 0.78, 0.88, 1.0))
+
 func _render_checkin_log(date_str: String) -> void:
+	if not log_card: return
 	for child in log_card.get_children(): child.queue_free()
 
 	var vbox = VBoxContainer.new(); vbox.add_theme_constant_override("separation", 14)
@@ -982,9 +996,45 @@ func _render_checkin_log(date_str: String) -> void:
 	var head_vbox = VBoxContainer.new(); head_vbox.size_flags_horizontal = SIZE_EXPAND_FILL
 	var title_lbl = Label.new(); title_lbl.text = "Recent Check-ins"; title_lbl.add_theme_font_size_override("font_size", 22); title_lbl.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
 	head_vbox.add_child(title_lbl)
-	var sub_lbl = Label.new(); sub_lbl.text = "All check-ins for the selected date, newest first."; sub_lbl.add_theme_font_size_override("font_size", 16); sub_lbl.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
+	var sub_lbl = Label.new(); sub_lbl.text = "All check-ins for the selected date."; sub_lbl.add_theme_font_size_override("font_size", 16); sub_lbl.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
 	head_vbox.add_child(sub_lbl)
 	header_hbox.add_child(head_vbox)
+
+	var sort_hbox = HBoxContainer.new()
+	sort_hbox.add_theme_constant_override("separation", 6)
+	sort_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+
+	var lbl_sort = Label.new()
+	lbl_sort.text = "SORT BY:"
+	lbl_sort.add_theme_font_size_override("font_size", 12)
+	lbl_sort.add_theme_color_override("font_color", Color(0.70, 0.78, 0.88, 1.0))
+	sort_hbox.add_child(lbl_sort)
+
+	var btn_sort_fn = Button.new()
+	btn_sort_fn.text = "First Name"
+	btn_sort_fn.custom_minimum_size = Vector2(85, 28)
+	btn_sort_fn.add_theme_font_size_override("font_size", 12)
+	_style_sort_button(btn_sort_fn, current_log_sort_by == "first_name")
+	btn_sort_fn.pressed.connect(func():
+		if current_log_sort_by != "first_name":
+			current_log_sort_by = "first_name"
+			_refresh_dashboard()
+	)
+	sort_hbox.add_child(btn_sort_fn)
+
+	var btn_sort_ln = Button.new()
+	btn_sort_ln.text = "Last Name"
+	btn_sort_ln.custom_minimum_size = Vector2(85, 28)
+	btn_sort_ln.add_theme_font_size_override("font_size", 12)
+	_style_sort_button(btn_sort_ln, current_log_sort_by == "last_name")
+	btn_sort_ln.pressed.connect(func():
+		if current_log_sort_by != "last_name":
+			current_log_sort_by = "last_name"
+			_refresh_dashboard()
+	)
+	sort_hbox.add_child(btn_sort_ln)
+
+	header_hbox.add_child(sort_hbox)
 
 	var btn_refresh = Button.new(); btn_refresh.text = "🔄 Refresh"; btn_refresh.custom_minimum_size = Vector2(110, 40)
 	_style_button_high_contrast(btn_refresh, Color(0.20, 0.26, 0.36, 1.0), Color(0.40, 0.55, 0.75, 1.0), 16)
@@ -992,7 +1042,9 @@ func _render_checkin_log(date_str: String) -> void:
 	header_hbox.add_child(btn_refresh)
 	vbox.add_child(header_hbox)
 
-	var res = db.execute("SELECT a.id, a.checkin_uuid, a.human_id, a.check_in_date, a.check_in_time, a.method, a.mode, p.first_name, p.last_name, p.primary_role, p.academic_year, i.short_name AS inst_short, p.profile_photo FROM attendance_log a LEFT JOIN people p ON p.id = a.person_id LEFT JOIN institutions i ON p.institution_id = i.id WHERE a.check_in_date = ? ORDER BY a.id DESC;", [date_str])
+	var order_sql = "ORDER BY p.first_name ASC, p.last_name ASC, a.id DESC;" if current_log_sort_by == "first_name" else "ORDER BY p.last_name ASC, p.first_name ASC, a.id DESC;"
+	var sql = "SELECT a.id, a.checkin_uuid, a.human_id, a.check_in_date, a.check_in_time, a.method, a.mode, p.first_name, p.last_name, p.primary_role, p.academic_year, i.short_name AS inst_short, p.profile_photo FROM attendance_log a LEFT JOIN people p ON p.id = a.person_id LEFT JOIN institutions i ON p.institution_id = i.id WHERE a.check_in_date = ? " + order_sql
+	var res = db.execute(sql, [date_str])
 
 	if res["success"] and res["data"].size() > 0:
 		var scroll = ScrollContainer.new(); scroll.custom_minimum_size = Vector2(0, 340); scroll.size_flags_vertical = SIZE_EXPAND_FILL

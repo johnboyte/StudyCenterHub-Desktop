@@ -19,28 +19,29 @@ func _init(path: String = "") -> void:
 		)
 		
 		var db_name = "studycenterhub_development.db"
+		var gateway_target = "https://dev-gateway.reallife-studycenter.org (Development)"
 		if env == "production":
 			db_name = "studycenterhub_production.db"
-		elif env == "staging":
-			db_name = "studycenterhub_staging.db"
+			gateway_target = "https://app.reallife-studycenter.org (Production)"
 		else:
-			env = "development" # fallback/default
+			env = "development" # canonical fallback
 		
 		db_path = ProjectSettings.globalize_path("user://" + db_name)
-		print("StudyCenterHub environment: ", env)
-		print("Database: ", db_path)
+		print("============================================================")
+		print("[ENVIRONMENT] MODE: ", env.to_upper())
+		print("[ENVIRONMENT] DATABASE PATH: ", db_path)
+		print("[ENVIRONMENT] GATEWAY TARGET: ", gateway_target)
+		print("============================================================")
 	_ensure_db_dir()
 
 static func resolve_environment(explicit_env: String, exec_path: String, cmdline_args: Array) -> String:
 	var clean_env = explicit_env.to_lower().strip_edges()
-	if clean_env == "production" or clean_env == "staging" or clean_env == "development":
+	if clean_env == "production" or clean_env == "development":
 		return clean_env
 	
 	var full_context = (exec_path + " " + " ".join(cmdline_args)).to_lower()
-	if full_context.contains("production") or full_context.contains("studycenterhub-desktop-production"):
+	if full_context.contains("production") or full_context.contains("studycenterhub-desktop-production") or full_context.contains("studycenterhub – production"):
 		return "production"
-	elif full_context.contains("staging") or full_context.contains("rc1"):
-		return "staging"
 	
 	return "development"
 

@@ -34,14 +34,41 @@ func list_people(options: Dictionary = {}) -> Dictionary:
 		sql += " WHERE p.status = ?"
 		args.append(status_filter)
 
-	sql += " ORDER BY p.last_name ASC, p.first_name ASC, p.id ASC;"
+	var sort_by = String(options.get("sort_by", "first_name")).to_lower()
+	if sort_by == "last_name":
+		sql += " ORDER BY p.last_name ASC, p.first_name ASC, p.id ASC;"
+	else:
+		sql += " ORDER BY p.first_name ASC, p.last_name ASC, p.id ASC;"
+
 	var res = db.execute(sql, args)
 	if not res["success"]:
 		return {"success": false, "error": res["error"], "people": []}
 	return {"success": true, "error": "", "people": res["data"]}
 
-func list_active_people() -> Dictionary:
-	return list_people({"status": "active"})
+func list_signed_in_today(options: Dictionary = {}) -> Dictionary:
+	var today_date = Time.get_date_string_from_system()
+	var sql = """
+		SELECT p.*, al.check_in_time, al.check_in_date, i.name AS institution_name
+		FROM attendance_log al
+		JOIN people p ON al.person_id = p.id
+		LEFT JOIN institutions i ON p.institution_id = i.id
+		WHERE al.check_in_date = ?
+	"""
+	var sort_by = String(options.get("sort_by", "first_name")).to_lower()
+	if sort_by == "last_name":
+		sql += " ORDER BY p.last_name ASC, p.first_name ASC, p.id ASC;"
+	else:
+		sql += " ORDER BY p.first_name ASC, p.last_name ASC, p.id ASC;"
+
+	var res = db.execute(sql, [today_date])
+	if not res["success"]:
+		return {"success": false, "error": res["error"], "people": []}
+	return {"success": true, "error": "", "people": res["data"]}
+
+func list_active_people(options: Dictionary = {}) -> Dictionary:
+	var opts = options.duplicate()
+	opts["status"] = "active"
+	return list_people(opts)
 
 func list_pending_people() -> Dictionary:
 	var sql = "SELECT p.*, i.name AS institution_name, i.short_name AS institution_short_name FROM people p LEFT JOIN institutions i ON p.institution_id = i.id WHERE p.status IN ('pending', 'To Be Confirmed') ORDER BY p.last_name ASC, p.first_name ASC, p.id ASC;"
@@ -138,7 +165,11 @@ func search_people(query_raw: String, options: Dictionary = {}) -> Dictionary:
 		sql += " AND status = ?"
 		args.append(status_filter)
 
-	sql += " ORDER BY last_name ASC, first_name ASC, id ASC LIMIT ?;"
+	var sort_by = String(options.get("sort_by", "first_name")).to_lower()
+	if sort_by == "last_name":
+		sql += " ORDER BY p.last_name ASC, p.first_name ASC, p.id ASC LIMIT ?;"
+	else:
+		sql += " ORDER BY p.first_name ASC, p.last_name ASC, p.id ASC LIMIT ?;"
 	args.append(limit_val)
 
 	var res = db.execute(sql, args)

@@ -75,10 +75,11 @@ const DEFAULT_SUBTITLES: Dictionary = {
 }
 
 func receive_navigation_context(params: Dictionary = {}) -> void:
-	if params.get("tab") == "campus_community":
-		active_tab = "campus_community"
+	if params.has("tab"):
+		active_tab = str(params["tab"])
 		if params.has("sub_tab"):
 			cc_admin_sub_tab = str(params["sub_tab"])
+			ivr_sub_tab = str(params["sub_tab"])
 		switch_tab(active_tab)
 	elif params.get("queue_mode", false) == true or params.get("queue_id") == "failed_inbound_events":
 		active_tab = "sync_engine"
@@ -88,6 +89,9 @@ func _ready() -> void:
 	_init_database()
 	_style_card()
 	_connect_tabs()
+	var init_subtab = OS.get_environment("STUDYCENTERHUB_INITIAL_SUBTAB")
+	if init_subtab != "":
+		active_tab = init_subtab
 	
 	# Dynamically instantiate IVR and Sessions tab buttons in TabHBox
 	btn_tab_ivr = Button.new()
@@ -207,7 +211,7 @@ func _ready() -> void:
 	if content_card:
 		content_card.child_order_changed.connect(_setup_scroll_handling)
 
-	switch_tab("modules")
+	switch_tab(active_tab)
 
 func _init_database() -> void:
 	if not db:

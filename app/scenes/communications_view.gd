@@ -782,6 +782,12 @@ func _on_send_message_pressed() -> void:
 
 	if body == "": return
 
+	var res = com_service.send_message_atomic(recipient, channel, body, _get_active_sender_name())
+	if res["success"]:
+		print("Message sent successfully: ", res["message_uuid"])
+		message_body_edit.text = ""
+		_refresh_all_feeds()
+
 func _get_active_sender_name() -> String:
 	if db:
 		var q_sup = db.execute("SELECT setting_value FROM app_settings WHERE setting_key = 'ACTIVE_SUPERVISOR' LIMIT 1;")
@@ -790,12 +796,6 @@ func _get_active_sender_name() -> String:
 			if val != "":
 				return val
 	return "John Boyte"
-
-	var res = com_service.send_message_atomic(recipient, channel, body, _get_active_sender_name())
-	if res["success"]:
-		print("Message sent successfully: ", res["message_uuid"])
-		message_body_edit.text = ""
-		_refresh_all_feeds()
 
 func _initiate_call_dialog(recipient: Dictionary, notes: String) -> void:
 	var fn = str(recipient.get("first_name", ""))
