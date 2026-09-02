@@ -81,11 +81,26 @@ func email_digital_member_pass(person_id: int, sent_by: String = "Staff Administ
 	var apple_res = AppleSvc.generate_apple_wallet_pass(p, raw_token, active_cred_id)
 	var google_res = GoogleSvc.generate_add_to_google_wallet_link(p, raw_token)
 
-	var apple_link = apple_res.get("pkpass_url", "https://checkin.reallife-studycenter.org/wallet/apple/" + str(p.get("person_uuid", "PRT")))
-	var google_link = google_res.get("google_wallet_url", "https://pay.google.com/gp/v/save/" + str(p.get("person_uuid", "PRT")))
+	var apple_success = apple_res.get("success", false) == true
+	var apple_link = str(apple_res.get("pkpass_url", "")).strip_edges()
+	var pkpass_file = str(apple_res.get("pkpass_file", "")).strip_edges()
+
+	var valid_apple_pass = apple_success and apple_link != "" and apple_link.begins_with("https://app.reallife-studycenter.org/upload_pass.php?pass_id=") and pkpass_file != "" and FileAccess.file_exists(pkpass_file)
+
+	if not valid_apple_pass:
+		var err_msg = "The Digital Member Pass could not be generated. Nothing was sent."
+		var err_detail = str(apple_res.get("error", "Unknown pass generation error"))
+		_log_email_communication(p, "Digital Member Pass Attempt", err_msg, sent_by, "failed", err_detail)
+		return {
+			"success": false,
+			"error": err_msg,
+			"reason": "pass_generation_failed"
+		}
 
 	var pass_link = apple_link
-	if pass_link == "": pass_link = google_link
+
+	var google_success = google_res.get("success", false) == true
+	var google_link = str(google_res.get("google_wallet_url", "")).strip_edges() if google_success else ""
 
 	var greeting_name = first_name
 	if greeting_name == "": greeting_name = "Valued Member"
@@ -269,12 +284,31 @@ func sms_digital_member_pass(arg1, arg2 = null, arg3: String = "Staff Administra
 	var apple_res = AppleSvc.generate_apple_wallet_pass(p, raw_token, active_cred_id)
 	var google_res = GoogleSvc.generate_add_to_google_wallet_link(p, raw_token)
 
-	var apple_link = apple_res.get("pkpass_url", "https://checkin.reallife-studycenter.org/wallet/apple/" + str(p.get("person_uuid", "PRT")))
-	var google_link = google_res.get("google_wallet_url", "https://pay.google.com/gp/v/save/" + str(p.get("person_uuid", "PRT")))
+	var apple_success = apple_res.get("success", false) == true
+	var apple_link = str(apple_res.get("pkpass_url", "")).strip_edges()
+	var pkpass_file = str(apple_res.get("pkpass_file", "")).strip_edges()
+
+	var valid_apple_pass = apple_success and apple_link != "" and apple_link.begins_with("https://app.reallife-studycenter.org/upload_pass.php?pass_id=") and pkpass_file != "" and FileAccess.file_exists(pkpass_file)
+
+	if not valid_apple_pass:
+		var err_msg = "The Digital Member Pass could not be generated. Nothing was sent."
+		var err_detail = str(apple_res.get("error", "Unknown pass generation error"))
+		var msg_uuid = "msg_" + _generate_uuid()
+		db.execute("INSERT INTO communications_log (message_uuid, recipient_person_id, recipient_name, recipient_contact, channel, message_body, status, status_detail, sent_by_user) VALUES (?, ?, ?, ?, 'SMS', ?, 'failed', ?, ?);",
+			[msg_uuid, person_id, display_name, phone, "Digital Member Pass SMS", err_detail, sent_by])
+		return {
+			"success": false,
+			"error": err_msg,
+			"reason": "pass_generation_failed"
+		}
+
+	var google_success = google_res.get("success", false) == true
+	var google_link = str(google_res.get("google_wallet_url", "")).strip_edges() if google_success else ""
 
 	var body = "Real Life House Pass for " + display_name + ":\n"
 	body += "Apple Wallet: " + apple_link + "\n"
-	body += "Google Wallet: " + google_link + "\n"
+	if google_link != "":
+		body += "Google Wallet: " + google_link + "\n"
 	body += "Tap the link to save your pass to your phone!"
 
 	# Initial Log Entry & Outbox Event (queued/submitted)

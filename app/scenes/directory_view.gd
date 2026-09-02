@@ -3275,6 +3275,11 @@ func _create_credentials_card(p: Dictionary, p_uuid: String) -> PanelContainer:
 				"Email Address Required",
 				"This member does not have a valid email address. Add or correct the email address before sending the Digital Member Pass."
 			)
+		elif reason == "pass_generation_failed":
+			_show_info_modal(
+				"Digital Member Pass Failed",
+				"The Digital Member Pass could not be generated. Nothing was sent."
+			)
 		elif email_res_val.get("success", false) == true:
 			_show_info_modal(
 				"Digital Member Pass",
@@ -3298,8 +3303,11 @@ func _create_credentials_card(p: Dictionary, p_uuid: String) -> PanelContainer:
 		var com_svc = CommunicationsServiceScript.new(db)
 		var sms_res_val = await com_svc.sms_digital_member_pass(self, int(p.get("id")))
 		btn_sms_pass.disabled = false
+		var sms_reason = sms_res_val.get("reason", "")
 		if sms_res_val.get("success", false):
 			_show_info_modal("Digital Member Pass Texted", "Digital Member Pass has been texted.")
+		elif sms_reason == "pass_generation_failed":
+			_show_info_modal("Digital Member Pass Failed", "The Digital Member Pass could not be generated. Nothing was sent.")
 		else:
 			_show_info_modal("SMS Dispatch Failed", "❌ Failed to send: " + sms_res_val.get("error", "Unknown error"))
 	)

@@ -161,8 +161,23 @@ func generate_apple_wallet_pass(person_data: Dictionary, raw_token: String, cred
 	# Create profile thumbnail images for Apple Wallet pass (locked in for pass face rendering)
 	_create_thumbnail_assets(person_data, temp_pass_dir)
 
-	# Execute sign_pkpass.py helper script
-	var script_path = ProjectSettings.globalize_path("res://src/infrastructure/wallet/sign_pkpass.py")
+	# Ensure user://wallet directory exists
+	var user_wallet_dir = ProjectSettings.globalize_path("user://wallet")
+	DirAccess.make_dir_recursive_absolute(user_wallet_dir)
+
+	# Always ensure runtime sign_pkpass.py exists in user://wallet for OS.execute python3
+	var runtime_script_user = "user://wallet/sign_pkpass.py"
+	var script_path = ProjectSettings.globalize_path(runtime_script_user)
+	if not FileAccess.file_exists(script_path):
+		var res_f = FileAccess.open("res://src/infrastructure/wallet/sign_pkpass.py", FileAccess.READ)
+		if res_f:
+			var script_content = res_f.get_as_text()
+			res_f.close()
+			var user_f = FileAccess.open(runtime_script_user, FileAccess.WRITE)
+			if user_f:
+				user_f.store_string(script_content)
+				user_f.close()
+
 	var output_pkpass = ProjectSettings.globalize_path("user://wallet/" + serial + ".pkpass")
 	var output = []
 	var exit_code = OS.execute("python3", [script_path, temp_pass_dir, cert_path, key_path, wwdr_path, output_pkpass], output)
