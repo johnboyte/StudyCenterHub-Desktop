@@ -37,6 +37,10 @@ cp -f "$PROJECT_DIR/gateway/config.php" "$DEV_DEPLOY_DIR/config.php"
 cp -f "$PROJECT_DIR/gateway/mail.php" "$PROD_DEPLOY_DIR/mail.php"
 cp -f "$PROJECT_DIR/gateway/mail.php" "$DEV_DEPLOY_DIR/mail.php"
 
+# 5. Copy upload_pass.php PassKit relay to both deployment targets
+cp -f "$PROJECT_DIR/gateway/upload_pass.php" "$PROD_DEPLOY_DIR/upload_pass.php"
+cp -f "$PROJECT_DIR/gateway/upload_pass.php" "$DEV_DEPLOY_DIR/upload_pass.php"
+
 echo "✅ Production Gateway Bundle Created at: $PROD_DEPLOY_DIR"
 echo "✅ Development Gateway Bundle Created at: $DEV_DEPLOY_DIR"
 echo "=============================================================================="
