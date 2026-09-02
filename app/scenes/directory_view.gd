@@ -1210,10 +1210,8 @@ func _create_kpi_card(title: String, val_text: String, accent_color: Color) -> P
 	t_lbl.add_theme_color_override("font_color", Color(0.68, 0.78, 0.90, 1.0))
 	vbox.add_child(t_lbl)
 
-	var v_lbl = Label.new()
-	v_lbl.text = val_text
-	v_lbl.add_theme_font_size_override("font_size", 19)
-	v_lbl.add_theme_color_override("font_color", accent_color)
+	var helper = load("res://src/ui/components/selectable_label_helper.gd").new()
+	var v_lbl = helper.create_selectable_line(val_text, 19, accent_color)
 	vbox.add_child(v_lbl)
 
 	panel.add_child(vbox)

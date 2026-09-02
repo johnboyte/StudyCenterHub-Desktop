@@ -1162,7 +1162,8 @@ func generate_today_script(custom_date: String = "", custom_weekday: String = ""
 		var day_names = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
 		weekday_name = day_names[dt.weekday]
 		
-	var script = "Today is " + weekday_name + ". "
+	var date_info = get_date_for_weekday_eastern(weekday_name)
+	var script = "Today is " + str(date_info.get("date_full", weekday_name)) + ". "
 	
 	var sessions_res = db.execute("""
 		SELECT s.title, s.description, s.start_time, s.end_time 
@@ -1598,12 +1599,36 @@ func get_daily_script_record(day_name: String) -> Dictionary:
 		return res["data"][0]
 	return {"day_of_week": day_name, "custom_script": "", "is_custom": 0}
 
+func _normalize_script_date_opening(script_text: String) -> String:
+	var s = script_text.strip_edges()
+	if s == "": return "Today is {date_full}."
+	if s.begins_with("Today is {date_full}."):
+		return s
+	
+	# Strip any existing literal "Today is [Day]..." or "Today is [Day], [Month] [Num]..." opening
+	var days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+	for d in days:
+		if s.begins_with("Today is " + d + ".") or s.begins_with("Today is " + d + ","):
+			var dot_pos = s.find(".")
+			if dot_pos != -1:
+				s = s.substr(dot_pos + 1).strip_edges()
+				break
+
+	if s != "":
+		return "Today is {date_full}. " + s
+	return "Today is {date_full}."
+
 func get_active_script_for_day(day_name: String) -> String:
 	var rec = get_daily_script_record(day_name)
 	var date_info = get_date_for_weekday_eastern(day_name)
+	var raw_script = ""
 	if int(rec.get("is_custom", 0)) == 1 and str(rec.get("custom_script", "")).strip_edges() != "":
-		return render_script_date_tokens(str(rec["custom_script"]), date_info)
-	return get_suggested_script_for_day(day_name)
+		raw_script = str(rec["custom_script"])
+	else:
+		raw_script = get_suggested_script_for_day(day_name)
+	
+	var norm_script = _normalize_script_date_opening(raw_script)
+	return render_script_date_tokens(norm_script, date_info)
 
 func get_suggested_script_for_day(day_name: String) -> String:
 	var date_info = get_date_for_weekday_eastern(day_name)
@@ -1611,7 +1636,8 @@ func get_suggested_script_for_day(day_name: String) -> String:
 
 func save_daily_script_template(day_name: String, script_text: String, is_custom: bool = true) -> bool:
 	var is_c = 1 if is_custom else 0
-	var res = db.execute("INSERT INTO ivr_daily_scripts (day_of_week, custom_script, is_custom, updated_at) VALUES (?, ?, ?, datetime('now')) ON CONFLICT(day_of_week) DO UPDATE SET custom_script = excluded.custom_script, is_custom = excluded.is_custom, updated_at = datetime('now');", [day_name, script_text, is_c])
+	var norm_script = _normalize_script_date_opening(script_text)
+	var res = db.execute("INSERT INTO ivr_daily_scripts (day_of_week, custom_script, is_custom, updated_at) VALUES (?, ?, ?, datetime('now')) ON CONFLICT(day_of_week) DO UPDATE SET custom_script = excluded.custom_script, is_custom = excluded.is_custom, updated_at = datetime('now');", [day_name, norm_script, is_c])
 	return res["success"]
 
 func get_all_daily_scripts() -> Dictionary:

@@ -289,16 +289,14 @@ func _render_unresolved_inbound_sms_item(vbox: VBoxContainer, item: Dictionary) 
 	var body = str(item.get("raw_body", item.get("transcription", "")))
 	var recv_at = str(item.get("received_at", item.get("created_at", "")))
 
-	var head = Label.new(); head.text = "💬 Inbound SMS Text from " + phone
-	head.add_theme_font_size_override("font_size", 16); head.add_theme_color_override("font_color", Color(0.12, 0.53, 0.90, 1.0))
+	var helper = load("res://src/ui/components/selectable_label_helper.gd").new()
+	var head = helper.create_selectable_line("💬 Inbound SMS Text from " + phone, 16, Color(0.12, 0.53, 0.90, 1.0))
 	vbox.add_child(head)
 
-	var time_lbl = Label.new(); time_lbl.text = "Received: " + recv_at + "  •  Follow-Up Status: Unresolved"
-	time_lbl.add_theme_font_size_override("font_size", 13); time_lbl.add_theme_color_override("font_color", Color(0.45, 0.50, 0.60, 1.0))
+	var time_lbl = helper.create_selectable_line("Received: " + recv_at + "  •  Follow-Up Status: Unresolved", 13, Color(0.45, 0.50, 0.60, 1.0))
 	vbox.add_child(time_lbl)
 
-	var msg_lbl = Label.new(); msg_lbl.text = "Text Message: \"" + body + "\""
-	msg_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD; msg_lbl.add_theme_font_size_override("font_size", 14)
+	var msg_lbl = helper.create_selectable_text("Text Message: \"" + body + "\"", 14, Color(0.12, 0.18, 0.26, 1.0), 3)
 	vbox.add_child(msg_lbl)
 
 	var reply_edit = TextEdit.new(); reply_edit.placeholder_text = "Type SMS reply to constituent..."; reply_edit.custom_minimum_size = Vector2(0, 80)

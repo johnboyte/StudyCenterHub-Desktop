@@ -381,18 +381,11 @@ func _style_input_control(control: Control, font_size: int = 18) -> void:
 	control.add_theme_stylebox_override("hover", st)
 	control.add_theme_stylebox_override("focus", st_focus)
 
-func _create_selectable_label(text_str: String, font_size: int = 14, text_color: Color = Color(0.12, 0.18, 0.26, 1.0)) -> RichTextLabel:
-	var rtl = RichTextLabel.new()
-	rtl.selection_enabled = true
-	rtl.focus_mode = Control.FOCUS_CLICK
-	rtl.fit_content = true
-	rtl.scroll_active = false
-	rtl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	rtl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	rtl.add_theme_font_size_override("normal_font_size", font_size)
-	rtl.add_theme_color_override("default_color", text_color)
-	rtl.text = text_str
-	return rtl
+func _create_selectable_label(text_str: String, font_size: int = 14, text_color: Color = Color(0.12, 0.18, 0.26, 1.0)) -> Control:
+	var helper = load("res://src/ui/components/selectable_label_helper.gd").new()
+	if text_str.contains("\n") or text_str.length() > 60:
+		return helper.create_selectable_text(text_str, font_size, text_color)
+	return helper.create_selectable_line(text_str, font_size, text_color)
 
 
 func _style_checkbox(chk: CheckBox) -> void:
