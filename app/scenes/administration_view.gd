@@ -1,15 +1,19 @@
 extends "res://app/scenes/standard_page_container.gd"
 
 const static_voices = [
-	{"id": "Polly.Kimberly-Neural", "label": "Kimberly", "gender": "Female", "language": "en-US"},
-	{"id": "Polly.Joanna-Neural", "label": "Joanna", "gender": "Female", "language": "en-US"},
-	{"id": "Polly.Kendra-Neural", "label": "Kendra", "gender": "Female", "language": "en-US"},
-	{"id": "Polly.Salli-Neural", "label": "Salli", "gender": "Female", "language": "en-US"},
-	{"id": "Polly.Ruth-Neural", "label": "Ruth", "gender": "Female", "language": "en-US"},
-	{"id": "Polly.Amy-Neural", "label": "Amy", "gender": "Female", "language": "en-GB"},
-	{"id": "Polly.Olivia-Neural", "label": "Olivia", "gender": "Female", "language": "en-US"},
-	{"id": "Polly.Lupe-Neural", "label": "Lupe", "gender": "Female", "language": "en-US"},
-	{"id": "Polly.Matthew-Neural", "label": "Matthew", "gender": "Male", "language": "en-US"}
+	{"id": "Polly.Joanna-Generative", "label": "Joanna — Generative", "gender": "Female", "language": "en-US"},
+	{"id": "Polly.Danielle-Generative", "label": "Danielle — Generative", "gender": "Female", "language": "en-US"},
+	{"id": "Polly.Matthew-Generative", "label": "Matthew — Generative", "gender": "Male", "language": "en-US"},
+	{"id": "Polly.Stephen-Generative", "label": "Stephen — Generative", "gender": "Male", "language": "en-US"},
+	{"id": "Polly.Kimberly-Neural", "label": "Kimberly — Neural", "gender": "Female", "language": "en-US"},
+	{"id": "Polly.Joanna-Neural", "label": "Joanna — Neural", "gender": "Female", "language": "en-US"},
+	{"id": "Polly.Kendra-Neural", "label": "Kendra — Neural", "gender": "Female", "language": "en-US"},
+	{"id": "Polly.Salli-Neural", "label": "Salli — Neural", "gender": "Female", "language": "en-US"},
+	{"id": "Polly.Ruth-Neural", "label": "Ruth — Neural", "gender": "Female", "language": "en-US"},
+	{"id": "Polly.Amy-Neural", "label": "Amy — Neural", "gender": "Female", "language": "en-GB"},
+	{"id": "Polly.Olivia-Neural", "label": "Olivia — Neural", "gender": "Female", "language": "en-US"},
+	{"id": "Polly.Lupe-Neural", "label": "Lupe — Neural", "gender": "Female", "language": "en-US"},
+	{"id": "Polly.Matthew-Neural", "label": "Matthew — Neural", "gender": "Male", "language": "en-US"}
 ]
 
 ## Administration & Platform Control Center View (ADM-SPR1-001)
@@ -2226,12 +2230,26 @@ func _render_ivr_tab() -> void:
 		var voice_lbl = Label.new(); voice_lbl.text = "Neural TTS Voice: "; voice_lbl.custom_minimum_size = Vector2(180, 0); voice_lbl.add_theme_font_size_override("font_size", 15); voice_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
 		var voice_opt = OptionButton.new(); voice_opt.custom_minimum_size = Vector2(300, 36); _style_input_control(voice_opt, 15)
 		
+		var stored_voice_name = str(settings.get("voice_name", ""))
+		var selected_voice_idx = -1
 		for idx in range(static_voices.size()):
 			var v = static_voices[idx]
 			voice_opt.add_item(v["label"] + " (" + v["gender"] + ")", idx)
 			voice_opt.set_item_metadata(idx, v["id"])
-			if settings.has("voice_name") and v["id"] == settings["voice_name"]:
-				voice_opt.selected = idx
+			if stored_voice_name != "" and v["id"] == stored_voice_name:
+				selected_voice_idx = idx
+		
+		if selected_voice_idx != -1:
+			voice_opt.selected = selected_voice_idx
+		elif stored_voice_name != "":
+			for idx in range(static_voices.size()):
+				var v = static_voices[idx]
+				var base_stored = stored_voice_name.split("-")[0]
+				var base_v = str(v["id"]).split("-")[0]
+				if base_stored == base_v:
+					voice_opt.selected = idx
+					break
+
 		voice_hbox.add_child(voice_lbl); voice_hbox.add_child(voice_opt)
 		gen_vbox.add_child(voice_hbox)
 		
@@ -2272,15 +2290,19 @@ func _render_ivr_tab() -> void:
 				return
 			
 			var voice_id = ""
+			var voice_label = "Selected Voice"
 			if voice_opt.selected > -1:
-				voice_id = voice_opt.get_item_metadata(voice_opt.selected)
+				voice_id = str(voice_opt.get_item_metadata(voice_opt.selected))
+				voice_label = str(voice_opt.get_item_text(voice_opt.selected))
 			
-			DisplayServer.tts_stop()
 			var txt = settings.get("automated_greeter_tts", "")
-			if voice_id == "" or voice_id.begins_with("mock_"):
-				var play_dlg = AcceptDialog.new(); play_dlg.dialog_text = "📢 Greeting Preview:\n\n\"" + txt + "\"\n\n(Voice: " + str(voice_opt.get_item_text(voice_opt.selected)) + ")"; add_child(play_dlg); play_dlg.popup_centered()
-			else:
-				DisplayServer.tts_speak(txt, voice_id)
+			var play_dlg = AcceptDialog.new()
+			play_dlg.title = "📢 Live Cloud Voice Status"
+			play_dlg.dialog_text = "📞 Live Cloud Text-to-Speech Voice:\n\nVoice Engine: " + voice_label + "\nVoice Identifier: " + voice_id + "\n\nScript Text:\n\"" + txt + "\"\n\nℹ️ This high-fidelity cloud voice is synthesized live by Twilio whenever callers dial into Real Life House.\n\nSave settings and call the phone system to test the live voice, or upload a custom recorded audio file above to play a local recording override."
+			play_dlg.dialog_hide_on_ok = true
+			play_dlg.close_requested.connect(func(): play_dlg.queue_free())
+			add_child(play_dlg)
+			play_dlg.popup_centered()
 		)
 		
 		upload_btn.pressed.connect(func():

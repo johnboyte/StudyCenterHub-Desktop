@@ -1040,6 +1040,15 @@ func get_phone_settings() -> Dictionary:
 				"PHONE_TODAY_SPECIAL_MESSAGE": dict["today_special_message"] = val
 				"PHONE_TODAY_CUSTOM_SCRIPT": dict["today_custom_script"] = val
 				"PHONE_LOCATION_DIRECTIONS_TEXT": dict["location_directions_text"] = val
+
+	var ivr_res = db.execute("SELECT voice_name, language FROM ivr_settings WHERE id = 1 LIMIT 1;")
+	if ivr_res["success"] and ivr_res["data"].size() > 0:
+		dict["voice_name"] = str(ivr_res["data"][0].get("voice_name", "Polly.Kimberly-Neural"))
+		dict["language"] = str(ivr_res["data"][0].get("language", "en-US"))
+	else:
+		dict["voice_name"] = "Polly.Kimberly-Neural"
+		dict["language"] = "en-US"
+
 	return dict
 
 func save_phone_settings(on_call: String, rings: int, tts_active: bool, tts_text: String, audio_base64: String) -> bool:
