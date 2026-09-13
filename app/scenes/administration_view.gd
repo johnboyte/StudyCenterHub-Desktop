@@ -1,19 +1,10 @@
 extends "res://app/scenes/standard_page_container.gd"
 
 const static_voices = [
-	{"id": "Polly.Joanna-Generative", "label": "Joanna — Generative", "gender": "Female", "language": "en-US"},
-	{"id": "Polly.Danielle-Generative", "label": "Danielle — Generative", "gender": "Female", "language": "en-US"},
-	{"id": "Polly.Matthew-Generative", "label": "Matthew — Generative", "gender": "Male", "language": "en-US"},
-	{"id": "Polly.Stephen-Generative", "label": "Stephen — Generative", "gender": "Male", "language": "en-US"},
-	{"id": "Polly.Kimberly-Neural", "label": "Kimberly — Neural", "gender": "Female", "language": "en-US"},
-	{"id": "Polly.Joanna-Neural", "label": "Joanna — Neural", "gender": "Female", "language": "en-US"},
-	{"id": "Polly.Kendra-Neural", "label": "Kendra — Neural", "gender": "Female", "language": "en-US"},
-	{"id": "Polly.Salli-Neural", "label": "Salli — Neural", "gender": "Female", "language": "en-US"},
-	{"id": "Polly.Ruth-Neural", "label": "Ruth — Neural", "gender": "Female", "language": "en-US"},
-	{"id": "Polly.Amy-Neural", "label": "Amy — Neural", "gender": "Female", "language": "en-GB"},
-	{"id": "Polly.Olivia-Neural", "label": "Olivia — Neural", "gender": "Female", "language": "en-US"},
-	{"id": "Polly.Lupe-Neural", "label": "Lupe — Neural", "gender": "Female", "language": "en-US"},
-	{"id": "Polly.Matthew-Neural", "label": "Matthew — Neural", "gender": "Male", "language": "en-US"}
+	{"id": "Polly.Joanna-Generative", "label": "Joanna Generative", "gender": "Female", "language": "en-US"},
+	{"id": "Polly.Danielle-Generative", "label": "Danielle Generative", "gender": "Female", "language": "en-US"},
+	{"id": "Polly.Matthew-Generative", "label": "Matthew Generative", "gender": "Male", "language": "en-US"},
+	{"id": "Polly.Stephen-Generative", "label": "Stephen Generative", "gender": "Male", "language": "en-US"}
 ]
 
 ## Administration & Platform Control Center View (ADM-SPR1-001)
@@ -2234,7 +2225,7 @@ func _render_ivr_tab() -> void:
 		var selected_voice_idx = -1
 		for idx in range(static_voices.size()):
 			var v = static_voices[idx]
-			voice_opt.add_item(v["label"] + " (" + v["gender"] + ")", idx)
+			voice_opt.add_item(v["label"] + " — " + v["gender"], idx)
 			voice_opt.set_item_metadata(idx, v["id"])
 			if stored_voice_name != "" and v["id"] == stored_voice_name:
 				selected_voice_idx = idx
@@ -2242,13 +2233,16 @@ func _render_ivr_tab() -> void:
 		if selected_voice_idx != -1:
 			voice_opt.selected = selected_voice_idx
 		elif stored_voice_name != "":
-			for idx in range(static_voices.size()):
-				var v = static_voices[idx]
-				var base_stored = stored_voice_name.split("-")[0]
-				var base_v = str(v["id"]).split("-")[0]
-				if base_stored == base_v:
-					voice_opt.selected = idx
-					break
+			if stored_voice_name.contains("Matthew"):
+				voice_opt.selected = 2
+			elif stored_voice_name.contains("Danielle"):
+				voice_opt.selected = 1
+			elif stored_voice_name.contains("Stephen"):
+				voice_opt.selected = 3
+			else:
+				voice_opt.selected = 0
+		else:
+			voice_opt.selected = 0
 
 		voice_hbox.add_child(voice_lbl); voice_hbox.add_child(voice_opt)
 		gen_vbox.add_child(voice_hbox)
@@ -2296,13 +2290,10 @@ func _render_ivr_tab() -> void:
 				voice_label = str(voice_opt.get_item_text(voice_opt.selected))
 			
 			var txt = settings.get("automated_greeter_tts", "")
-			var play_dlg = AcceptDialog.new()
-			play_dlg.title = "📢 Live Cloud Voice Status"
-			play_dlg.dialog_text = "📞 Live Cloud Text-to-Speech Voice:\n\nVoice Engine: " + voice_label + "\nVoice Identifier: " + voice_id + "\n\nScript Text:\n\"" + txt + "\"\n\nℹ️ This high-fidelity cloud voice is synthesized live by Twilio whenever callers dial into Real Life House.\n\nSave settings and call the phone system to test the live voice, or upload a custom recorded audio file above to play a local recording override."
-			play_dlg.dialog_hide_on_ok = true
-			play_dlg.close_requested.connect(func(): play_dlg.queue_free())
-			add_child(play_dlg)
-			play_dlg.popup_centered()
+			if txt.strip_edges() == "":
+				txt = "Thank you for calling Real Life House."
+
+			_preview_cloud_tts_voice(voice_id, voice_label, txt)
 		)
 		
 		upload_btn.pressed.connect(func():
@@ -2372,8 +2363,39 @@ func _render_ivr_tab() -> void:
 		
 		main_content_vbox.add_child(gen_card)
 
-	for c in content_card.get_children(): c.free()
+	for c in content_card.get_children(): c.queue_free()
 	content_card.add_child(root_vbox)
+
+func _preview_cloud_tts_voice(voice_id: String, voice_label: String, txt: String) -> void:
+	var gateway_host = "app.reallife-studycenter.org"
+	var url = "https://" + gateway_host + "/api/v1/tts/preview?voice=" + voice_id.uri_encode() + "&text=" + txt.uri_encode()
+	
+	var http = HTTPRequest.new()
+	add_child(http)
+	http.timeout = 5.0
+	http.request_completed.connect(func(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray):
+		if result == HTTPRequest.RESULT_SUCCESS and response_code == 200 and body.size() > 100:
+			var stream = AudioStreamMP3.new()
+			stream.data = body
+			var player = AudioStreamPlayer.new()
+			player.stream = stream
+			add_child(player)
+			player.play()
+			player.finished.connect(func():
+				player.queue_free()
+				http.queue_free()
+			)
+		else:
+			http.queue_free()
+			var play_dlg = AcceptDialog.new()
+			play_dlg.title = "📢 Live Cloud Voice Status"
+			play_dlg.dialog_text = "📞 Live Cloud Text-to-Speech Voice:\n\nVoice Engine: " + voice_label + "\nVoice Identifier: " + voice_id + "\n\nScript Text:\n\"" + txt + "\"\n\nℹ️ This high-fidelity cloud voice is synthesized live by Twilio whenever callers dial into Real Life House.\n\nSave settings and call the phone system to test the live voice, or upload a custom recorded audio file above to play a local recording override."
+			play_dlg.dialog_hide_on_ok = true
+			play_dlg.close_requested.connect(func(): play_dlg.queue_free())
+			add_child(play_dlg)
+			play_dlg.popup_centered()
+	)
+	http.request(url)
 
 func _open_voice_recording_dialog(callback: Callable) -> void:
 	var backdrop = ColorRect.new()
