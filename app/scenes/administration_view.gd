@@ -2265,7 +2265,7 @@ func _render_ivr_tab() -> void:
 		
 		var rec_hbox = HBoxContainer.new()
 		rec_hbox.add_theme_constant_override("separation", 12)
-		var preview_btn = Button.new(); preview_btn.text = "🔊 Preview Greeting"; preview_btn.custom_minimum_size = Vector2(160, 34); preview_btn.add_theme_font_size_override("font_size", 14)
+		var preview_btn = Button.new(); preview_btn.text = "📞 Preview Live Voice"; preview_btn.custom_minimum_size = Vector2(180, 34); preview_btn.add_theme_font_size_override("font_size", 14)
 		var upload_btn = Button.new(); upload_btn.text = "📤 Upload Audio (.mp3/.wav)"; upload_btn.custom_minimum_size = Vector2(200, 34); upload_btn.add_theme_font_size_override("font_size", 14)
 		var rec_btn = Button.new(); rec_btn.text = "🎤 Record Audio"; rec_btn.custom_minimum_size = Vector2(150, 34); rec_btn.add_theme_font_size_override("font_size", 14)
 		
@@ -2283,8 +2283,8 @@ func _render_ivr_tab() -> void:
 				_play_audio_from_base64(active_audio_base64)
 				return
 			
-			var voice_id = ""
-			var voice_label = "Selected Voice"
+			var voice_id = "Polly.Joanna-Generative"
+			var voice_label = "Joanna Generative"
 			if voice_opt.selected > -1:
 				voice_id = str(voice_opt.get_item_metadata(voice_opt.selected))
 				voice_label = str(voice_opt.get_item_text(voice_opt.selected))
@@ -2293,9 +2293,13 @@ func _render_ivr_tab() -> void:
 			if txt.strip_edges() == "":
 				txt = "Thank you for calling Real Life House."
 
-			_preview_cloud_tts_voice(voice_id, voice_label, txt)
+			var oc_person_id = ""
+			if oc_opt.selected > 0:
+				oc_person_id = str(oc_opt.get_item_id(oc_opt.selected))
+
+			_trigger_twilio_live_preview_call(voice_id, voice_label, txt, oc_person_id)
 		)
-		
+
 		upload_btn.pressed.connect(func():
 			var fd = FileDialog.new()
 			fd.access = FileDialog.ACCESS_FILESYSTEM
@@ -2366,36 +2370,134 @@ func _render_ivr_tab() -> void:
 	for c in content_card.get_children(): c.queue_free()
 	content_card.add_child(root_vbox)
 
-func _preview_cloud_tts_voice(voice_id: String, voice_label: String, txt: String) -> void:
-	var gateway_host = "app.reallife-studycenter.org"
-	var url = "https://" + gateway_host + "/api/v1/tts/preview?voice=" + voice_id.uri_encode() + "&text=" + txt.uri_encode()
+func _get_preview_target_phone(on_call_person_id: String = "") -> String:
+	if on_call_person_id != "" and on_call_person_id != "0":
+		var res = db.execute("SELECT phone_mobile, phone_home FROM people WHERE id = ? LIMIT 1;", [on_call_person_id])
+		if res["success"] and res["data"].size() > 0:
+			var p = res["data"][0]
+			var ph = str(p.get("phone_mobile", "")).strip_edges()
+			if ph == "" or ph == "null" or ph == "<null>":
+				ph = str(p.get("phone_home", "")).strip_edges()
+			if ph != "" and ph != "null" and ph != "<null>":
+				return ph
+	
+	var staff_res = db.execute("SELECT phone_mobile, phone_home FROM people WHERE LOWER(primary_role) IN ('staff', 'intern', 'volunteer') AND (phone_mobile != '' OR phone_home != '') ORDER BY id ASC LIMIT 1;")
+	if staff_res["success"] and staff_res["data"].size() > 0:
+		var p = staff_res["data"][0]
+		var ph = str(p.get("phone_mobile", "")).strip_edges()
+		if ph == "" or ph == "null" or ph == "<null>":
+			ph = str(p.get("phone_home", "")).strip_edges()
+		if ph != "" and ph != "null" and ph != "<null>":
+			return ph
+
+	var default_ph = _get_setting_string("STAFF_PHONE_NUMBER", "")
+	return default_ph
+
+func _trigger_twilio_live_preview_call(voice_id: String, voice_label: String, txt: String, on_call_person_id: String = "") -> void:
+	var target_phone = _get_preview_target_phone(on_call_person_id)
+	_show_preview_call_dialog(voice_id, voice_label, txt, target_phone)
+
+func _show_preview_call_dialog(voice_id: String, voice_label: String, txt: String, initial_phone: String) -> void:
+	var dlg = ConfirmationDialog.new()
+	dlg.title = "📞 Preview Live Voice via Twilio Call"
+	dlg.dialog_hide_on_ok = true
+	
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 10)
+	
+	var info_lbl = Label.new()
+	info_lbl.text = "Twilio will place a short test call to speak your greeting script using the selected unsaved voice:\n\nVoice: " + voice_label + " (" + voice_id + ")\n\nEnter staff/user phone number to receive the test call:"
+	info_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vbox.add_child(info_lbl)
+	
+	var phone_edit = LineEdit.new()
+	phone_edit.text = initial_phone
+	phone_edit.placeholder_text = "+1 (864) 555-0199"
+	phone_edit.caret_blink = true
+	phone_edit.add_theme_color_override("caret_color", Color(0.12, 0.16, 0.22, 1.0))
+	_style_input_control(phone_edit, 15)
+	vbox.add_child(phone_edit)
+	
+	dlg.add_child(vbox)
+	dlg.ok_button_text = "📞 Start Test Call"
+	
+	dlg.confirmed.connect(func():
+		var ph = phone_edit.text.strip_edges()
+		dlg.queue_free()
+		if ph == "":
+			var err_dlg = AcceptDialog.new()
+			err_dlg.title = "Missing Phone Number"
+			err_dlg.dialog_text = "Please enter a valid phone number to receive the preview call."
+			err_dlg.dialog_hide_on_ok = true
+			err_dlg.close_requested.connect(func(): err_dlg.queue_free())
+			add_child(err_dlg)
+			err_dlg.popup_centered()
+			return
+			
+		_dispatch_preview_call(voice_id, voice_label, txt, ph)
+	)
+	dlg.close_requested.connect(func(): dlg.queue_free())
+	add_child(dlg)
+	dlg.popup_centered(Vector2i(480, 240))
+
+func _dispatch_preview_call(voice_id: String, voice_label: String, txt: String, to_phone: String) -> void:
+	var gateway_url = _get_setting_string("GATEWAY_SYNC_URL", "https://app.reallife-studycenter.org").strip_edges()
+	if gateway_url.ends_with("/"):
+		gateway_url = gateway_url.left(gateway_url.length() - 1)
+	var api_key = _get_setting_string("GATEWAY_SYNC_API_KEY", "SCH_SYNC_KEY_PLACEHOLDER_8f3d").strip_edges()
+	
+	var url = gateway_url + "/api/v1/tts/preview-call"
+	var headers = PackedStringArray([
+		"Content-Type: application/json",
+		"X-Sync-Api-Key: " + api_key
+	])
+	var payload = JSON.stringify({
+		"voice": voice_id,
+		"text": txt,
+		"to": to_phone
+	})
 	
 	var http = HTTPRequest.new()
 	add_child(http)
-	http.timeout = 5.0
+	http.timeout = 10.0
 	http.request_completed.connect(func(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray):
-		if result == HTTPRequest.RESULT_SUCCESS and response_code == 200 and body.size() > 100:
-			var stream = AudioStreamMP3.new()
-			stream.data = body
-			var player = AudioStreamPlayer.new()
-			player.stream = stream
-			add_child(player)
-			player.play()
-			player.finished.connect(func():
-				player.queue_free()
-				http.queue_free()
-			)
+		http.queue_free()
+		var resp_text = body.get_string_from_utf8()
+		var json = JSON.parse_string(resp_text) if resp_text != "" else null
+		
+		if result == HTTPRequest.RESULT_SUCCESS and response_code == 200 and json and json.get("success", false) == true:
+			var ok_dlg = AcceptDialog.new()
+			ok_dlg.title = "📞 Twilio Test Call Started"
+			ok_dlg.dialog_text = "Preview call started using " + voice_label + ".\nTwilio is calling " + to_phone + " now."
+			ok_dlg.dialog_hide_on_ok = true
+			ok_dlg.close_requested.connect(func(): ok_dlg.queue_free())
+			add_child(ok_dlg)
+			ok_dlg.popup_centered()
 		else:
-			http.queue_free()
-			var play_dlg = AcceptDialog.new()
-			play_dlg.title = "📢 Live Cloud Voice Status"
-			play_dlg.dialog_text = "📞 Live Cloud Text-to-Speech Voice:\n\nVoice Engine: " + voice_label + "\nVoice Identifier: " + voice_id + "\n\nScript Text:\n\"" + txt + "\"\n\nℹ️ This high-fidelity cloud voice is synthesized live by Twilio whenever callers dial into Real Life House.\n\nSave settings and call the phone system to test the live voice, or upload a custom recorded audio file above to play a local recording override."
-			play_dlg.dialog_hide_on_ok = true
-			play_dlg.close_requested.connect(func(): play_dlg.queue_free())
-			add_child(play_dlg)
-			play_dlg.popup_centered()
+			var err_msg = "Failed to start preview call."
+			if json and json.has("error"):
+				err_msg = str(json["error"])
+			elif response_code > 0:
+				err_msg += " (HTTP " + str(response_code) + ")"
+			
+			var err_dlg = AcceptDialog.new()
+			err_dlg.title = "❌ Voice Preview Failed"
+			err_dlg.dialog_text = "Twilio Preview Call Error:\n\n" + err_msg
+			err_dlg.dialog_hide_on_ok = true
+			err_dlg.close_requested.connect(func(): err_dlg.queue_free())
+			add_child(err_dlg)
+			err_dlg.popup_centered()
 	)
-	http.request(url)
+	var err = http.request(url, headers, HTTPClient.METHOD_POST, payload)
+	if err != OK:
+		http.queue_free()
+		var err_dlg = AcceptDialog.new()
+		err_dlg.title = "❌ Request Error"
+		err_dlg.dialog_text = "Unable to connect to gateway (Error code: " + str(err) + ")."
+		err_dlg.dialog_hide_on_ok = true
+		err_dlg.close_requested.connect(func(): err_dlg.queue_free())
+		add_child(err_dlg)
+		err_dlg.popup_centered()
 
 func _open_voice_recording_dialog(callback: Callable) -> void:
 	var backdrop = ColorRect.new()

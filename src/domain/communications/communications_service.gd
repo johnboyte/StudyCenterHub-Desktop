@@ -1009,6 +1009,15 @@ func get_threaded_messages() -> Array:
 	return []
 
 func save_ivr_voice_settings(voice_name: String, language: String) -> bool:
+	if db:
+		db.execute("""
+			CREATE TABLE IF NOT EXISTS ivr_settings (
+				id INTEGER PRIMARY KEY DEFAULT 1,
+				voice_name TEXT NOT NULL DEFAULT 'Polly.Joanna-Generative',
+				language TEXT NOT NULL DEFAULT 'en-US',
+				updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+			);
+		""")
 	var q = "INSERT OR REPLACE INTO ivr_settings (id, voice_name, language) VALUES (1, ?, ?);"
 	var res = db.execute(q, [voice_name, language])
 	return res["success"]
@@ -1041,12 +1050,21 @@ func get_phone_settings() -> Dictionary:
 				"PHONE_TODAY_CUSTOM_SCRIPT": dict["today_custom_script"] = val
 				"PHONE_LOCATION_DIRECTIONS_TEXT": dict["location_directions_text"] = val
 
+	if db:
+		db.execute("""
+			CREATE TABLE IF NOT EXISTS ivr_settings (
+				id INTEGER PRIMARY KEY DEFAULT 1,
+				voice_name TEXT NOT NULL DEFAULT 'Polly.Joanna-Generative',
+				language TEXT NOT NULL DEFAULT 'en-US',
+				updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+			);
+		""")
 	var ivr_res = db.execute("SELECT voice_name, language FROM ivr_settings WHERE id = 1 LIMIT 1;")
 	if ivr_res["success"] and ivr_res["data"].size() > 0:
-		dict["voice_name"] = str(ivr_res["data"][0].get("voice_name", "Polly.Kimberly-Neural"))
+		dict["voice_name"] = str(ivr_res["data"][0].get("voice_name", "Polly.Joanna-Generative"))
 		dict["language"] = str(ivr_res["data"][0].get("language", "en-US"))
 	else:
-		dict["voice_name"] = "Polly.Kimberly-Neural"
+		dict["voice_name"] = "Polly.Joanna-Generative"
 		dict["language"] = "en-US"
 
 	return dict
