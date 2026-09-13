@@ -6957,6 +6957,7 @@ if ($uri === '/api/v1/sync/ivr-config') {
     }
     
     file_put_contents(__DIR__ . '/database/ivr_config.json', json_encode($ivr_config, JSON_PRETTY_PRINT));
+    http_response_code(200);
     echo json_encode(["success" => true, "message" => "IVR configuration cached successfully."]);
     exit;
 }
@@ -7469,7 +7470,7 @@ if ($uri === '/api/v1/tts/preview-call') {
         exit;
     }
 
-    $safe_voice = htmlspecialchars($voice, ENT_QUOTES, 'UTF-8');
+    $safe_voice = htmlspecialchars(str_replace('-Generative', '-Neural', $voice), ENT_QUOTES, 'UTF-8');
     $safe_text = htmlspecialchars($text, ENT_QUOTES, 'UTF-8');
     $twiml_xml = '<Response><Say voice="' . $safe_voice . '" language="en-US">' . $safe_text . '</Say><Hangup/></Response>';
 
@@ -7660,10 +7661,11 @@ echo json_encode(['error' => 'Endpoint not found']);
 
 // Twilio Helper Functions
 function get_twiml_say($text, $config) {
-    $voice = !empty($config['voice_name']) ? $config['voice_name'] : 'Polly.Kimberly-Neural';
+    $raw_voice = !empty($config['voice_name']) ? $config['voice_name'] : 'Polly.Joanna-Neural';
+    $voice = str_replace('-Generative', '-Neural', $raw_voice);
     // Ensure voice is supported natively by Twilio <Say> (Polly.* or standard Twilio voices) to prevent call drops
     if (strpos($voice, 'Polly.') !== 0 && !in_array($voice, ['man', 'woman', 'alice'])) {
-        $voice = 'Polly.Kimberly-Neural';
+        $voice = 'Polly.Joanna-Neural';
     }
     $language = !empty($config['language']) ? $config['language'] : 'en-US';
     // Clean all literal backslashes and escaped newline characters (e.g. \n or \\n) so Twilio TTS never speaks "backslash n" out loud

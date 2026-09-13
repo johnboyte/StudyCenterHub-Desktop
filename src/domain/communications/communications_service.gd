@@ -557,7 +557,7 @@ func dispatch_email_sync(to_email: String, subject: String, body_html: String, p
 	if result_code != HTTPRequest.RESULT_SUCCESS:
 		return {"success": false, "error": "Network request failed (result=" + str(result_code) + ")"}
 
-	if response_code != 200:
+	if response_code not in [200, 201, 202] and (response_code < 200 or response_code >= 300):
 		return {"success": false, "error": "Mail relay returned HTTP status " + str(response_code)}
 
 	var body_str = body_bytes.get_string_from_utf8()

@@ -755,7 +755,7 @@ func publish_ivr_config(callback: Callable) -> void:
 		return
 		
 	http_client.request_completed.connect(func(_result: int, response_code: int, _r_headers: PackedStringArray, _body_bytes: PackedByteArray):
-		if response_code == 200:
+		if response_code in [200, 201, 202] or (response_code >= 200 and response_code < 300):
 			callback.call({"success": true})
 		else:
 			callback.call({"success": false, "error": "Config publish failed with status: " + str(response_code)})
