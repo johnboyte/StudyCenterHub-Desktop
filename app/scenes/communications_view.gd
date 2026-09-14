@@ -35,11 +35,28 @@ var queue_controller: RefCounted = null
 var header_bar_instance: Control = null
 var queue_card_container: PanelContainer = null
 
-@onready var channel_dropdown: OptionButton = %ChannelDropdown
-@onready var recipient_dropdown: OptionButton = %RecipientDropdown
-@onready var template_dropdown: OptionButton = %TemplateDropdown
-@onready var btn_send_message: Button = %BtnSendMessage
-@onready var message_body_edit: TextEdit = %MessageBodyEdit
+# Communicate / Send Audience Selector Members
+var audience_type_dropdown: OptionButton = null
+var pathway_dropdown: OptionButton = null
+var session_dropdown: OptionButton = null
+var aud_count_label: Label = null
+var btn_review_recipients: Button = null
+var btn_schedule_message: Button = null
+
+var selected_audience_type: String = "Individual"
+var selected_individual_ids: Array = []
+var individual_chips_container: HBoxContainer = null
+var real_life_status_dropdown: OptionButton = null
+var pathway_list: Array = []
+var session_list: Array = []
+var current_eligible_recipients: Array = []
+var current_excluded_recipients: Array = []
+
+var channel_dropdown: OptionButton = null
+var recipient_dropdown: OptionButton = null
+var template_dropdown: OptionButton = null
+var btn_send_message: Button = null
+var message_body_edit: TextEdit = null
 @onready var composer_card: PanelContainer = %ComposerCard
 @onready var voicemail_card: PanelContainer = %VoicemailCard
 @onready var threads_card: PanelContainer = %ThreadsCard
@@ -47,6 +64,7 @@ var queue_card_container: PanelContainer = null
 
 func _ready() -> void:
 	add_to_group("sync_listeners")
+	_setup_communicate_send_composer()
 	_init_database()
 	_style_card()
 	_populate_dropdowns()
@@ -516,275 +534,834 @@ func _get_active_theme_color() -> Color:
 		return Color(0.42, 0.11, 0.60, 1.0) # Royal Purple #6A1B9A
 	return Color(0.596, 0.192, 0.255, 1.0)
 
-var filter_inst_id: int = 0
-var filter_rel: String = "All"
-var filter_ay: String = "All"
-var filter_mj: String = ""
-var filter_res: String = "All"
-var filter_gt: String = "All"
-var filter_gy: int = 0
+func _setup_communicate_send_composer() -> void:
+	if audience_type_dropdown and is_instance_valid(audience_type_dropdown):
+		return
+	if not composer_card:
+		if has_node("%ComposerCard"):
+			composer_card = get_node("%ComposerCard") as PanelContainer
+		elif has_node("MarginContainer/MainVBox/ComposerCard"):
+			composer_card = get_node("MarginContainer/MainVBox/ComposerCard") as PanelContainer
+	if not composer_card: return
 
-func filter_recipients(params: Dictionary) -> void:
-	if params.has("institution_id"): filter_inst_id = int(params["institution_id"])
-	if params.has("relationship"): filter_rel = str(params["relationship"])
-	if params.has("academic_year"): filter_ay = str(params["academic_year"])
-	if params.has("major"): filter_mj = str(params["major"])
-	if params.has("residence"): filter_res = str(params["residence"])
-	if params.has("expected_grad_term"): filter_gt = str(params["expected_grad_term"])
-	if params.has("expected_grad_year"): filter_gy = int(params["expected_grad_year"])
-	_apply_audience_filters()
+	if not channel_dropdown and has_node("%ChannelDropdown"): channel_dropdown = get_node("%ChannelDropdown") as OptionButton
+	if not recipient_dropdown and has_node("%RecipientDropdown"): recipient_dropdown = get_node("%RecipientDropdown") as OptionButton
+	if not template_dropdown and has_node("%TemplateDropdown"): template_dropdown = get_node("%TemplateDropdown") as OptionButton
+	if not btn_send_message and has_node("%BtnSendMessage"): btn_send_message = get_node("%BtnSendMessage") as Button
+	if not message_body_edit and has_node("%MessageBodyEdit"): message_body_edit = get_node("%MessageBodyEdit") as TextEdit
+	var composer_vbox = composer_card.get_node_or_null("ComposerMargin/ComposerVBox") as VBoxContainer
+	if not composer_vbox: return
 
-var audience_filter_panel: Control = null
-var aud_count_label: Label = null
+	for child in composer_vbox.get_children():
+		composer_vbox.remove_child(child)
 
-func _build_audience_filter_panel() -> Control:
-	if audience_filter_panel and is_instance_valid(audience_filter_panel):
-		return audience_filter_panel
+	composer_vbox.add_theme_constant_override("separation", 10)
 
-	var p_panel = PanelContainer.new()
-	var p_st = StyleBoxFlat.new()
-	p_st.bg_color = Color(0.96, 0.97, 0.99, 1.0)
-	p_st.border_width_left = 1; p_st.border_width_top = 1; p_st.border_width_right = 1; p_st.border_width_bottom = 1
-	p_st.border_color = Color(0.80, 0.85, 0.92, 1.0)
-	p_st.corner_radius_top_left = 8; p_st.corner_radius_top_right = 8; p_st.corner_radius_bottom_left = 8; p_st.corner_radius_bottom_right = 8
-	p_st.content_margin_left = 12; p_st.content_margin_top = 10; p_st.content_margin_right = 12; p_st.content_margin_bottom = 10
-	p_panel.add_theme_stylebox_override("panel", p_st)
-
-	var main_vbox = VBoxContainer.new()
-	main_vbox.add_theme_constant_override("separation", 8)
-
-	var title_hbox = HBoxContainer.new()
+	# Top Header Label
 	var title_lbl = Label.new()
-	title_lbl.text = "🎯 Audience Segmentation & Filters"
-	title_lbl.add_theme_font_size_override("font_size", 14)
-	title_lbl.add_theme_color_override("font_color", Color(0.12, 0.16, 0.24, 1.0))
-	title_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	title_hbox.add_child(title_lbl)
+	title_lbl.text = "📢 COMMUNICATE / SEND"
+	title_lbl.add_theme_font_size_override("font_size", 17)
+	title_lbl.add_theme_color_override("font_color", _get_active_theme_color())
+	composer_vbox.add_child(title_lbl)
+
+	# Row 1: Audience Type & Sub-Selectors
+	var row1 = HBoxContainer.new()
+	row1.add_theme_constant_override("separation", 10)
+
+	var aud_type_lbl = Label.new()
+	aud_type_lbl.text = "Audience Type:"
+	aud_type_lbl.add_theme_font_size_override("font_size", 14)
+	aud_type_lbl.add_theme_color_override("font_color", Color(0.20, 0.25, 0.32, 1.0))
+	row1.add_child(aud_type_lbl)
+
+	audience_type_dropdown = OptionButton.new()
+	audience_type_dropdown.custom_minimum_size = Vector2(180, 38)
+	audience_type_dropdown.add_item("Individual", 0)
+	audience_type_dropdown.add_item("Real Life", 1)
+	audience_type_dropdown.add_item("Pathway", 2)
+	audience_type_dropdown.add_item("Session", 3)
+	audience_type_dropdown.add_item("Volunteers", 4)
+	audience_type_dropdown.add_item("Checked In Today", 5)
+	audience_type_dropdown.add_item("All Active People", 6)
+	_style_dropdown_control(audience_type_dropdown)
+	row1.add_child(audience_type_dropdown)
+
+	# Individual Search Dropdown
+	_style_dropdown_control(recipient_dropdown)
+	recipient_dropdown.custom_minimum_size = Vector2(240, 38)
+	recipient_dropdown.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_reparent_node(recipient_dropdown, row1)
+
+	# Real Life Status Dropdown
+	real_life_status_dropdown = OptionButton.new()
+	real_life_status_dropdown.custom_minimum_size = Vector2(260, 38)
+	real_life_status_dropdown.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	real_life_status_dropdown.add_item("Status: Both (Interested & In Real Life)", 0)
+	real_life_status_dropdown.add_item("Status: Interested", 1)
+	real_life_status_dropdown.add_item("Status: In Real Life", 2)
+	real_life_status_dropdown.visible = false
+	_style_dropdown_control(real_life_status_dropdown)
+	row1.add_child(real_life_status_dropdown)
+
+	# Pathway Dropdown
+	pathway_dropdown = OptionButton.new()
+	pathway_dropdown.custom_minimum_size = Vector2(280, 38)
+	pathway_dropdown.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	pathway_dropdown.visible = false
+	_style_dropdown_control(pathway_dropdown)
+	row1.add_child(pathway_dropdown)
+
+	# Session Dropdown
+	session_dropdown = OptionButton.new()
+	session_dropdown.custom_minimum_size = Vector2(280, 38)
+	session_dropdown.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	session_dropdown.visible = false
+	_style_dropdown_control(session_dropdown)
+	row1.add_child(session_dropdown)
+
+	composer_vbox.add_child(row1)
+
+	# Row 1.5: Selected Individual Chips Container
+	individual_chips_container = HBoxContainer.new()
+	individual_chips_container.add_theme_constant_override("separation", 8)
+	individual_chips_container.custom_minimum_size = Vector2(0, 34)
+	composer_vbox.add_child(individual_chips_container)
+
+	# Row 2: Delivery Channel, Recipient Summary & Review Button
+	var row2 = HBoxContainer.new()
+	row2.add_theme_constant_override("separation", 12)
+
+	var ch_lbl = Label.new()
+	ch_lbl.text = "Channel:"
+	ch_lbl.add_theme_font_size_override("font_size", 14)
+	ch_lbl.add_theme_color_override("font_color", Color(0.20, 0.25, 0.32, 1.0))
+	row2.add_child(ch_lbl)
+
+	_style_dropdown_control(channel_dropdown)
+	channel_dropdown.custom_minimum_size = Vector2(180, 38)
+	_reparent_node(channel_dropdown, row2)
 
 	aud_count_label = Label.new()
-	aud_count_label.text = "0 Eligible Recipients"
-	aud_count_label.add_theme_font_size_override("font_size", 13)
+	aud_count_label.text = "0 Eligible Recipients | 0 Excluded"
+	aud_count_label.add_theme_font_size_override("font_size", 14)
 	aud_count_label.add_theme_color_override("font_color", Color(0.18, 0.45, 0.85, 1.0))
-	title_hbox.add_child(aud_count_label)
-	main_vbox.add_child(title_hbox)
+	aud_count_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row2.add_child(aud_count_label)
 
-	var grid = GridContainer.new()
-	grid.columns = 4
-	grid.add_theme_constant_override("h_separation", 10)
-	grid.add_theme_constant_override("v_separation", 8)
+	btn_review_recipients = Button.new()
+	btn_review_recipients.text = "👁️ Review Recipients"
+	btn_review_recipients.custom_minimum_size = Vector2(170, 38)
+	_style_secondary_button(btn_review_recipients)
+	row2.add_child(btn_review_recipients)
 
-	# Fetch Master Institutions
-	var inst_list = []
-	if db:
-		var q_i = db.execute("SELECT id, name, short_name FROM institutions WHERE is_active = 1 ORDER BY display_order ASC;")
-		if q_i["success"]: inst_list = q_i["data"]
+	composer_vbox.add_child(row2)
 
-	# 1. Institution
-	var dd_inst = OptionButton.new()
-	dd_inst.add_item("All Institutions", 0)
-	for i in range(inst_list.size()):
-		dd_inst.add_item(str(inst_list[i].get("name", "")), i + 1)
-	dd_inst.custom_minimum_size = Vector2(160, 36)
-	dd_inst.item_selected.connect(func(idx):
-		filter_inst_id = int(inst_list[idx - 1].get("id", 0)) if idx > 0 else 0
-		_apply_audience_filters()
-	)
-	grid.add_child(dd_inst)
+	# Row 3: Template & Action Buttons
+	var row3 = HBoxContainer.new()
+	row3.add_theme_constant_override("separation", 10)
 
-	# 2. Relationship
-	var dd_rel = OptionButton.new()
-	var rel_opts = ["All Relationships", "Student", "Alumni", "Faculty", "Staff", "Community Member", "Other"]
-	for r in rel_opts: dd_rel.add_item(r)
-	dd_rel.custom_minimum_size = Vector2(160, 36)
-	dd_rel.item_selected.connect(func(idx):
-		filter_rel = rel_opts[idx] if idx > 0 else "All"
-		_apply_audience_filters()
-	)
-	grid.add_child(dd_rel)
+	var tmpl_lbl = Label.new()
+	tmpl_lbl.text = "Template:"
+	tmpl_lbl.add_theme_font_size_override("font_size", 14)
+	tmpl_lbl.add_theme_color_override("font_color", Color(0.20, 0.25, 0.32, 1.0))
+	row3.add_child(tmpl_lbl)
 
-	# 3. Academic Year
-	var dd_ay = OptionButton.new()
-	var ay_opts = ["All Academic Years", "Freshman", "Sophomore", "Junior", "Senior", "Graduate Student", "Not Applicable"]
-	for a in ay_opts: dd_ay.add_item(a)
-	dd_ay.custom_minimum_size = Vector2(160, 36)
-	dd_ay.item_selected.connect(func(idx):
-		filter_ay = ay_opts[idx] if idx > 0 else "All"
-		_apply_audience_filters()
-	)
-	grid.add_child(dd_ay)
+	_style_dropdown_control(template_dropdown)
+	template_dropdown.custom_minimum_size = Vector2(220, 38)
+	template_dropdown.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_reparent_node(template_dropdown, row3)
 
-	# 4. Residence
-	var dd_res = OptionButton.new()
-	var res_opts = ["All Residence Types", "On Campus", "Off Campus", "Commuter", "Online Student"]
-	for rs in res_opts: dd_res.add_item(rs)
-	dd_res.custom_minimum_size = Vector2(160, 36)
-	dd_res.item_selected.connect(func(idx):
-		filter_res = res_opts[idx] if idx > 0 else "All"
-		_apply_audience_filters()
-	)
-	grid.add_child(dd_res)
+	btn_send_message.text = "✉️ Send Message"
+	btn_send_message.custom_minimum_size = Vector2(155, 38)
+	_style_primary_button(btn_send_message)
+	_reparent_node(btn_send_message, row3)
 
-	# 5. Major Search LineEdit
-	var txt_mj = LineEdit.new()
-	txt_mj.placeholder_text = "Filter by Major..."
-	txt_mj.custom_minimum_size = Vector2(160, 36)
-	txt_mj.text_changed.connect(func(t):
-		filter_mj = t.strip_edges()
-		_apply_audience_filters()
-	)
-	grid.add_child(txt_mj)
+	btn_schedule_message = Button.new()
+	btn_schedule_message.text = "🕒 Schedule Message"
+	btn_schedule_message.custom_minimum_size = Vector2(165, 38)
+	btn_schedule_message.disabled = true
+	btn_schedule_message.tooltip_text = "TODO: Scheduling disabled in current pass"
+	_style_disabled_button(btn_schedule_message)
+	row3.add_child(btn_schedule_message)
 
-	# 6. Expected Grad Term
-	var dd_gt = OptionButton.new()
-	var gt_opts = ["All Grad Terms", "Spring", "Summer", "Fall"]
-	for g in gt_opts: dd_gt.add_item(g)
-	dd_gt.custom_minimum_size = Vector2(160, 36)
-	dd_gt.item_selected.connect(func(idx):
-		filter_gt = gt_opts[idx] if idx > 0 else "All"
-		_apply_audience_filters()
-	)
-	grid.add_child(dd_gt)
+	composer_vbox.add_child(row3)
 
-	# 7. Expected Grad Year LineEdit
-	var txt_gy = LineEdit.new()
-	txt_gy.placeholder_text = "Grad Year (e.g. 2026)..."
-	txt_gy.custom_minimum_size = Vector2(160, 36)
-	txt_gy.text_changed.connect(func(t):
-		filter_gy = int(t.strip_edges()) if t.strip_edges().is_valid_int() else 0
-		_apply_audience_filters()
-	)
-	grid.add_child(txt_gy)
+	# Row 4: Message Body TextEdit
+	if message_body_edit:
+		message_body_edit.custom_minimum_size = Vector2(0, 90)
+		message_body_edit.placeholder_text = "Type your message body or select a pre-built template..."
+		message_body_edit.caret_blink = true
+		message_body_edit.add_theme_color_override("caret_color", Color(0.12, 0.16, 0.22, 1.0))
+		_reparent_node(message_body_edit, composer_vbox)
 
-	# 8. Reset Filters Button
-	var btn_reset_f = Button.new()
-	btn_reset_f.text = "🔄 Reset Filters"
-	btn_reset_f.custom_minimum_size = Vector2(140, 36)
-	btn_reset_f.pressed.connect(func():
-		filter_inst_id = 0; filter_rel = "All"; filter_ay = "All"; filter_mj = ""; filter_res = "All"; filter_gt = "All"; filter_gy = 0
-		dd_inst.select(0); dd_rel.select(0); dd_ay.select(0); dd_res.select(0); dd_gt.select(0)
-		txt_mj.text = ""; txt_gy.text = ""
-		_apply_audience_filters()
-	)
-	grid.add_child(btn_reset_f)
+func _reparent_node(node: Node, new_parent: Node) -> void:
+	if not node or not new_parent: return
+	var p = node.get_parent()
+	if p:
+		p.remove_child(node)
+	new_parent.add_child(node)
 
-	main_vbox.add_child(grid)
-	p_panel.add_child(main_vbox)
-	audience_filter_panel = p_panel
-	return audience_filter_panel
+func _style_dropdown_control(dd: OptionButton) -> void:
+	if not dd: return
+	var dd_st = StyleBoxFlat.new()
+	dd_st.bg_color = Color(0.96, 0.97, 0.99, 1.0)
+	dd_st.border_width_left = 1; dd_st.border_width_top = 1; dd_st.border_width_right = 1; dd_st.border_width_bottom = 1
+	dd_st.border_color = Color(0.78, 0.82, 0.88, 1.0)
+	dd_st.corner_radius_top_left = 6; dd_st.corner_radius_top_right = 6; dd_st.corner_radius_bottom_left = 6; dd_st.corner_radius_bottom_right = 6
+	dd_st.content_margin_left = 10; dd_st.content_margin_top = 6; dd_st.content_margin_right = 10; dd_st.content_margin_bottom = 6
+	dd.add_theme_stylebox_override("normal", dd_st)
+	dd.add_theme_stylebox_override("hover", dd_st)
+	dd.add_theme_stylebox_override("pressed", dd_st)
+	dd.add_theme_stylebox_override("focus", dd_st)
+	dd.add_theme_font_size_override("font_size", 14)
+	dd.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
+	dd.add_theme_color_override("font_hover_color", Color(0.08, 0.12, 0.18, 1.0))
+	dd.add_theme_color_override("font_pressed_color", Color(0.08, 0.12, 0.18, 1.0))
 
-func _apply_audience_filters() -> void:
-	if not db or not recipient_dropdown: return
+func _style_primary_button(btn: Button) -> void:
+	if not btn: return
+	var btn_st = StyleBoxFlat.new()
+	btn_st.bg_color = _get_active_theme_color()
+	btn_st.corner_radius_top_left = 6; btn_st.corner_radius_top_right = 6; btn_st.corner_radius_bottom_left = 6; btn_st.corner_radius_bottom_right = 6
+	btn.add_theme_stylebox_override("normal", btn_st)
+	btn.add_theme_stylebox_override("hover", btn_st)
+	btn.add_theme_stylebox_override("pressed", btn_st)
+	btn.add_theme_stylebox_override("focus", btn_st)
+	btn.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
+	btn.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 1.0, 1.0))
+	btn.add_theme_color_override("font_pressed_color", Color(1.0, 1.0, 1.0, 1.0))
+	btn.add_theme_color_override("font_focus_color", Color(1.0, 1.0, 1.0, 1.0))
 
-	var sql = "SELECT DISTINCT p.id, p.person_uuid, p.human_id, p.first_name, p.last_name, p.phone, p.email, p.sms_consent, i.short_name AS inst_short FROM people p LEFT JOIN institutions i ON p.institution_id = i.id WHERE (p.status IS NULL OR p.status = '' OR LOWER(p.status) IN ('active', 'pending', 'to be confirmed'))"
-	var args = []
+func _style_secondary_button(btn: Button) -> void:
+	if not btn: return
+	var st = StyleBoxFlat.new()
+	st.bg_color = Color(0.92, 0.95, 0.98, 1.0)
+	st.border_width_left = 1; st.border_width_top = 1; st.border_width_right = 1; st.border_width_bottom = 1
+	st.border_color = Color(0.75, 0.82, 0.90, 1.0)
+	st.corner_radius_top_left = 6; st.corner_radius_top_right = 6; st.corner_radius_bottom_left = 6; st.corner_radius_bottom_right = 6
+	btn.add_theme_stylebox_override("normal", st)
+	btn.add_theme_stylebox_override("hover", st)
+	btn.add_theme_stylebox_override("pressed", st)
+	btn.add_theme_stylebox_override("focus", st)
+	btn.add_theme_color_override("font_color", Color(0.12, 0.20, 0.32, 1.0))
+	btn.add_theme_color_override("font_hover_color", Color(0.12, 0.20, 0.32, 1.0))
+	btn.add_theme_color_override("font_pressed_color", Color(0.12, 0.20, 0.32, 1.0))
+	btn.add_theme_color_override("font_focus_color", Color(0.12, 0.20, 0.32, 1.0))
 
-	if filter_inst_id > 0:
-		sql += " AND p.institution_id = ?"
-		args.append(filter_inst_id)
+func _style_disabled_button(btn: Button) -> void:
+	if not btn: return
+	var st = StyleBoxFlat.new()
+	st.bg_color = Color(0.92, 0.93, 0.95, 1.0)
+	st.corner_radius_top_left = 6; st.corner_radius_top_right = 6; st.corner_radius_bottom_left = 6; st.corner_radius_bottom_right = 6
+	btn.add_theme_stylebox_override("disabled", st)
+	btn.add_theme_color_override("font_disabled_color", Color(0.55, 0.60, 0.68, 1.0))
 
-	if filter_rel != "" and filter_rel != "All":
-		sql += " AND p.relationship = ?"
-		args.append(filter_rel)
-
-	if filter_ay != "" and filter_ay != "All":
-		sql += " AND p.academic_year = ?"
-		args.append(filter_ay)
-
-	if filter_mj != "":
-		sql += " AND LOWER(p.major) LIKE LOWER(?)"
-		args.append("%" + filter_mj + "%")
-
-	if filter_res != "" and filter_res != "All":
-		sql += " AND p.residence = ?"
-		args.append(filter_res)
-
-	if filter_gt != "" and filter_gt != "All":
-		sql += " AND p.expected_grad_term = ?"
-		args.append(filter_gt)
-
-	if filter_gy > 0:
-		sql += " AND p.expected_grad_year = ?"
-		args.append(filter_gy)
-
-	sql += " ORDER BY p.last_name ASC, p.first_name ASC;"
-
-	var res = db.execute(sql, args)
-	recipient_dropdown.clear()
-	person_list.clear()
-
-	if res["success"] and res["data"].size() > 0:
-		person_list = res["data"]
-		for i in range(person_list.size()):
-			var p = person_list[i]
-			var fn = str(p.get("first_name", ""))
-			var ln = str(p.get("last_name", ""))
-			var inst = str(p.get("inst_short", ""))
-			var badge = (" [" + inst + "]") if inst != "" else ""
-			var name = (fn + " " + ln).strip_edges() + badge + " (" + str(p.get("human_id", "")) + ")"
-			recipient_dropdown.add_item(name, i)
-
-	if aud_count_label:
-		aud_count_label.text = str(person_list.size()) + " Eligible Recipients"
+func filter_recipients(_params: Dictionary) -> void:
+	_update_audience_resolution()
 
 func _populate_dropdowns() -> void:
 	if not db: return
 	if not com_service: com_service = CommunicationsServiceScript.new(db)
+	if not audience_type_dropdown: _setup_communicate_send_composer()
 
-	channel_dropdown.clear()
-	channel_dropdown.add_item("SMS Text", 0)
-	channel_dropdown.add_item("Phone Call", 1)
-	channel_dropdown.add_item("Email", 2)
-	channel_dropdown.add_item("Push Alert", 3)
+	# Populate Pathways dropdown (EXCLUDING Academic Mastery and Discipleship Track)
+	if pathway_dropdown:
+		pathway_dropdown.clear()
+		pathway_list.clear()
+		var res_pw = db.execute("SELECT id, pathway_key, name, description FROM pathways WHERE is_active = 1 AND pathway_key IN ('fellows', 'lead') ORDER BY name ASC;")
+		if res_pw["success"] and res_pw["data"].size() > 0:
+			pathway_list = res_pw["data"]
+			for i in range(pathway_list.size()):
+				pathway_dropdown.add_item(str(pathway_list[i].get("name", "Pathway")), i)
 
-	_apply_audience_filters()
+	# Populate Sessions dropdown
+	if session_dropdown:
+		session_dropdown.clear()
+		session_list.clear()
+		var res_sess = db.execute("SELECT id, title, session_type, date_text, start_time FROM sessions WHERE is_active = 1 ORDER BY date_text DESC, start_time ASC;")
+		if res_sess["success"] and res_sess["data"].size() > 0:
+			session_list = res_sess["data"]
+			for i in range(session_list.size()):
+				var s = session_list[i]
+				var t = str(s.get("title", "Session"))
+				var dt = str(s.get("date_text", ""))
+				var label = t + (" (" + dt + ")" if dt != "" else "")
+				session_dropdown.add_item(label, i)
 
-	template_dropdown.clear()
-	template_dropdown.add_item("-- Select Template --", 0)
-	template_list = com_service.get_templates()
-	for i in range(template_list.size()):
-		var t = template_list[i]
-		template_dropdown.add_item(str(t.get("title", "")), i + 1)
+	# Populate Individual constituents dropdown
+	if recipient_dropdown:
+		recipient_dropdown.clear()
+		person_list.clear()
+		recipient_dropdown.add_item("-- Search / Add Person --", 0)
+		var res_p = db.execute("SELECT id, person_uuid, human_id, first_name, last_name, phone, email, sms_consent FROM people WHERE status IS NULL OR status = '' OR LOWER(status) IN ('active', 'pending', 'to be confirmed') ORDER BY last_name ASC, first_name ASC;")
+		if res_p["success"] and res_p["data"].size() > 0:
+			person_list = res_p["data"]
+			for i in range(person_list.size()):
+				var p = person_list[i]
+				var fn = str(p.get("first_name", ""))
+				var ln = str(p.get("last_name", ""))
+				var name = (fn + " " + ln).strip_edges() + " (" + str(p.get("human_id", "")) + ")"
+				recipient_dropdown.add_item(name, i + 1)
+
+			if selected_individual_ids.size() == 0 and person_list.size() > 0:
+				selected_individual_ids.append(int(person_list[0].get("id", 0)))
+
+	_refresh_individual_chips()
+	_on_audience_type_selected(0)
+
+func _refresh_individual_chips() -> void:
+	if not individual_chips_container: return
+	for c in individual_chips_container.get_children():
+		c.queue_free()
+
+	if selected_individual_ids.size() == 0: return
+
+	for pid in selected_individual_ids:
+		var p_dict = {}
+		for p in person_list:
+			if int(p.get("id", 0)) == int(pid):
+				p_dict = p
+				break
+		if p_dict.size() == 0: continue
+
+		var chip = PanelContainer.new()
+		var chip_st = StyleBoxFlat.new()
+		chip_st.bg_color = Color(0.90, 0.94, 0.98, 1.0)
+		chip_st.border_width_left = 1; chip_st.border_width_top = 1; chip_st.border_width_right = 1; chip_st.border_width_bottom = 1
+		chip_st.border_color = Color(0.70, 0.80, 0.92, 1.0)
+		chip_st.corner_radius_top_left = 14; chip_st.corner_radius_top_right = 14; chip_st.corner_radius_bottom_left = 14; chip_st.corner_radius_bottom_right = 14
+		chip_st.content_margin_left = 10; chip_st.content_margin_top = 4; chip_st.content_margin_right = 8; chip_st.content_margin_bottom = 4
+		chip.add_theme_stylebox_override("panel", chip_st)
+
+		var hbox = HBoxContainer.new()
+		hbox.add_theme_constant_override("separation", 6)
+
+		var fn = str(p_dict.get("first_name", ""))
+		var ln = str(p_dict.get("last_name", ""))
+		var lbl = Label.new()
+		lbl.text = (fn + " " + ln).strip_edges() + " (" + str(p_dict.get("human_id", "")) + ")"
+		lbl.add_theme_font_size_override("font_size", 13)
+		lbl.add_theme_color_override("font_color", Color(0.12, 0.22, 0.38, 1.0))
+		hbox.add_child(lbl)
+
+		var btn_rem = Button.new()
+		btn_rem.text = "✕"
+		btn_rem.flat = true
+		btn_rem.add_theme_font_size_override("font_size", 12)
+		btn_rem.add_theme_color_override("font_color", Color(0.5, 0.2, 0.2, 1.0))
+		btn_rem.add_theme_color_override("font_hover_color", Color(0.8, 0.1, 0.1, 1.0))
+		var rem_pid = pid
+		btn_rem.pressed.connect(func():
+			selected_individual_ids.erase(rem_pid)
+			_refresh_individual_chips()
+			_update_channel_dropdown_options()
+			_update_audience_resolution()
+		)
+		hbox.add_child(btn_rem)
+
+		chip.add_child(hbox)
+		individual_chips_container.add_child(chip)
 
 func _connect_signals() -> void:
-	if btn_send_message: btn_send_message.pressed.connect(_on_send_message_pressed)
-	if template_dropdown: template_dropdown.item_selected.connect(_on_template_selected)
-	if channel_dropdown: channel_dropdown.item_selected.connect(_on_channel_selected)
+	if btn_send_message and not btn_send_message.pressed.is_connected(_on_send_message_pressed):
+		btn_send_message.pressed.connect(_on_send_message_pressed)
+	if template_dropdown and not template_dropdown.item_selected.is_connected(_on_template_selected):
+		template_dropdown.item_selected.connect(_on_template_selected)
+	if channel_dropdown and not channel_dropdown.item_selected.is_connected(_on_channel_selected):
+		channel_dropdown.item_selected.connect(_on_channel_selected)
+	if audience_type_dropdown and not audience_type_dropdown.item_selected.is_connected(_on_audience_type_selected):
+		audience_type_dropdown.item_selected.connect(_on_audience_type_selected)
+	if real_life_status_dropdown and not real_life_status_dropdown.item_selected.is_connected(_on_real_life_status_selected):
+		real_life_status_dropdown.item_selected.connect(_on_real_life_status_selected)
+	if pathway_dropdown and not pathway_dropdown.item_selected.is_connected(_on_pathway_selected):
+		pathway_dropdown.item_selected.connect(_on_pathway_selected)
+	if session_dropdown and not session_dropdown.item_selected.is_connected(_on_session_selected):
+		session_dropdown.item_selected.connect(_on_session_selected)
+	if recipient_dropdown and not recipient_dropdown.item_selected.is_connected(_on_individual_selected):
+		recipient_dropdown.item_selected.connect(_on_individual_selected)
+	if btn_review_recipients and not btn_review_recipients.pressed.is_connected(_open_review_recipients_dialog):
+		btn_review_recipients.pressed.connect(_open_review_recipients_dialog)
+
+func _on_audience_type_selected(index: int) -> void:
+	if index < 0 or not audience_type_dropdown: return
+	selected_audience_type = audience_type_dropdown.get_item_text(index)
+
+	if recipient_dropdown: recipient_dropdown.visible = (selected_audience_type == "Individual")
+	if individual_chips_container: individual_chips_container.visible = (selected_audience_type == "Individual")
+	if real_life_status_dropdown: real_life_status_dropdown.visible = (selected_audience_type == "Real Life")
+	if pathway_dropdown: pathway_dropdown.visible = (selected_audience_type == "Pathway")
+	if session_dropdown: session_dropdown.visible = (selected_audience_type == "Session")
+
+	_update_channel_dropdown_options()
+	_update_audience_resolution()
+
+func _update_channel_dropdown_options() -> void:
+	if not channel_dropdown: return
+	var prev_sel = channel_dropdown.get_item_text(channel_dropdown.selected) if channel_dropdown.selected >= 0 and channel_dropdown.item_count > 0 else ""
+	channel_dropdown.clear()
+
+	if selected_audience_type == "Individual" and selected_individual_ids.size() <= 1:
+		channel_dropdown.add_item("SMS Text", 0)
+		channel_dropdown.add_item("Email", 1)
+		channel_dropdown.add_item("Phone Call", 2)
+	else:
+		channel_dropdown.add_item("SMS Text", 0)
+		channel_dropdown.add_item("Email", 1)
+		channel_dropdown.add_item("Both (SMS + Email)", 2)
+
+	var reselected = false
+	for i in range(channel_dropdown.item_count):
+		if channel_dropdown.get_item_text(i) == prev_sel:
+			channel_dropdown.select(i)
+			reselected = true
+			break
+	if not reselected:
+		channel_dropdown.select(0)
+
+	_on_channel_selected(channel_dropdown.selected)
+
+func _on_real_life_status_selected(_index: int) -> void:
+	_update_audience_resolution()
+
+func _on_pathway_selected(_index: int) -> void:
+	_update_audience_resolution()
+
+func _on_session_selected(_index: int) -> void:
+	_update_audience_resolution()
+
+func _on_individual_selected(index: int) -> void:
+	if index <= 0 or index - 1 >= person_list.size(): return
+	var p = person_list[index - 1]
+	var pid = int(p.get("id", 0))
+	if pid > 0 and not pid in selected_individual_ids:
+		selected_individual_ids.append(pid)
+	if recipient_dropdown:
+		recipient_dropdown.select(0)
+	_refresh_individual_chips()
+	_update_channel_dropdown_options()
+	_update_audience_resolution()
 
 func _on_template_selected(index: int) -> void:
 	if index <= 0 or index - 1 >= template_list.size(): return
 	var tmpl = template_list[index - 1]
-	message_body_edit.text = str(tmpl.get("body_template", ""))
+	if message_body_edit: message_body_edit.text = str(tmpl.get("body_template", ""))
 
 func _on_channel_selected(index: int) -> void:
+	if not channel_dropdown: return
 	var ch = channel_dropdown.get_item_text(index)
 	if ch == "Phone Call":
-		btn_send_message.text = "📞 Place Call"
+		if btn_send_message: btn_send_message.text = "📞 Place Call"
 		if message_body_edit: message_body_edit.placeholder_text = "Enter optional call agenda or notes before dialing..."
 	else:
-		btn_send_message.text = "✉️ Send Message"
+		if btn_send_message: btn_send_message.text = "✉️ Send Message"
 		if message_body_edit: message_body_edit.placeholder_text = "Type your message body or select a pre-built template..."
+	_update_audience_resolution()
+
+func _update_audience_resolution() -> void:
+	if not db: return
+
+	var candidates: Array = []
+
+	match selected_audience_type:
+		"Individual":
+			candidates.clear()
+			for pid in selected_individual_ids:
+				for p in person_list:
+					if int(p.get("id", 0)) == int(pid):
+						candidates.append(p)
+						break
+
+		"Real Life":
+			var q = """
+				SELECT DISTINCT p.id, p.person_uuid, p.human_id, p.first_name, p.last_name, p.phone, p.email, COALESCE(p.sms_consent, 1) as sms_consent
+				FROM people p
+				WHERE p.real_life = 1
+				AND (p.status IS NULL OR p.status = '' OR LOWER(p.status) IN ('active', 'pending', 'to be confirmed'))
+				ORDER BY p.last_name ASC, p.first_name ASC;
+			"""
+			var res = db.execute(q)
+			if res["success"] and res["data"].size() > 0: candidates = res["data"]
+
+		"Pathway":
+			if pathway_dropdown and pathway_dropdown.selected >= 0 and pathway_dropdown.selected < pathway_list.size():
+				var pw_id = int(pathway_list[pathway_dropdown.selected].get("id", 0))
+				var q = """
+					SELECT DISTINCT p.id, p.person_uuid, p.human_id, p.first_name, p.last_name, p.phone, p.email, COALESCE(p.sms_consent, 1) as sms_consent
+					FROM person_pathways pp
+					JOIN people p ON p.id = pp.person_id
+					WHERE pp.pathway_id = ? AND (pp.status IS NULL OR pp.status = '' OR LOWER(pp.status) = 'active' OR LOWER(pp.enrollment_status) = 'active')
+					AND (p.status IS NULL OR p.status = '' OR LOWER(p.status) IN ('active', 'pending', 'to be confirmed'))
+					ORDER BY p.last_name ASC, p.first_name ASC;
+				"""
+				var res = db.execute(q, [pw_id])
+				if res["success"] and res["data"].size() > 0: candidates = res["data"]
+
+		"Session":
+			if session_dropdown and session_dropdown.selected >= 0 and session_dropdown.selected < session_list.size():
+				var sess_id = int(session_list[session_dropdown.selected].get("id", 0))
+				var q = """
+					SELECT DISTINCT p.id, p.person_uuid, p.human_id, p.first_name, p.last_name, p.phone, p.email, COALESCE(p.sms_consent, 1) as sms_consent
+					FROM session_signups ss
+					JOIN people p ON p.id = ss.person_id
+					WHERE ss.session_id = ? AND ss.removed_at IS NULL AND (ss.signup_status IN ('confirmed', 'registered'))
+					AND (p.status IS NULL OR p.status = '' OR LOWER(p.status) IN ('active', 'pending', 'to be confirmed'))
+					ORDER BY p.last_name ASC, p.first_name ASC;
+				"""
+				var res = db.execute(q, [sess_id])
+				if res["success"] and res["data"].size() > 0: candidates = res["data"]
+
+		"Volunteers":
+			var q = """
+				SELECT DISTINCT p.id, p.person_uuid, p.human_id, p.first_name, p.last_name, p.phone, p.email, COALESCE(p.sms_consent, 1) as sms_consent
+				FROM people p
+				LEFT JOIN volunteer_profiles vp ON vp.person_id = p.id
+				LEFT JOIN volunteer_shifts vs ON vs.person_id = p.id
+				WHERE (LOWER(p.relationship) LIKE '%volunteer%' OR vp.id IS NOT NULL OR vs.id IS NOT NULL)
+				AND (p.status IS NULL OR p.status = '' OR LOWER(p.status) IN ('active', 'pending', 'to be confirmed'))
+				ORDER BY p.last_name ASC, p.first_name ASC;
+			"""
+			var res = db.execute(q)
+			if res["success"] and res["data"].size() > 0: candidates = res["data"]
+
+		"Checked In Today":
+			var today_date = Time.get_date_string_from_system()
+			var q = """
+				SELECT DISTINCT p.id, p.person_uuid, p.human_id, p.first_name, p.last_name, p.phone, p.email, COALESCE(p.sms_consent, 1) as sms_consent
+				FROM attendance_log al
+				JOIN people p ON p.id = al.person_id
+				WHERE (al.check_in_date = date('now', 'localtime') OR al.check_in_date = ?)
+				AND (p.status IS NULL OR p.status = '' OR LOWER(p.status) IN ('active', 'pending', 'to be confirmed'))
+				ORDER BY p.last_name ASC, p.first_name ASC;
+			"""
+			var res = db.execute(q, [today_date])
+			if res["success"] and res["data"].size() > 0: candidates = res["data"]
+
+		"All Active People":
+			var q = """
+				SELECT DISTINCT p.id, p.person_uuid, p.human_id, p.first_name, p.last_name, p.phone, p.email, COALESCE(p.sms_consent, 1) as sms_consent
+				FROM people p
+				WHERE (p.status IS NULL OR p.status = '' OR LOWER(p.status) IN ('active', 'pending', 'to be confirmed'))
+				ORDER BY p.last_name ASC, p.first_name ASC;
+			"""
+			var res = db.execute(q)
+			if res["success"] and res["data"].size() > 0: candidates = res["data"]
+
+	# Deduplicate by person.id
+	var deduped_map = {}
+	for c in candidates:
+		var pid = int(c.get("id", 0))
+		if pid > 0 and not deduped_map.has(pid):
+			deduped_map[pid] = c.duplicate()
+
+	var unique_candidates = deduped_map.values()
+
+	var ch_text = channel_dropdown.get_item_text(channel_dropdown.selected) if channel_dropdown else "SMS Text"
+
+	current_eligible_recipients.clear()
+	current_excluded_recipients.clear()
+
+	for person in unique_candidates:
+		var eval_res = _evaluate_person_eligibility(person, ch_text)
+		if eval_res.is_eligible:
+			var p_copy = person.duplicate()
+			p_copy["eval"] = eval_res
+			current_eligible_recipients.append(p_copy)
+		else:
+			var p_copy = person.duplicate()
+			p_copy["eval"] = eval_res
+			current_excluded_recipients.append(p_copy)
+
+	if aud_count_label:
+		aud_count_label.text = str(current_eligible_recipients.size()) + " Eligible Recipients | " + str(current_excluded_recipients.size()) + " Excluded"
+
+func _evaluate_person_eligibility(person: Dictionary, channel_str: String) -> Dictionary:
+	var phone = str(person.get("phone", "")).strip_edges()
+	var email = str(person.get("email", "")).strip_edges()
+	var sms_consent = int(person.get("sms_consent", 1)) == 1
+
+	var has_valid_phone = (phone != "" and phone != "555-0000" and phone.length() >= 7)
+	var has_valid_email = (email != "" and email.contains("@"))
+
+	if channel_str.contains("SMS") and not channel_str.contains("Both"):
+		if not sms_consent:
+			return {"is_eligible": false, "reason": "SMS Consent Withdrawn (STOP Opt-Out)", "has_phone": has_valid_phone, "has_email": has_valid_email, "sms_consent": false}
+		if not has_valid_phone:
+			return {"is_eligible": false, "reason": "Missing or Invalid Phone Number", "has_phone": false, "has_email": has_valid_email, "sms_consent": sms_consent}
+		return {"is_eligible": true, "reason": "Eligible for SMS", "has_phone": true, "has_email": has_valid_email, "sms_consent": true}
+
+	elif channel_str.contains("Email"):
+		if not has_valid_email:
+			return {"is_eligible": false, "reason": "Missing or Invalid Email Address", "has_phone": has_valid_phone, "has_email": false, "sms_consent": sms_consent}
+		return {"is_eligible": true, "reason": "Eligible for Email", "has_phone": has_valid_phone, "has_email": true, "sms_consent": sms_consent}
+
+	elif channel_str.contains("Both"):
+		var sms_ok = has_valid_phone and sms_consent
+		var email_ok = has_valid_email
+		if not sms_ok and not email_ok:
+			var reason_str = "Missing Phone & Email Address"
+			if not sms_consent and not email_ok:
+				reason_str = "SMS Consent Withdrawn & Missing Email"
+			return {"is_eligible": false, "reason": reason_str, "has_phone": has_valid_phone, "has_email": has_valid_email, "sms_consent": sms_consent}
+		return {"is_eligible": true, "reason": "Eligible (SMS and/or Email)", "has_phone": has_valid_phone, "has_email": has_valid_email, "sms_consent": sms_consent}
+
+	elif channel_str.contains("Phone Call"):
+		if not has_valid_phone:
+			return {"is_eligible": false, "reason": "Missing Phone Number", "has_phone": false, "has_email": has_valid_email, "sms_consent": sms_consent}
+		return {"is_eligible": true, "reason": "Eligible for Call", "has_phone": true, "has_email": has_valid_email, "sms_consent": sms_consent}
+
+	return {"is_eligible": true, "reason": "Eligible", "has_phone": has_valid_phone, "has_email": has_valid_email, "sms_consent": sms_consent}
+
+func _open_review_recipients_dialog() -> void:
+	_update_audience_resolution()
+
+	var backdrop = ColorRect.new()
+	backdrop.color = Color(0.08, 0.12, 0.18, 0.6)
+	backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(backdrop)
+
+	var center = CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	backdrop.add_child(center)
+
+	var card = PanelContainer.new()
+	var card_st = StyleBoxFlat.new()
+	card_st.bg_color = Color(1.0, 1.0, 1.0, 1.0)
+	card_st.border_width_left = 1; card_st.border_width_top = 1; card_st.border_width_right = 1; card_st.border_width_bottom = 1
+	card_st.border_color = Color(0.78, 0.82, 0.88, 1.0)
+	card_st.corner_radius_top_left = 12; card_st.corner_radius_top_right = 12; card_st.corner_radius_bottom_left = 12; card_st.corner_radius_bottom_right = 12
+	card_st.content_margin_left = 24; card_st.content_margin_top = 22; card_st.content_margin_right = 24; card_st.content_margin_bottom = 22
+	card.add_theme_stylebox_override("panel", card_st)
+	center.add_child(card)
+
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 14)
+	vbox.custom_minimum_size = Vector2(740, 480)
+	card.add_child(vbox)
+
+	var header_hbox = HBoxContainer.new()
+	var title = Label.new()
+	title.text = "👥 Review Recipients — " + selected_audience_type
+	title.add_theme_font_size_override("font_size", 18)
+	title.add_theme_color_override("font_color", _get_active_theme_color())
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header_hbox.add_child(title)
+
+	var cnt_badge = Label.new()
+	cnt_badge.text = str(current_eligible_recipients.size()) + " Eligible • " + str(current_excluded_recipients.size()) + " Excluded"
+	cnt_badge.add_theme_font_size_override("font_size", 14)
+	cnt_badge.add_theme_color_override("font_color", Color(0.18, 0.45, 0.85, 1.0))
+	header_hbox.add_child(cnt_badge)
+	vbox.add_child(header_hbox)
+
+	var scroll = ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(0, 360)
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	vbox.add_child(scroll)
+
+	var list_vbox = VBoxContainer.new()
+	list_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	list_vbox.add_theme_constant_override("separation", 6)
+	scroll.add_child(list_vbox)
+
+	var all_items = []
+	for p in current_eligible_recipients: all_items.append({"person": p, "eligible": true})
+	for p in current_excluded_recipients: all_items.append({"person": p, "eligible": false})
+
+	if all_items.size() == 0:
+		var empty_lbl = Label.new()
+		empty_lbl.text = "No constituents found in this audience selection."
+		empty_lbl.add_theme_font_size_override("font_size", 14)
+		empty_lbl.add_theme_color_override("font_color", Color(0.40, 0.45, 0.55, 1.0))
+		list_vbox.add_child(empty_lbl)
+	else:
+		for item in all_items:
+			var p = item["person"]
+			var is_elig = item["eligible"]
+			var eval = p.get("eval", {})
+
+			var row_card = PanelContainer.new()
+			var row_st = StyleBoxFlat.new()
+			row_st.bg_color = Color(0.96, 0.98, 0.96, 1.0) if is_elig else Color(0.99, 0.95, 0.95, 1.0)
+			row_st.border_width_left = 1; row_st.border_width_top = 1; row_st.border_width_right = 1; row_st.border_width_bottom = 1
+			row_st.border_color = Color(0.70, 0.88, 0.70, 1.0) if is_elig else Color(0.92, 0.70, 0.70, 1.0)
+			row_st.corner_radius_top_left = 6; row_st.corner_radius_top_right = 6; row_st.corner_radius_bottom_left = 6; row_st.corner_radius_bottom_right = 6
+			row_st.content_margin_left = 12; row_st.content_margin_top = 8; row_st.content_margin_right = 12; row_st.content_margin_bottom = 8
+			row_card.add_theme_stylebox_override("panel", row_st)
+
+			var rhbox = HBoxContainer.new()
+			rhbox.add_theme_constant_override("separation", 12)
+
+			var fn = str(p.get("first_name", ""))
+			var ln = str(p.get("last_name", ""))
+			var name_str = (fn + " " + ln).strip_edges() + " (" + str(p.get("human_id", "")) + ")"
+
+			var name_lbl = Label.new()
+			name_lbl.text = name_str
+			name_lbl.custom_minimum_size = Vector2(180, 0)
+			name_lbl.add_theme_font_size_override("font_size", 13)
+			name_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
+			rhbox.add_child(name_lbl)
+
+			var phone_val = str(p.get("phone", "")).strip_edges()
+			var phone_str = phone_val if (phone_val != "" and phone_val != "555-0000") else "❌ No Phone"
+			var phone_lbl = Label.new()
+			phone_lbl.text = phone_str
+			phone_lbl.custom_minimum_size = Vector2(110, 0)
+			phone_lbl.add_theme_font_size_override("font_size", 12)
+			phone_lbl.add_theme_color_override("font_color", Color(0.20, 0.25, 0.32, 1.0))
+			rhbox.add_child(phone_lbl)
+
+			var email_val = str(p.get("email", "")).strip_edges()
+			var email_str = email_val if (email_val != "" and email_val.contains("@")) else "❌ No Email"
+			var email_lbl = Label.new()
+			email_lbl.text = email_str
+			email_lbl.custom_minimum_size = Vector2(160, 0)
+			email_lbl.add_theme_font_size_override("font_size", 12)
+			email_lbl.add_theme_color_override("font_color", Color(0.20, 0.25, 0.32, 1.0))
+			rhbox.add_child(email_lbl)
+
+			var consent_str = "✅ Consented" if int(p.get("sms_consent", 1)) == 1 else "⛔ Opted Out"
+			var consent_lbl = Label.new()
+			consent_lbl.text = consent_str
+			consent_lbl.custom_minimum_size = Vector2(110, 0)
+			consent_lbl.add_theme_font_size_override("font_size", 12)
+			consent_lbl.add_theme_color_override("font_color", Color(0.18, 0.55, 0.35, 1.0) if int(p.get("sms_consent", 1)) == 1 else Color(0.75, 0.20, 0.20, 1.0))
+			rhbox.add_child(consent_lbl)
+
+			var status_str = "✅ Eligible" if is_elig else ("🚫 " + str(eval.get("reason", "Excluded")))
+			var status_lbl = Label.new()
+			status_lbl.text = status_str
+			status_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			status_lbl.add_theme_font_size_override("font_size", 12)
+			status_lbl.add_theme_color_override("font_color", Color(0.18, 0.55, 0.35, 1.0) if is_elig else Color(0.75, 0.20, 0.20, 1.0))
+			rhbox.add_child(status_lbl)
+
+			row_card.add_child(rhbox)
+			list_vbox.add_child(row_card)
+
+	var close_btn = Button.new()
+	close_btn.text = "Close Review"
+	close_btn.custom_minimum_size = Vector2(120, 36)
+	_style_secondary_button(close_btn)
+	close_btn.pressed.connect(func(): backdrop.queue_free())
+	vbox.add_child(close_btn)
 
 func _on_send_message_pressed() -> void:
-	if person_list.size() == 0: return
+	var channel = channel_dropdown.get_item_text(channel_dropdown.selected) if channel_dropdown else "SMS Text"
+	var body = message_body_edit.text.strip_edges() if message_body_edit else ""
 
-	var sel_p_idx = recipient_dropdown.selected
-	if sel_p_idx < 0 or sel_p_idx >= person_list.size(): return
-	var recipient = person_list[sel_p_idx]
+	if selected_audience_type == "Individual" and selected_individual_ids.size() <= 1:
+		if selected_individual_ids.size() == 0:
+			OS.alert("Please select at least one individual recipient.", "No Recipient Selected")
+			return
 
-	var channel = channel_dropdown.get_item_text(channel_dropdown.selected)
-	var body = message_body_edit.text.strip_edges()
+		var sel_pid = selected_individual_ids[0]
+		var recipient = {}
+		for p in person_list:
+			if int(p.get("id", 0)) == sel_pid:
+				recipient = p
+				break
+		if recipient.size() == 0: return
 
-	if channel == "Phone Call":
-		_initiate_call_dialog(recipient, body)
-		return
+		if channel == "Phone Call":
+			_initiate_call_dialog(recipient, body)
+			return
 
-	if body == "": return
+		if body == "":
+			OS.alert("Please type a message body or select a template before sending.", "Empty Message")
+			return
 
-	var res = com_service.send_message_atomic(recipient, channel, body, _get_active_sender_name())
-	if res["success"]:
-		print("Message sent successfully: ", res["message_uuid"])
-		message_body_edit.text = ""
-		_refresh_all_feeds()
+		var res = com_service.send_message_atomic(recipient, channel, body, _get_active_sender_name())
+		if res["success"]:
+			print("Individual message sent successfully: ", res["message_uuid"])
+			if message_body_edit: message_body_edit.text = ""
+			_refresh_all_feeds()
+		else:
+			OS.alert("Failed to send message: " + str(res.get("error", "Unknown error")), "Send Error")
+
+	else:
+		# Group / Multi-Individual Audience Send Flow
+		_update_audience_resolution()
+
+		if current_eligible_recipients.size() == 0:
+			OS.alert("No eligible recipients found for audience selection: " + selected_audience_type, "No Recipients")
+			return
+
+		if body == "":
+			OS.alert("Please type a message body or select a template before sending.", "Empty Message")
+			return
+
+		# Group Send Confirmation Modal (Development Preview stop)
+		var backdrop = ColorRect.new()
+		backdrop.color = Color(0.08, 0.12, 0.18, 0.6)
+		backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
+		add_child(backdrop)
+
+		var center = CenterContainer.new()
+		center.set_anchors_preset(Control.PRESET_FULL_RECT)
+		backdrop.add_child(center)
+
+		var card = PanelContainer.new()
+		var card_st = StyleBoxFlat.new()
+		card_st.bg_color = Color(1.0, 1.0, 1.0, 1.0)
+		card_st.border_width_left = 1; card_st.border_width_top = 1; card_st.border_width_right = 1; card_st.border_width_bottom = 1
+		card_st.border_color = Color(0.78, 0.82, 0.88, 1.0)
+		card_st.corner_radius_top_left = 12; card_st.corner_radius_top_right = 12; card_st.corner_radius_bottom_left = 12; card_st.corner_radius_bottom_right = 12
+		card_st.content_margin_left = 24; card_st.content_margin_top = 22; card_st.content_margin_right = 24; card_st.content_margin_bottom = 22
+		card.add_theme_stylebox_override("panel", card_st)
+		center.add_child(card)
+
+		var vbox = VBoxContainer.new()
+		vbox.add_theme_constant_override("separation", 14)
+		vbox.custom_minimum_size = Vector2(460, 220)
+		card.add_child(vbox)
+
+		var title = Label.new()
+		title.text = "⚠️ Confirm Group Message"
+		title.add_theme_font_size_override("font_size", 18)
+		title.add_theme_color_override("font_color", _get_active_theme_color())
+		vbox.add_child(title)
+
+		var target_label_str = selected_audience_type
+		if selected_audience_type == "Individual":
+			target_label_str = "Individual (%d Selected)" % selected_individual_ids.size()
+
+		var confirm_text = Label.new()
+		confirm_text.text = "You are about to send " + channel + " to " + str(current_eligible_recipients.size()) + " recipients."
+		confirm_text.add_theme_font_size_override("font_size", 15)
+		confirm_text.add_theme_color_override("font_color", Color(0.12, 0.16, 0.22, 1.0))
+		confirm_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		vbox.add_child(confirm_text)
+
+		var sub_text = Label.new()
+		sub_text.text = "Audience Target: " + target_label_str + "\nExcluded Constituents: " + str(current_excluded_recipients.size())
+		sub_text.add_theme_font_size_override("font_size", 13)
+		sub_text.add_theme_color_override("font_color", Color(0.40, 0.45, 0.55, 1.0))
+		vbox.add_child(sub_text)
+
+		var btn_hbox = HBoxContainer.new()
+		btn_hbox.add_theme_constant_override("separation", 12)
+
+		var btn_confirm = Button.new()
+		btn_confirm.text = "Confirm & Proceed"
+		btn_confirm.custom_minimum_size = Vector2(160, 36)
+		_style_primary_button(btn_confirm)
+		btn_confirm.pressed.connect(func():
+			backdrop.queue_free()
+			# IMPORTANT PER USER DIRECTIVE: DEVELOPMENT PREVIEW ONLY (DO NOT DISPATCH REAL GROUP SMS/EMAIL)
+			OS.alert("Development Preview — Group sending is not enabled yet.\n\nAudience: " + target_label_str + "\nEligible Recipients: " + str(current_eligible_recipients.size()) + "\nChannel: " + channel + "\n\nJohn can inspect layout, terminology, and recipient lists before enabling real dispatch.", "Development Preview")
+			print("[DEV-PREVIEW] Group send confirmed for " + target_label_str + " (" + str(current_eligible_recipients.size()) + " recipients, Channel: " + channel + ")")
+		)
+		btn_hbox.add_child(btn_confirm)
+
+		var btn_cancel = Button.new()
+		btn_cancel.text = "Cancel"
+		btn_cancel.custom_minimum_size = Vector2(100, 36)
+		_style_secondary_button(btn_cancel)
+		btn_cancel.pressed.connect(func(): backdrop.queue_free())
+		btn_hbox.add_child(btn_cancel)
+
+		vbox.add_child(btn_hbox)
 
 func _get_active_sender_name() -> String:
 	if db:
@@ -973,7 +1550,7 @@ func _refresh_voicemail_inbox() -> void:
 	header_hbox.size_flags_horizontal = SIZE_EXPAND_FILL
 	
 	var title_lbl = Label.new()
-	title_lbl.text = "🎙️ Communications Worksheet"
+	title_lbl.text = "🎙️ Response Center"
 	title_lbl.add_theme_font_size_override("font_size", 20)
 	title_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
 	title_lbl.size_flags_horizontal = SIZE_EXPAND_FILL

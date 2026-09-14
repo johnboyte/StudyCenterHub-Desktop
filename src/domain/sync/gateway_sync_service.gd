@@ -66,7 +66,7 @@ func sync_now(callback: Callable) -> void:
 		return
 		
 	http_client.request_completed.connect(func(result: int, response_code: int, _r_headers: PackedStringArray, body_bytes: PackedByteArray):
-		if response_code != 200:
+		if response_code < 200 or response_code >= 300:
 			callback.call({"success": false, "error": "Pull request failed with status: " + str(response_code)})
 			return
 			
@@ -356,7 +356,7 @@ func _push_acknowledgements(callback: Callable, inserted_count: int) -> void:
 		publish_staff_credentials_index()
 		publish_person_notes()
 		publish_staff_tasks()
-		if response_code == 200:
+		if response_code >= 200 and response_code < 300:
 			callback.call({"success": true, "inserted_count": inserted_count, "ack_count": event_ids.size()})
 		else:
 			callback.call({"success": true, "inserted_count": inserted_count, "error": "Pull complete, ack response failed: " + str(response_code)})
@@ -676,7 +676,7 @@ func publish_ivr_config(callback: Callable) -> void:
 		phone_settings["voice_name"] = str(ivr_res["data"][0]["voice_name"])
 		phone_settings["language"] = str(ivr_res["data"][0]["language"])
 	else:
-		phone_settings["voice_name"] = "Polly.Kimberly-Neural"
+		phone_settings["voice_name"] = "Polly.Joanna-Generative"
 		phone_settings["language"] = "en-US"
 
 	# Load active staff members

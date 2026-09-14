@@ -6957,7 +6957,6 @@ if ($uri === '/api/v1/sync/ivr-config') {
     }
     
     file_put_contents(__DIR__ . '/database/ivr_config.json', json_encode($ivr_config, JSON_PRETTY_PRINT));
-    http_response_code(200);
     echo json_encode(["success" => true, "message" => "IVR configuration cached successfully."]);
     exit;
 }
@@ -7400,117 +7399,6 @@ if ($uri === '/api/v1/calls/outbound') {
     exit;
 }
 
-// Route: TTS Voice Preview Test Call Endpoint (authenticated server-side request to Twilio)
-if ($uri === '/api/v1/tts/preview-call') {
-    header('Content-Type: application/json; charset=utf-8');
-    $req_key = $_SERVER['HTTP_X_SYNC_API_KEY'] ?? $_GET['sync_api_key'] ?? $_POST['sync_api_key'] ?? '';
-    if ($req_key !== $sync_api_key) {
-        http_response_code(401);
-        echo json_encode(['success' => false, 'error' => 'Unauthorized']);
-        exit;
-    }
-
-    $raw_input = file_get_contents('php://input');
-    $input = !empty($raw_input) ? json_decode($raw_input, true) : [];
-    if (!is_array($input)) {
-        $input = [];
-    }
-
-    $voice = trim($input['voice'] ?? $_POST['voice'] ?? $_GET['voice'] ?? '');
-    $text = trim($input['text'] ?? $_POST['text'] ?? $_GET['text'] ?? '');
-    $to_phone = trim($input['to'] ?? $input['to_phone'] ?? $input['destination'] ?? $_POST['to'] ?? $_POST['to_phone'] ?? $_GET['to'] ?? '');
-
-    $allowed_voices = [
-        'Polly.Joanna-Generative',
-        'Polly.Danielle-Generative',
-        'Polly.Matthew-Generative',
-        'Polly.Stephen-Generative'
-    ];
-
-    if (!in_array($voice, $allowed_voices, true)) {
-        http_response_code(400);
-        echo json_encode(['success' => false, 'error' => 'Invalid or unapproved voice identifier: ' . $voice]);
-        exit;
-    }
-
-    if (empty($to_phone)) {
-        http_response_code(400);
-        echo json_encode(['success' => false, 'error' => 'Missing destination phone number']);
-        exit;
-    }
-
-    if (empty($text)) {
-        $text = "This is a live preview call from Real Life Study Center Hub using " . str_replace('Polly.', '', $voice) . ".";
-    }
-
-    if (mb_strlen($text, 'UTF-8') > 500) {
-        $text = mb_substr($text, 0, 500, 'UTF-8');
-    }
-
-    $tw_sid = $config['TWILIO_ACCOUNT_SID'] ?? '';
-    $tw_token = $config['TWILIO_AUTH_TOKEN'] ?? '';
-    $from_phone = $config['TWILIO_PHONE_NUMBER'] ?? '+18647124446';
-
-    try {
-        $sid_stmt = $pdo->query("SELECT setting_value FROM app_settings WHERE setting_key = 'TWILIO_ACCOUNT_SID' LIMIT 1");
-        if ($sid_stmt && ($row = $sid_stmt->fetch(PDO::FETCH_ASSOC))) {
-            $val = trim($row['setting_value']);
-            if (!empty($val)) $tw_sid = $val;
-        }
-        $tok_stmt = $pdo->query("SELECT setting_value FROM app_settings WHERE setting_key = 'TWILIO_AUTH_TOKEN' LIMIT 1");
-        if ($tok_stmt && ($row = $tok_stmt->fetch(PDO::FETCH_ASSOC))) {
-            $val = trim($row['setting_value']);
-            if (!empty($val)) $tw_token = $val;
-        }
-    } catch (Throwable $e) {}
-
-    if (empty($tw_sid) || empty($tw_token)) {
-        http_response_code(401);
-        echo json_encode(['success' => false, 'error' => 'Twilio server credentials unconfigured in config.php']);
-        exit;
-    }
-
-    $safe_voice = htmlspecialchars($voice, ENT_QUOTES, 'UTF-8');
-    $safe_text = htmlspecialchars($text, ENT_QUOTES, 'UTF-8');
-    $twiml_xml = '<Response><Say voice="' . $safe_voice . '" language="en-US">' . $safe_text . '</Say><Hangup/></Response>';
-
-    $post_data = http_build_query([
-        'To' => $to_phone,
-        'From' => $from_phone,
-        'Twiml' => $twiml_xml
-    ]);
-
-    $ch = curl_init("https://api.twilio.com/2010-04-01/Accounts/$tw_sid/Calls.json");
-    curl_setopt($ch, CURLOPT_USERPWD, "$tw_sid:$tw_token");
-    curl_setopt($ch, CURLOPT_POST, true);
-    curl_setopt($ch, CURLOPT_POSTFIELDS, $post_data);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
-
-    $resp = curl_exec($ch);
-    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-
-    $json = json_decode($resp, true);
-    if ($http_code >= 200 && $http_code < 300 && !empty($json['sid'])) {
-        echo json_encode([
-            'success' => true,
-            'call_sid' => $json['sid'],
-            'voice' => $voice,
-            'status' => $json['status'] ?? 'queued',
-            'message' => 'Preview call initiated via Twilio'
-        ]);
-    } else {
-        http_response_code($http_code ?: 500);
-        echo json_encode([
-            'success' => false,
-            'error' => $json['message'] ?? 'Twilio API call failed',
-            'http_code' => $http_code
-        ]);
-    }
-    exit;
-}
-
 // Route: TwiML Outbound Bridge Webhook
 if ($uri === '/api/v1/webhooks/twilio/outbound-twiml') {
     $to = trim($_GET['to'] ?? '');
@@ -7661,10 +7549,10 @@ echo json_encode(['error' => 'Endpoint not found']);
 
 // Twilio Helper Functions
 function get_twiml_say($text, $config) {
-    $voice = !empty($config['voice_name']) ? trim($config['voice_name']) : 'Polly.Joanna-Generative';
+    $voice = !empty($config['voice_name']) ? $config['voice_name'] : 'Polly.Kimberly-Neural';
     // Ensure voice is supported natively by Twilio <Say> (Polly.* or standard Twilio voices) to prevent call drops
     if (strpos($voice, 'Polly.') !== 0 && !in_array($voice, ['man', 'woman', 'alice'])) {
-        $voice = 'Polly.Joanna-Generative';
+        $voice = 'Polly.Kimberly-Neural';
     }
     $language = !empty($config['language']) ? $config['language'] : 'en-US';
     // Clean all literal backslashes and escaped newline characters (e.g. \n or \\n) so Twilio TTS never speaks "backslash n" out loud

@@ -770,7 +770,7 @@ func get_ivr_voice_settings() -> Dictionary:
 	var res = db.execute("SELECT voice_name, language FROM ivr_settings WHERE id = 1;")
 	if res["success"] and res["data"].size() > 0:
 		return {"voice_name": str(res["data"][0]["voice_name"]), "language": str(res["data"][0]["language"])}
-	return {"voice_name": "Polly.Joanna", "language": "en-US"}
+	return {"voice_name": "Polly.Joanna-Generative", "language": "en-US"}
 
 func get_voicemails() -> Array:
 	var supervisor_name = ""

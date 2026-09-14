@@ -1836,15 +1836,17 @@ func _render_ivr_tab() -> void:
 			play_btn.pressed.connect(func():
 				var txt = act_edit.text.strip_edges()
 				if txt == "": return
-				DisplayServer.tts_stop()
 				var v_res = db.execute("SELECT voice_name, language FROM ivr_settings WHERE id = 1 LIMIT 1;")
-				var voice_id = ""
+				var voice_id = "Polly.Joanna-Generative"
 				if v_res["success"] and v_res["data"].size() > 0:
-					voice_id = str(v_res["data"][0].get("voice_name", ""))
-				if voice_id == "" or voice_id.begins_with("mock_"):
-					var play_dlg = AcceptDialog.new(); play_dlg.dialog_text = "📢 Greeting Preview:\n\n\"" + txt + "\"\n\n(Voice: Default TTS)"; add_child(play_dlg); play_dlg.popup_centered()
-				else:
-					DisplayServer.tts_speak(txt, voice_id)
+					var stored_v = str(v_res["data"][0].get("voice_name", "")).strip_edges()
+					if stored_v != "": voice_id = stored_v
+				var voice_label = voice_id
+				for v in static_voices:
+					if v["id"] == voice_id:
+						voice_label = str(v["label"])
+						break
+				_trigger_twilio_live_preview_call(voice_id, voice_label, txt, "")
 			)
 			
 			var save_btn = Button.new()
@@ -2371,6 +2373,12 @@ func _render_ivr_tab() -> void:
 	content_card.add_child(root_vbox)
 
 func _get_preview_target_phone(on_call_person_id: String = "") -> String:
+	var last_res = db.execute("SELECT setting_value FROM app_settings WHERE setting_key = 'PHONE_LAST_PREVIEW_DESTINATION' LIMIT 1;")
+	if last_res["success"] and last_res["data"].size() > 0:
+		var last_ph = str(last_res["data"][0].get("setting_value", "")).strip_edges()
+		if last_ph != "" and last_ph != "null" and last_ph != "<null>":
+			return last_ph
+
 	if on_call_person_id != "" and on_call_person_id != "0":
 		var res = db.execute("SELECT phone_mobile, phone_home FROM people WHERE id = ? LIMIT 1;", [on_call_person_id])
 		if res["success"] and res["data"].size() > 0:
@@ -2398,32 +2406,102 @@ func _trigger_twilio_live_preview_call(voice_id: String, voice_label: String, tx
 	_show_preview_call_dialog(voice_id, voice_label, txt, target_phone)
 
 func _show_preview_call_dialog(voice_id: String, voice_label: String, txt: String, initial_phone: String) -> void:
-	var dlg = ConfirmationDialog.new()
-	dlg.title = "📞 Preview Live Voice via Twilio Call"
-	dlg.dialog_hide_on_ok = true
+	var modal_bg = ColorRect.new()
+	modal_bg.color = Color(0, 0, 0, 0.45)
+	modal_bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	modal_bg.mouse_filter = Control.MOUSE_FILTER_STOP
+	
+	var center_margin = MarginContainer.new()
+	center_margin.set_anchors_preset(Control.PRESET_FULL_RECT)
+	modal_bg.add_child(center_margin)
+	
+	var dialog_card = PanelContainer.new()
+	dialog_card.custom_minimum_size = Vector2(480, 240)
+	dialog_card.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	dialog_card.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	
+	var card_st = StyleBoxFlat.new()
+	card_st.bg_color = Color(1.0, 1.0, 1.0, 1.0)
+	card_st.border_width_left = 1; card_st.border_width_top = 1; card_st.border_width_right = 1; card_st.border_width_bottom = 1
+	card_st.border_color = Color(0.82, 0.86, 0.90, 1.0)
+	card_st.corner_radius_top_left = 10; card_st.corner_radius_top_right = 10; card_st.corner_radius_bottom_left = 10; card_st.corner_radius_bottom_right = 10
+	card_st.content_margin_left = 20; card_st.content_margin_top = 18; card_st.content_margin_right = 20; card_st.content_margin_bottom = 18
+	card_st.shadow_color = Color(0, 0, 0, 0.15)
+	card_st.shadow_size = 12
+	dialog_card.add_theme_stylebox_override("panel", card_st)
+	center_margin.add_child(dialog_card)
 	
 	var vbox = VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 10)
+	vbox.add_theme_constant_override("separation", 14)
+	dialog_card.add_child(vbox)
+	
+	var title_lbl = Label.new()
+	title_lbl.text = "📞 Preview Live Voice via Twilio Call"
+	title_lbl.add_theme_font_size_override("font_size", 16)
+	title_lbl.add_theme_color_override("font_color", _get_active_theme_color())
+	vbox.add_child(title_lbl)
 	
 	var info_lbl = Label.new()
-	info_lbl.text = "Twilio will place a short test call to speak your greeting script using the selected unsaved voice:\n\nVoice: " + voice_label + " (" + voice_id + ")\n\nEnter staff/user phone number to receive the test call:"
+	info_lbl.text = "Twilio will place a short test call to speak your greeting script using the selected voice:\n\nVoice: " + voice_label + " (" + voice_id + ")"
 	info_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	info_lbl.add_theme_font_size_override("font_size", 13)
+	info_lbl.add_theme_color_override("font_color", Color(0.18, 0.24, 0.32, 1.0))
 	vbox.add_child(info_lbl)
+	
+	var input_vbox = VBoxContainer.new()
+	input_vbox.add_theme_constant_override("separation", 6)
+	
+	var phone_lbl = Label.new()
+	phone_lbl.text = "Destination phone number for test call:"
+	phone_lbl.add_theme_font_size_override("font_size", 13)
+	phone_lbl.add_theme_color_override("font_color", Color(0.12, 0.18, 0.26, 1.0))
+	input_vbox.add_child(phone_lbl)
 	
 	var phone_edit = LineEdit.new()
 	phone_edit.text = initial_phone
 	phone_edit.placeholder_text = "+1 (864) 555-0199"
+	phone_edit.custom_minimum_size = Vector2(0, 36)
 	phone_edit.caret_blink = true
 	phone_edit.add_theme_color_override("caret_color", Color(0.12, 0.16, 0.22, 1.0))
 	_style_input_control(phone_edit, 15)
-	vbox.add_child(phone_edit)
+	input_vbox.add_child(phone_edit)
 	
-	dlg.add_child(vbox)
-	dlg.ok_button_text = "📞 Start Test Call"
+	vbox.add_child(input_vbox)
 	
-	dlg.confirmed.connect(func():
+	var btn_hbox = HBoxContainer.new()
+	btn_hbox.alignment = BoxContainer.ALIGNMENT_END
+	btn_hbox.add_theme_constant_override("separation", 12)
+	
+	var cancel_btn = Button.new()
+	cancel_btn.text = "Cancel"
+	cancel_btn.custom_minimum_size = Vector2(100, 36)
+	cancel_btn.add_theme_font_size_override("font_size", 14)
+	var cnc_st = StyleBoxFlat.new()
+	cnc_st.bg_color = Color(0.92, 0.94, 0.96, 1.0)
+	cnc_st.corner_radius_top_left = 6; cnc_st.corner_radius_top_right = 6; cnc_st.corner_radius_bottom_left = 6; cnc_st.corner_radius_bottom_right = 6
+	cnc_st.content_margin_left = 14; cnc_st.content_margin_right = 14
+	cancel_btn.add_theme_stylebox_override("normal", cnc_st)
+	var cnc_hov = cnc_st.duplicate(); cnc_hov.bg_color = Color(0.86, 0.89, 0.93, 1.0)
+	cancel_btn.add_theme_stylebox_override("hover", cnc_hov)
+	cancel_btn.add_theme_color_override("font_color", Color(0.2, 0.25, 0.35, 1.0))
+	cancel_btn.pressed.connect(func(): modal_bg.queue_free())
+	btn_hbox.add_child(cancel_btn)
+	
+	var call_btn = Button.new()
+	call_btn.text = "📞 Call My Phone"
+	call_btn.custom_minimum_size = Vector2(170, 36)
+	call_btn.add_theme_font_size_override("font_size", 14)
+	var call_st = StyleBoxFlat.new()
+	call_st.bg_color = _get_active_theme_color()
+	call_st.corner_radius_top_left = 6; call_st.corner_radius_top_right = 6; call_st.corner_radius_bottom_left = 6; call_st.corner_radius_bottom_right = 6
+	call_st.content_margin_left = 16; call_st.content_margin_right = 16
+	call_btn.add_theme_stylebox_override("normal", call_st)
+	var call_hov = call_st.duplicate(); call_hov.bg_color = _get_active_theme_color().lightened(0.08)
+	call_btn.add_theme_stylebox_override("hover", call_hov)
+	call_btn.add_theme_color_override("font_color", Color(1, 1, 1, 1))
+	
+	call_btn.pressed.connect(func():
 		var ph = phone_edit.text.strip_edges()
-		dlg.queue_free()
 		if ph == "":
 			var err_dlg = AcceptDialog.new()
 			err_dlg.title = "Missing Phone Number"
@@ -2434,11 +2512,14 @@ func _show_preview_call_dialog(voice_id: String, voice_label: String, txt: Strin
 			err_dlg.popup_centered()
 			return
 			
+		modal_bg.queue_free()
+		db.execute("INSERT OR REPLACE INTO app_settings (setting_key, setting_value) VALUES ('PHONE_LAST_PREVIEW_DESTINATION', ?);", [ph])
 		_dispatch_preview_call(voice_id, voice_label, txt, ph)
 	)
-	dlg.close_requested.connect(func(): dlg.queue_free())
-	add_child(dlg)
-	dlg.popup_centered(Vector2i(480, 240))
+	btn_hbox.add_child(call_btn)
+	vbox.add_child(btn_hbox)
+	
+	add_child(modal_bg)
 
 func _dispatch_preview_call(voice_id: String, voice_label: String, txt: String, to_phone: String) -> void:
 	var gateway_url = _get_setting_string("GATEWAY_SYNC_URL", "https://app.reallife-studycenter.org").strip_edges()
@@ -2465,9 +2546,11 @@ func _dispatch_preview_call(voice_id: String, voice_label: String, txt: String, 
 		var resp_text = body.get_string_from_utf8()
 		var json = JSON.parse_string(resp_text) if resp_text != "" else null
 		
-		if result == HTTPRequest.RESULT_SUCCESS and response_code == 200 and json and json.get("success", false) == true:
+		var is_2xx = (response_code >= 200 and response_code < 300) or response_code in [200, 201, 202]
+		var is_success = (json and json.get("success", false) == true) or (json == null and is_2xx)
+		if result == HTTPRequest.RESULT_SUCCESS and is_2xx and is_success:
 			var ok_dlg = AcceptDialog.new()
-			ok_dlg.title = "📞 Twilio Test Call Started"
+			ok_dlg.title = "📞 Preview Call Started"
 			ok_dlg.dialog_text = "Preview call started using " + voice_label + ".\nTwilio is calling " + to_phone + " now."
 			ok_dlg.dialog_hide_on_ok = true
 			ok_dlg.close_requested.connect(func(): ok_dlg.queue_free())

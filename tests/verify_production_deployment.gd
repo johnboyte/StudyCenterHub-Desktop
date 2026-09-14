@@ -47,7 +47,7 @@ func verify_production() -> void:
 		"title": "Prod Test General Note (Edited)",
 		"body": "Testing General Note editing in Production."
 	})
-	assert(edit_res["success"], "Failed to edit General Note in Production")
+	assert(edit_res["success"], "Failed to edit General Note in Production: " + str(edit_res.get("error", "")))
 	print("  ✓ 3. Edited Production General Note: ", n_uuid)
 
 	# 4. Spelling assistance suggestions check

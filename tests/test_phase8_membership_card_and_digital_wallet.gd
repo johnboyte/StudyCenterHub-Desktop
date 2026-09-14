@@ -77,7 +77,7 @@ func _process(_delta: float) -> bool:
 		target_id = int(p_res["data"][0].get("id"))
 
 	var com_svc = CommunicationsService.new(db)
-	var email_res = com_svc.email_digital_member_pass(target_id, "Test Staff")
+	var email_res = await com_svc.sms_digital_member_pass(target_id, "Test Staff")
 	assert(email_res.has("apple_pass") and email_res.has("google_pass"), "FAIL: Email pass dispatch missing wallet links")
 	print("[PASS 7] Email Digital Member Pass dispatched outbox event with Apple & Google Wallet links.")
 

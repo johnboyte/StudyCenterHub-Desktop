@@ -184,7 +184,8 @@ func update_person_profile(person_uuid: String, updates: Dictionary, device_uuid
 
 	var allowed_fields = [
 		"first_name", "last_name", "phone", "status", "grade",
-		"notes", "emergency_contact_name", "emergency_contact_phone", "medical_notes"
+		"notes", "emergency_contact_name", "emergency_contact_phone", "medical_notes",
+		"real_life"
 	]
 
 	var set_clauses = []

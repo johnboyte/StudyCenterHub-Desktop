@@ -1427,6 +1427,11 @@ func _populate_profile_section(p: Dictionary) -> void:
 	_style_checkbox_on_dark(chk_is_tl)
 	cap_vbox.add_child(chk_is_tl)
 
+	var chk_real_life = CheckBox.new(); chk_real_life.text = "Real Life"
+	chk_real_life.button_pressed = (int(p.get("real_life", 0)) == 1)
+	_style_checkbox_on_dark(chk_real_life)
+	cap_vbox.add_child(chk_real_life)
+
 	role_dropdown.item_selected.connect(func(idx: int):
 		var selected_role = role_dropdown.get_item_text(idx)
 		if selected_role == "Staff" or selected_role == "Intern":
@@ -1452,6 +1457,7 @@ func _populate_profile_section(p: Dictionary) -> void:
 			var flag_db_val = flag_dropdown.get_item_text(flag_dropdown.selected)
 			var can_cov_val = 1 if (chk_can_cover.button_pressed or role_sel_txt == "Staff" or role_sel_txt == "Intern") else 0
 			var is_tl_val = 1 if chk_is_tl.button_pressed else 0
+			var real_life_val = 1 if chk_real_life.button_pressed else 0
 
 			var old_cls = _clean_str(p.get("staff_classification", p.get("primary_role", "Participant")))
 			if old_cls.contains("Supervisor") or old_cls == "Shift Supervisor": old_cls = "Team Leader"
@@ -1460,8 +1466,8 @@ func _populate_profile_section(p: Dictionary) -> void:
 			var pid = int(p.get("id", 0))
 
 			var execute_save = func():
-				db.execute("UPDATE people SET first_name = ?, last_name = ?, suffix = ?, phone = ?, email = ?, preferred_email = ?, birthday = ?, primary_role = ?, staff_classification = ?, flag_status = ?, can_cover_hours = ?, is_team_leader_eligible = ? WHERE person_uuid = ?;",
-					[fn_edit.text.strip_edges(), ln_edit.text.strip_edges(), suf_edit.text.strip_edges(), ph_edit.text.strip_edges(), em_edit.text.strip_edges(), pref_email, _ui_to_db_date(bd_edit.text.strip_edges()), role_db_val, role_db_val, flag_db_val, can_cov_val, is_tl_val, p_uuid])
+				db.execute("UPDATE people SET first_name = ?, last_name = ?, suffix = ?, phone = ?, email = ?, preferred_email = ?, birthday = ?, primary_role = ?, staff_classification = ?, flag_status = ?, can_cover_hours = ?, is_team_leader_eligible = ?, real_life = ? WHERE person_uuid = ?;",
+					[fn_edit.text.strip_edges(), ln_edit.text.strip_edges(), suf_edit.text.strip_edges(), ph_edit.text.strip_edges(), em_edit.text.strip_edges(), pref_email, _ui_to_db_date(bd_edit.text.strip_edges()), role_db_val, role_db_val, flag_db_val, can_cov_val, is_tl_val, real_life_val, p_uuid])
 				refresh_view()
 
 			if old_cls != role_sel_txt and role_sel_txt != "Participant":
