@@ -58,6 +58,7 @@ var recipient_dropdown: OptionButton = null
 var template_dropdown: OptionButton = null
 var btn_send_message: Button = null
 var message_body_edit: TextEdit = null
+var char_count_label: Label = null
 @onready var composer_card: PanelContainer = %ComposerCard
 @onready var voicemail_card: PanelContainer = %VoicemailCard
 @onready var threads_card: PanelContainer = %ThreadsCard
@@ -502,17 +503,18 @@ func _style_card() -> void:
 			dd.add_theme_color_override("font_hover_color", Color(0.08, 0.12, 0.18, 1.0))
 			dd.add_theme_color_override("font_pressed_color", Color(0.08, 0.12, 0.18, 1.0))
 
-	# High contrast message composer edit box with 18pt font size
+	# High contrast message composer edit box with 15pt font size and comfortable line spacing
 	if message_body_edit:
 		var edit_st = StyleBoxFlat.new()
 		edit_st.bg_color = Color(0.98, 0.99, 1.0, 1.0)
 		edit_st.border_width_left = 1; edit_st.border_width_top = 1; edit_st.border_width_right = 1; edit_st.border_width_bottom = 1
 		edit_st.border_color = Color(0.78, 0.82, 0.88, 1.0)
 		edit_st.corner_radius_top_left = 6; edit_st.corner_radius_top_right = 6; edit_st.corner_radius_bottom_left = 6; edit_st.corner_radius_bottom_right = 6
-		edit_st.content_margin_left = 14; edit_st.content_margin_top = 10; edit_st.content_margin_right = 14; edit_st.content_margin_bottom = 10
+		edit_st.content_margin_left = 16; edit_st.content_margin_top = 12; edit_st.content_margin_right = 16; edit_st.content_margin_bottom = 12
 		message_body_edit.add_theme_stylebox_override("normal", edit_st)
 		message_body_edit.add_theme_stylebox_override("focus", edit_st)
-		message_body_edit.add_theme_font_size_override("font_size", 18)
+		message_body_edit.add_theme_font_size_override("font_size", 15)
+		message_body_edit.add_theme_constant_override("line_spacing", 3)
 		message_body_edit.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
 		message_body_edit.add_theme_color_override("font_placeholder_color", Color(0.35, 0.45, 0.58, 1.0))
 
@@ -687,13 +689,38 @@ func _setup_communicate_send_composer() -> void:
 
 	composer_vbox.add_child(row3)
 
-	# Row 4: Message Body TextEdit
+	# Row 4: Message Body TextEdit (narrow ~660px writing area & live character count)
 	if message_body_edit:
-		message_body_edit.custom_minimum_size = Vector2(0, 90)
+		var msg_section = VBoxContainer.new()
+		msg_section.add_theme_constant_override("separation", 6)
+		msg_section.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+		msg_section.custom_minimum_size = Vector2(660, 0)
+
+		var msg_hdr_lbl = Label.new()
+		msg_hdr_lbl.text = "Message:"
+		msg_hdr_lbl.add_theme_font_size_override("font_size", 14)
+		msg_hdr_lbl.add_theme_color_override("font_color", Color(0.20, 0.25, 0.32, 1.0))
+		msg_section.add_child(msg_hdr_lbl)
+
+		message_body_edit.custom_minimum_size = Vector2(660, 140)
 		message_body_edit.placeholder_text = "Type your message body or select a pre-built template..."
+		message_body_edit.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
+		message_body_edit.scroll_fit_content_height = false
 		message_body_edit.caret_blink = true
 		message_body_edit.add_theme_color_override("caret_color", Color(0.12, 0.16, 0.22, 1.0))
-		_reparent_node(message_body_edit, composer_vbox)
+		_reparent_node(message_body_edit, msg_section)
+
+		if not char_count_label:
+			char_count_label = Label.new()
+			char_count_label.add_theme_font_size_override("font_size", 13)
+			char_count_label.add_theme_color_override("font_color", Color(0.40, 0.45, 0.55, 1.0))
+		_reparent_node(char_count_label, msg_section)
+
+		if not message_body_edit.text_changed.is_connected(_update_character_count):
+			message_body_edit.text_changed.connect(_update_character_count)
+
+		composer_vbox.add_child(msg_section)
+		_update_character_count()
 
 func _reparent_node(node: Node, new_parent: Node) -> void:
 	if not node or not new_parent: return
@@ -946,6 +973,7 @@ func _on_template_selected(index: int) -> void:
 	if index <= 0 or index - 1 >= template_list.size(): return
 	var tmpl = template_list[index - 1]
 	if message_body_edit: message_body_edit.text = str(tmpl.get("body_template", ""))
+	_update_character_count()
 
 func _on_channel_selected(index: int) -> void:
 	if not channel_dropdown: return
@@ -957,6 +985,24 @@ func _on_channel_selected(index: int) -> void:
 		if btn_send_message: btn_send_message.text = "✉️ Send Message"
 		if message_body_edit: message_body_edit.placeholder_text = "Type your message body or select a pre-built template..."
 	_update_audience_resolution()
+	_update_character_count()
+
+func _update_character_count() -> void:
+	if not message_body_edit or not char_count_label: return
+	var txt = message_body_edit.text
+	var count = txt.length()
+	var ch = channel_dropdown.get_item_text(channel_dropdown.selected) if (channel_dropdown and channel_dropdown.selected >= 0) else "SMS Text"
+
+	var count_str = "%d character%s" % [count, ("s" if count != 1 else "")]
+	if ch.contains("SMS") or ch.contains("Both"):
+		var segments = 1
+		if count > 160:
+			segments = int(ceil(float(count) / 153.0))
+		elif count == 0:
+			segments = 0
+		count_str += " • Est. %d SMS segment%s" % [segments, ("s" if segments != 1 else "")]
+
+	char_count_label.text = count_str
 
 func _update_audience_resolution() -> void:
 	if not db: return
@@ -1279,7 +1325,9 @@ func _on_send_message_pressed() -> void:
 		var res = com_service.send_message_atomic(recipient, channel, body, _get_active_sender_name())
 		if res["success"]:
 			print("Individual message sent successfully: ", res["message_uuid"])
-			if message_body_edit: message_body_edit.text = ""
+			if message_body_edit:
+				message_body_edit.text = ""
+				_update_character_count()
 			_refresh_all_feeds()
 		else:
 			OS.alert("Failed to send message: " + str(res.get("error", "Unknown error")), "Send Error")
@@ -1492,6 +1540,7 @@ func _execute_group_broadcast(channel: String, body: String, backdrop: Node = nu
 
 	if (sms_sent > 0 or email_sent > 0) and message_body_edit:
 		message_body_edit.text = ""
+		_update_character_count()
 
 	_refresh_all_feeds()
 
