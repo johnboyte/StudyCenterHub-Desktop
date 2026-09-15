@@ -51,6 +51,7 @@ var pathway_list: Array = []
 var session_list: Array = []
 var current_eligible_recipients: Array = []
 var current_excluded_recipients: Array = []
+var _is_sending_group_broadcast: bool = false
 
 var channel_dropdown: OptionButton = null
 var recipient_dropdown: OptionButton = null
@@ -1082,34 +1083,35 @@ func _evaluate_person_eligibility(person: Dictionary, channel_str: String) -> Di
 	var has_valid_phone = (phone != "" and phone != "555-0000" and phone.length() >= 7)
 	var has_valid_email = (email != "" and email.contains("@"))
 
-	if channel_str.contains("SMS") and not channel_str.contains("Both"):
-		if not sms_consent:
-			return {"is_eligible": false, "reason": "SMS Consent Withdrawn (STOP Opt-Out)", "has_phone": has_valid_phone, "has_email": has_valid_email, "sms_consent": false}
-		if not has_valid_phone:
-			return {"is_eligible": false, "reason": "Missing or Invalid Phone Number", "has_phone": false, "has_email": has_valid_email, "sms_consent": sms_consent}
-		return {"is_eligible": true, "reason": "Eligible for SMS", "has_phone": true, "has_email": has_valid_email, "sms_consent": true}
+	var sms_ok = has_valid_phone and sms_consent
+	var email_ok = has_valid_email
 
-	elif channel_str.contains("Email"):
-		if not has_valid_email:
-			return {"is_eligible": false, "reason": "Missing or Invalid Email Address", "has_phone": has_valid_phone, "has_email": false, "sms_consent": sms_consent}
-		return {"is_eligible": true, "reason": "Eligible for Email", "has_phone": has_valid_phone, "has_email": true, "sms_consent": sms_consent}
-
-	elif channel_str.contains("Both"):
-		var sms_ok = has_valid_phone and sms_consent
-		var email_ok = has_valid_email
+	if channel_str.contains("Both"):
 		if not sms_ok and not email_ok:
 			var reason_str = "Missing Phone & Email Address"
 			if not sms_consent and not email_ok:
 				reason_str = "SMS Consent Withdrawn & Missing Email"
-			return {"is_eligible": false, "reason": reason_str, "has_phone": has_valid_phone, "has_email": has_valid_email, "sms_consent": sms_consent}
-		return {"is_eligible": true, "reason": "Eligible (SMS and/or Email)", "has_phone": has_valid_phone, "has_email": has_valid_email, "sms_consent": sms_consent}
+			return {"is_eligible": false, "reason": reason_str, "has_phone": has_valid_phone, "has_email": has_valid_email, "sms_consent": sms_consent, "sms_ok": false, "email_ok": false}
+		return {"is_eligible": true, "reason": "Eligible (SMS and/or Email)", "has_phone": has_valid_phone, "has_email": has_valid_email, "sms_consent": sms_consent, "sms_ok": sms_ok, "email_ok": email_ok}
+
+	elif channel_str.contains("SMS"):
+		if not sms_consent:
+			return {"is_eligible": false, "reason": "SMS Consent Withdrawn (STOP Opt-Out)", "has_phone": has_valid_phone, "has_email": has_valid_email, "sms_consent": false, "sms_ok": false, "email_ok": false}
+		if not has_valid_phone:
+			return {"is_eligible": false, "reason": "Missing or Invalid Phone Number", "has_phone": false, "has_email": has_valid_email, "sms_consent": sms_consent, "sms_ok": false, "email_ok": false}
+		return {"is_eligible": true, "reason": "Eligible for SMS", "has_phone": true, "has_email": has_valid_email, "sms_consent": true, "sms_ok": true, "email_ok": false}
+
+	elif channel_str.contains("Email"):
+		if not has_valid_email:
+			return {"is_eligible": false, "reason": "Missing or Invalid Email Address", "has_phone": has_valid_phone, "has_email": false, "sms_consent": sms_consent, "sms_ok": false, "email_ok": false}
+		return {"is_eligible": true, "reason": "Eligible for Email", "has_phone": has_valid_phone, "has_email": true, "sms_consent": sms_consent, "sms_ok": false, "email_ok": true}
 
 	elif channel_str.contains("Phone Call"):
 		if not has_valid_phone:
-			return {"is_eligible": false, "reason": "Missing Phone Number", "has_phone": false, "has_email": has_valid_email, "sms_consent": sms_consent}
-		return {"is_eligible": true, "reason": "Eligible for Call", "has_phone": true, "has_email": has_valid_email, "sms_consent": sms_consent}
+			return {"is_eligible": false, "reason": "Missing Phone Number", "has_phone": false, "has_email": has_valid_email, "sms_consent": sms_consent, "sms_ok": false, "email_ok": false}
+		return {"is_eligible": true, "reason": "Eligible for Call", "has_phone": true, "has_email": has_valid_email, "sms_consent": sms_consent, "sms_ok": true, "email_ok": false}
 
-	return {"is_eligible": true, "reason": "Eligible", "has_phone": has_valid_phone, "has_email": has_valid_email, "sms_consent": sms_consent}
+	return {"is_eligible": true, "reason": "Eligible", "has_phone": has_valid_phone, "has_email": has_valid_email, "sms_consent": sms_consent, "sms_ok": sms_ok, "email_ok": email_ok}
 
 func _open_review_recipients_dialog() -> void:
 	_update_audience_resolution()
@@ -1247,6 +1249,9 @@ func _open_review_recipients_dialog() -> void:
 	vbox.add_child(close_btn)
 
 func _on_send_message_pressed() -> void:
+	if _is_sending_group_broadcast:
+		return
+
 	var channel = channel_dropdown.get_item_text(channel_dropdown.selected) if channel_dropdown else "SMS Text"
 	var body = message_body_edit.text.strip_edges() if message_body_edit else ""
 
@@ -1291,7 +1296,7 @@ func _on_send_message_pressed() -> void:
 			OS.alert("Please type a message body or select a template before sending.", "Empty Message")
 			return
 
-		# Group Send Confirmation Modal (Development Preview stop)
+		# Group Send Confirmation Modal
 		var backdrop = ColorRect.new()
 		backdrop.color = Color(0.08, 0.12, 0.18, 0.6)
 		backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -1313,7 +1318,7 @@ func _on_send_message_pressed() -> void:
 
 		var vbox = VBoxContainer.new()
 		vbox.add_theme_constant_override("separation", 14)
-		vbox.custom_minimum_size = Vector2(460, 220)
+		vbox.custom_minimum_size = Vector2(480, 260)
 		card.add_child(vbox)
 
 		var title = Label.new()
@@ -1326,32 +1331,79 @@ func _on_send_message_pressed() -> void:
 		if selected_audience_type == "Individual":
 			target_label_str = "Individual (%d Selected)" % selected_individual_ids.size()
 
+		var sms_count = 0
+		var email_count = 0
+		for p in current_eligible_recipients:
+			var eval_d = p.get("eval", {})
+			if eval_d.get("sms_ok", false): sms_count += 1
+			if eval_d.get("email_ok", false): email_count += 1
+
 		var confirm_text = Label.new()
-		confirm_text.text = "You are about to send " + channel + " to " + str(current_eligible_recipients.size()) + " recipients."
+		confirm_text.text = "You are about to send " + channel + " to " + str(current_eligible_recipients.size()) + " constituents."
 		confirm_text.add_theme_font_size_override("font_size", 15)
 		confirm_text.add_theme_color_override("font_color", Color(0.12, 0.16, 0.22, 1.0))
 		confirm_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		vbox.add_child(confirm_text)
 
-		var sub_text = Label.new()
-		sub_text.text = "Audience Target: " + target_label_str + "\nExcluded Constituents: " + str(current_excluded_recipients.size())
-		sub_text.add_theme_font_size_override("font_size", 13)
-		sub_text.add_theme_color_override("font_color", Color(0.40, 0.45, 0.55, 1.0))
-		vbox.add_child(sub_text)
+		var details_box = PanelContainer.new()
+		var details_st = StyleBoxFlat.new()
+		details_st.bg_color = Color(0.96, 0.97, 0.99, 1.0)
+		details_st.corner_radius_top_left = 8; details_st.corner_radius_top_right = 8; details_st.corner_radius_bottom_left = 8; details_st.corner_radius_bottom_right = 8
+		details_st.content_margin_left = 12; details_st.content_margin_top = 10; details_st.content_margin_right = 12; details_st.content_margin_bottom = 10
+		details_box.add_theme_stylebox_override("panel", details_st)
+
+		var details_vbox = VBoxContainer.new()
+		details_vbox.add_theme_constant_override("separation", 4)
+
+		var sub_target = Label.new()
+		sub_target.text = "Audience Target: " + target_label_str
+		sub_target.add_theme_font_size_override("font_size", 13)
+		sub_target.add_theme_color_override("font_color", Color(0.20, 0.25, 0.35, 1.0))
+		details_vbox.add_child(sub_target)
+
+		if channel.contains("Both"):
+			var sub_sms = Label.new()
+			sub_sms.text = "📱 SMS Recipients: " + str(sms_count)
+			sub_sms.add_theme_font_size_override("font_size", 13)
+			sub_sms.add_theme_color_override("font_color", Color(0.15, 0.45, 0.25, 1.0))
+			details_vbox.add_child(sub_sms)
+
+			var sub_email = Label.new()
+			sub_email.text = "✉️ Email Recipients: " + str(email_count)
+			sub_email.add_theme_font_size_override("font_size", 13)
+			sub_email.add_theme_color_override("font_color", Color(0.15, 0.40, 0.75, 1.0))
+			details_vbox.add_child(sub_email)
+		else:
+			var sub_ch = Label.new()
+			sub_ch.text = "Channel: " + channel
+			sub_ch.add_theme_font_size_override("font_size", 13)
+			sub_ch.add_theme_color_override("font_color", Color(0.20, 0.25, 0.35, 1.0))
+			details_vbox.add_child(sub_ch)
+
+		var sub_excl = Label.new()
+		sub_excl.text = "Excluded Constituents: " + str(current_excluded_recipients.size())
+		sub_excl.add_theme_font_size_override("font_size", 13)
+		sub_excl.add_theme_color_override("font_color", Color(0.50, 0.30, 0.30, 1.0))
+		details_vbox.add_child(sub_excl)
+
+		var summary_snippet = body.left(120) + ("..." if body.length() > 120 else "")
+		var sub_msg = Label.new()
+		sub_msg.text = "Message Summary:\n\"" + summary_snippet + "\""
+		sub_msg.add_theme_font_size_override("font_size", 12)
+		sub_msg.add_theme_color_override("font_color", Color(0.40, 0.45, 0.55, 1.0))
+		sub_msg.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		details_vbox.add_child(sub_msg)
+
+		details_box.add_child(details_vbox)
+		vbox.add_child(details_box)
 
 		var btn_hbox = HBoxContainer.new()
 		btn_hbox.add_theme_constant_override("separation", 12)
 
 		var btn_confirm = Button.new()
-		btn_confirm.text = "Confirm & Proceed"
-		btn_confirm.custom_minimum_size = Vector2(160, 36)
+		btn_confirm.text = "Send Now"
+		btn_confirm.custom_minimum_size = Vector2(140, 36)
 		_style_primary_button(btn_confirm)
-		btn_confirm.pressed.connect(func():
-			backdrop.queue_free()
-			# IMPORTANT PER USER DIRECTIVE: DEVELOPMENT PREVIEW ONLY (DO NOT DISPATCH REAL GROUP SMS/EMAIL)
-			OS.alert("Development Preview — Group sending is not enabled yet.\n\nAudience: " + target_label_str + "\nEligible Recipients: " + str(current_eligible_recipients.size()) + "\nChannel: " + channel + "\n\nJohn can inspect layout, terminology, and recipient lists before enabling real dispatch.", "Development Preview")
-			print("[DEV-PREVIEW] Group send confirmed for " + target_label_str + " (" + str(current_eligible_recipients.size()) + " recipients, Channel: " + channel + ")")
-		)
 		btn_hbox.add_child(btn_confirm)
 
 		var btn_cancel = Button.new()
@@ -1361,7 +1413,108 @@ func _on_send_message_pressed() -> void:
 		btn_cancel.pressed.connect(func(): backdrop.queue_free())
 		btn_hbox.add_child(btn_cancel)
 
+		btn_confirm.pressed.connect(func():
+			if _is_sending_group_broadcast:
+				return
+			_is_sending_group_broadcast = true
+			btn_confirm.disabled = true
+			btn_confirm.text = "Sending..."
+			btn_cancel.disabled = true
+			if btn_send_message: btn_send_message.disabled = true
+			_execute_group_broadcast(channel, body, backdrop)
+		)
+
 		vbox.add_child(btn_hbox)
+
+func _execute_group_broadcast(channel: String, body: String, backdrop: Node = null) -> void:
+	var sender_name = _get_active_sender_name()
+	var total_candidates_count = current_eligible_recipients.size() + current_excluded_recipients.size()
+
+	var sms_sent = 0
+	var sms_failed = 0
+	var sms_excluded = 0
+
+	var email_sent = 0
+	var email_failed = 0
+	var email_unavailable = 0
+
+	if channel.contains("Both"):
+		var sms_eligible_count = 0
+		var email_eligible_count = 0
+
+		for p in current_eligible_recipients:
+			var eval_d = p.get("eval", {})
+			var sms_ok = eval_d.get("sms_ok", false)
+			var email_ok = eval_d.get("email_ok", false)
+
+			if sms_ok:
+				sms_eligible_count += 1
+				var res_sms = com_service.send_message_atomic(p, "SMS Text", body, sender_name)
+				if res_sms.get("success", false):
+					sms_sent += 1
+				else:
+					sms_failed += 1
+
+			if email_ok:
+				email_eligible_count += 1
+				var res_email = com_service.send_message_atomic(p, "Email", body, sender_name)
+				if res_email.get("success", false):
+					email_sent += 1
+				else:
+					email_failed += 1
+
+		sms_excluded = total_candidates_count - sms_eligible_count
+		email_unavailable = total_candidates_count - email_eligible_count
+
+	elif channel.contains("SMS"):
+		sms_excluded = current_excluded_recipients.size()
+		for p in current_eligible_recipients:
+			var res_sms = com_service.send_message_atomic(p, "SMS Text", body, sender_name)
+			if res_sms.get("success", false):
+				sms_sent += 1
+			else:
+				sms_failed += 1
+
+	elif channel.contains("Email"):
+		email_unavailable = current_excluded_recipients.size()
+		for p in current_eligible_recipients:
+			var res_email = com_service.send_message_atomic(p, "Email", body, sender_name)
+			if res_email.get("success", false):
+				email_sent += 1
+			else:
+				email_failed += 1
+
+	if backdrop and is_instance_valid(backdrop):
+		backdrop.queue_free()
+
+	_is_sending_group_broadcast = false
+	if btn_send_message: btn_send_message.disabled = false
+
+	if (sms_sent > 0 or email_sent > 0) and message_body_edit:
+		message_body_edit.text = ""
+
+	_refresh_all_feeds()
+
+	_show_group_send_completion_dialog(channel, sms_sent, sms_failed, sms_excluded, email_sent, email_failed, email_unavailable)
+
+func _show_group_send_completion_dialog(channel: String, sms_sent: int, sms_failed: int, sms_excluded: int, email_sent: int, email_failed: int, email_unavailable: int) -> void:
+	var summary_msg = "Send Complete\n\n"
+	if channel.contains("SMS") or channel.contains("Both"):
+		summary_msg += "SMS:\n"
+		summary_msg += "%d sent\n" % sms_sent
+		summary_msg += "%d failed\n" % sms_failed
+		summary_msg += "%d excluded\n\n" % sms_excluded
+
+	if channel.contains("Email") or channel.contains("Both"):
+		summary_msg += "Email:\n"
+		summary_msg += "%d sent\n" % email_sent
+		summary_msg += "%d failed\n" % email_failed
+		summary_msg += "%d unavailable\n" % email_unavailable
+
+	print("[GROUP-DISPATCH-COMPLETE]\n", summary_msg.strip_edges())
+
+	if DisplayServer.get_name() != "headless":
+		OS.alert(summary_msg.strip_edges(), "Send Complete")
 
 func _get_active_sender_name() -> String:
 	if db:
