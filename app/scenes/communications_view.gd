@@ -321,7 +321,13 @@ func _render_unresolved_inbound_sms_item(vbox: VBoxContainer, item: Dictionary) 
 	vbox.add_child(msg_lbl)
 
 	var reply_edit = TextEdit.new(); reply_edit.placeholder_text = "Type SMS reply to constituent..."; reply_edit.custom_minimum_size = Vector2(0, 80)
+	reply_edit.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
+	reply_edit.caret_blink = true
+	reply_edit.add_theme_color_override("caret_color", Color(0.12, 0.16, 0.22, 1.0))
 	vbox.add_child(reply_edit)
+
+	if SpellingAssistanceHelperScript:
+		SpellingAssistanceHelperScript.attach_inline_spell_check(reply_edit)
 
 	var btn_hbox = HBoxContainer.new(); btn_hbox.add_theme_constant_override("separation", 12)
 
@@ -710,6 +716,9 @@ func _setup_communicate_send_composer() -> void:
 		message_body_edit.caret_blink = true
 		message_body_edit.add_theme_color_override("caret_color", Color(0.12, 0.16, 0.22, 1.0))
 		_reparent_node(message_body_edit, msg_section)
+
+		if SpellingAssistanceHelperScript:
+			SpellingAssistanceHelperScript.attach_inline_spell_check(message_body_edit)
 
 		if not char_count_label:
 			char_count_label = Label.new()
@@ -2465,8 +2474,7 @@ func _open_sms_conversation_dialog(caller_num: String, display_caller: String, v
 	compose_vbox.add_child(msg_edit)
 
 	if SpellingAssistanceHelperScript:
-		var spell_inst = SpellingAssistanceHelperScript.new()
-		spell_inst.attach_to_text_edit(msg_edit, compose_vbox)
+		SpellingAssistanceHelperScript.attach_inline_spell_check(msg_edit)
 
 	var compose_action_hbox = HBoxContainer.new()
 	compose_action_hbox.add_theme_constant_override("separation", 10)

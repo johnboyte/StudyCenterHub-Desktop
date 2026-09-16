@@ -1943,8 +1943,7 @@ func _populate_notes_section(p: Dictionary) -> void:
 	body_vbox.add_child(body_edit)
 
 	if SpellingAssistanceHelperScript:
-		var spell_inst = SpellingAssistanceHelperScript.new()
-		spell_inst.attach_to_text_edit(body_edit, body_vbox)
+		SpellingAssistanceHelperScript.attach_inline_spell_check(body_edit)
 	comp_box.add_child(body_vbox)
 
 	var btn_save_note = Button.new()
@@ -2153,8 +2152,7 @@ func _populate_notes_section(p: Dictionary) -> void:
 			edit_vbox.add_child(edit_text_edit)
 
 			if SpellingAssistanceHelperScript:
-				var spell_inst_edit = SpellingAssistanceHelperScript.new()
-				spell_inst_edit.attach_to_text_edit(edit_text_edit, edit_vbox)
+				SpellingAssistanceHelperScript.attach_inline_spell_check(edit_text_edit)
 
 			var edit_act_row = HBoxContainer.new()
 			edit_act_row.add_theme_constant_override("separation", 10)

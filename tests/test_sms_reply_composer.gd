@@ -65,24 +65,40 @@ func _test_multiline_editor_properties() -> void:
 func _test_spelling_assistance_and_dictionary() -> void:
 	print("\n--- 2. Testing Spelling Assistance, Ignore Action & Dictionary Addition ---")
 
-	var sample_reply = "I will definately recieve your message for customconstterm."
-	var issues = SpellingAssistanceHelperScript.check_text(sample_reply)
+	# Test 2a: Ordinary English message including "Thanks for the reply..." MUST HAVE ZERO false positives
+	var realistic_text_1 = "Thanks for the reply. We're looking forward to seeing John's child at the center tomorrow at 3:00 PM."
+	var issues_realistic_1 = SpellingAssistanceHelperScript.check_text(realistic_text_1)
+	print("Realistic text 1 issues count: ", issues_realistic_1.size())
+	if issues_realistic_1.size() > 0:
+		print("FALSE POSITIVES DETECTED: ", issues_realistic_1)
+	assert(issues_realistic_1.size() == 0, "Ordinary English text 'Thanks for the reply...' MUST have 0 false positives! Got: " + str(issues_realistic_1.size()))
+	print("✓ PASS: 'Thanks for the reply...' produced 0 false positives.")
 
-	print("Detected issues in sample reply: ", issues)
-	assert(issues.size() >= 3, "Expected at least 3 issues, got: " + str(issues.size()))
-	var has_def = false
-	var has_rec = false
-	var has_custom = false
-	for iss in issues:
-		if iss["word"] == "definately": has_def = true
-		if iss["word"] == "recieve": has_rec = true
-		if iss["word"] == "customconstterm": has_custom = true
-	assert(has_def and has_rec and has_custom, "Must flag definately, recieve, and customconstterm")
-	print("✓ PASS: Misspellings detected and suggestions generated.")
+	# Test 2b: Multiline realistic constituent reply
+	var realistic_text_2 = "Thanks for reaching out!\n\nWe have updated your account preferences and confirmed your attendance for this Friday's session."
+	var issues_realistic_2 = SpellingAssistanceHelperScript.check_text(realistic_text_2)
+	assert(issues_realistic_2.size() == 0, "Multiline ordinary reply MUST have 0 false positives! Got: " + str(issues_realistic_2.size()))
+	print("✓ PASS: Multiline constituent reply produced 0 false positives.")
+
+	# Test 2c: Genuine typos MUST still be detected with accurate suggestions
+	var typo_reply = "I will definately recieve your message for customconstterm."
+	var issues_typos = SpellingAssistanceHelperScript.check_text(typo_reply)
+
+	print("Detected issues in typo reply: ", issues_typos)
+	assert(issues_typos.size() == 3, "Expected exactly 3 issues (definately, recieve, customconstterm), got: " + str(issues_typos.size()))
+
+	assert(issues_typos[0]["word"] == "definately", "Expected definately flagged first")
+	assert(issues_typos[0]["suggestions"][0] == "definitely", "Expected definitely suggestion for definately")
+
+	assert(issues_typos[1]["word"] == "recieve", "Expected recieve flagged second")
+	assert(issues_typos[1]["suggestions"][0] == "receive", "Expected receive suggestion for recieve")
+
+	assert(issues_typos[2]["word"] == "customconstterm", "Expected customconstterm flagged third")
+	print("✓ PASS: Misspellings detected accurately with correct suggestions.")
 
 	# Test Session Ignore Action
 	SpellingAssistanceHelperScript.ignore_word("definately")
-	var re_check1 = SpellingAssistanceHelperScript.check_text(sample_reply)
+	var re_check1 = SpellingAssistanceHelperScript.check_text(typo_reply)
 	var definately_still_flagged = false
 	for iss in re_check1:
 		if iss["word"] == "definately":
@@ -92,7 +108,7 @@ func _test_spelling_assistance_and_dictionary() -> void:
 
 	# Test Add to Dictionary Action
 	SpellingAssistanceHelperScript.add_word_to_dictionary("customconstterm")
-	var re_check2 = SpellingAssistanceHelperScript.check_text(sample_reply)
+	var re_check2 = SpellingAssistanceHelperScript.check_text(typo_reply)
 	var term_still_flagged = false
 	for iss in re_check2:
 		if iss["word"] == "customconstterm":
