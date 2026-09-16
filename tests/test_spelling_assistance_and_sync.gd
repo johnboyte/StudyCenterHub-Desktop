@@ -75,6 +75,23 @@ func _test_spelling_assistance_engine() -> void:
 	assert(hasehg_issue != null, "hasehg must be flagged!")
 	print("✓ PASS: 'hasehg' processed cleanly with candidates: ", hasehg_issue["suggestions"])
 
+	# Exact user requested word validation tests:
+	var req_text = "tha thak resturant restaurant that than thank the and"
+	var req_issues = SpellingAssistanceHelperScript.check_text(req_text)
+	var flagged_words: Array = []
+	for iss in req_issues:
+		flagged_words.append(iss["word"])
+	assert(flagged_words.has("tha"), "'tha' must be flagged as misspelled!")
+	assert(flagged_words.has("thak"), "'thak' must be flagged as misspelled!")
+	assert(flagged_words.has("resturant"), "'resturant' must be flagged as misspelled!")
+	assert(not flagged_words.has("restaurant"), "'restaurant' must NOT be flagged!")
+	assert(not flagged_words.has("that"), "'that' must NOT be flagged!")
+	assert(not flagged_words.has("than"), "'than' must NOT be flagged!")
+	assert(not flagged_words.has("thank"), "'thank' must NOT be flagged!")
+	assert(not flagged_words.has("the"), "'the' must NOT be flagged!")
+	assert(not flagged_words.has("and"), "'and' must NOT be flagged!")
+	print("✓ PASS: 'tha', 'thak', 'resturant' flagged correctly while valid words ('restaurant', 'that', 'than', 'thank', 'the', 'and') accepted.")
+
 	# Test Session Ignore Action
 	SpellingAssistanceHelperScript.ignore_word("hwe")
 	var re_check = SpellingAssistanceHelperScript.check_text("te hwe te hasehg")

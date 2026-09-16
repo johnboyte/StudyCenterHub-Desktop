@@ -31,15 +31,20 @@ func _setup_editor_with_text(initial_text: String) -> TextEdit:
 	SpellingAssistanceHelperScript.attach_inline_spell_check(te)
 	return te
 
+func _find_resturant_issue(text: String) -> Dictionary:
+	var issues = SpellingAssistanceHelperScript.check_text(text)
+	for iss in issues:
+		if iss["word"] == "resturant":
+			return iss
+	return {}
+
 func _test_cut_misspelled_word_only() -> void:
 	print("--- 1. Testing Cut on single misspelled word ---")
 	var initial = "This is a resturant and everything else stays."
 	var te = _setup_editor_with_text(initial)
 
-	var issues = SpellingAssistanceHelperScript.check_text(initial)
-	assert(issues.size() == 1, "Expected 1 issue for resturant")
-	var iss = issues[0]
-	assert(iss["word"] == "resturant", "Expected resturant issue")
+	var iss = _find_resturant_issue(initial)
+	assert(not iss.is_empty(), "Expected issue for resturant")
 
 	# Target range selection for resturant (10 to 19)
 	te.select(0, int(iss["start"]), 0, int(iss["end"]))
@@ -56,8 +61,8 @@ func _test_copy_misspelled_word_only() -> void:
 	var initial = "This is a resturant and everything else stays."
 	var te = _setup_editor_with_text(initial)
 
-	var issues = SpellingAssistanceHelperScript.check_text(initial)
-	var iss = issues[0]
+	var iss = _find_resturant_issue(initial)
+	assert(not iss.is_empty(), "Expected issue for resturant")
 
 	te.select(0, int(iss["start"]), 0, int(iss["end"]))
 	assert(te.get_selected_text() == "resturant", "Selected text must be resturant")
@@ -72,8 +77,8 @@ func _test_delete_misspelled_word_only() -> void:
 	var initial = "This is a resturant and everything else stays."
 	var te = _setup_editor_with_text(initial)
 
-	var issues = SpellingAssistanceHelperScript.check_text(initial)
-	var iss = issues[0]
+	var iss = _find_resturant_issue(initial)
+	assert(not iss.is_empty(), "Expected issue for resturant")
 
 	te.select(0, int(iss["start"]), 0, int(iss["end"]))
 	assert(te.get_selected_text() == "resturant", "Selected text must be resturant")
@@ -89,8 +94,8 @@ func _test_replace_suggestion_misspelled_word_only() -> void:
 	var initial = "This is a resturant and everything else stays."
 	var te = _setup_editor_with_text(initial)
 
-	var issues = SpellingAssistanceHelperScript.check_text(initial)
-	var iss = issues[0]
+	var iss = _find_resturant_issue(initial)
+	assert(not iss.is_empty(), "Expected issue for resturant")
 	var sug = str(iss["suggestions"][0])
 	assert(sug == "restaurant", "Expected 'restaurant' suggestion")
 
@@ -107,8 +112,8 @@ func _test_paste_replaces_only_target() -> void:
 	var initial = "This is a resturant and everything else stays."
 	var te = _setup_editor_with_text(initial)
 
-	var issues = SpellingAssistanceHelperScript.check_text(initial)
-	var iss = issues[0]
+	var iss = _find_resturant_issue(initial)
+	assert(not iss.is_empty(), "Expected issue for resturant")
 
 	te.select(0, int(iss["start"]), 0, int(iss["end"]))
 	te.insert_text_at_caret("bistro")

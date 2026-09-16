@@ -30,6 +30,7 @@ echo "==========================================================================
 "$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_session_staff_assignment_dialog.gd"
 "$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_uncovered_center_hours_calculation.gd"
 "$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_center_hours_staffing_and_capabilities.gd"
+"$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_spelling_context_menu_actions.gd"
 "$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_spelling_assistance_and_sync.gd"
 "$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_sms_reply_composer.gd"
 "$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_email_digital_member_pass.gd"

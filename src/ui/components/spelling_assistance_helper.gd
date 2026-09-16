@@ -24,6 +24,7 @@ const SUGGESTION_MAP = {
 	"tomorow": "tomorrow",
 	"freinds": "friends",
 	"teh": "the",
+	"tha": "the",
 	"taht": "that",
 	"wiht": "with",
 	"hvae": "have",
@@ -378,11 +379,13 @@ static func _ensure_dictionary_loaded() -> void:
 				var raw_line = f.get_line().strip_edges()
 				if raw_line.length() >= 2:
 					var lower = raw_line.to_lower()
-					_valid_word_set[lower] = true
-					line_idx += 1
-					if line_idx % 4 == 0 and _candidate_word_list.size() < 40000:
-						if not _candidate_word_list.has(lower) and lower.is_valid_identifier():
-							_candidate_word_list.append(lower)
+					# Filter short 2/3-letter web2 system dictionary noise (e.g. 'tha') unless in common vocabulary
+					if raw_line.length() > 3 or _valid_word_set.has(lower):
+						_valid_word_set[lower] = true
+						line_idx += 1
+						if line_idx % 4 == 0 and _candidate_word_list.size() < 40000:
+							if not _candidate_word_list.has(lower) and lower.is_valid_identifier():
+								_candidate_word_list.append(lower)
 
 static func is_word_valid(word: String) -> bool:
 	_ensure_dictionary_loaded()
