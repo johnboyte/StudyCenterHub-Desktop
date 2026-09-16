@@ -65,6 +65,14 @@ func _test_multiline_editor_properties() -> void:
 func _test_spelling_assistance_and_dictionary() -> void:
 	print("\n--- 2. Testing Spelling Assistance, Ignore Action & Dictionary Addition ---")
 
+	# Test user reported input: "Thak fasd f"
+	var user_failure_input = "Thak fasd f"
+	var user_issues = SpellingAssistanceHelperScript.check_text(user_failure_input)
+	assert(user_issues.size() == 2, "Expected 2 misspellings ('Thak', 'fasd') in 'Thak fasd f', got: " + str(user_issues.size()))
+	assert(user_issues[0]["word"] == "Thak", "Expected 'Thak' misspelling")
+	assert(user_issues[1]["word"] == "fasd", "Expected 'fasd' misspelling")
+	print("✓ PASS: User input 'Thak fasd f' flagged exact misspellings 'Thak' and 'fasd'.")
+
 	# Test 2a: Ordinary English message including "Thanks for the reply..." MUST HAVE ZERO false positives
 	var realistic_text_1 = "Thanks for the reply. We're looking forward to seeing John's child at the center tomorrow at 3:00 PM."
 	var issues_realistic_1 = SpellingAssistanceHelperScript.check_text(realistic_text_1)

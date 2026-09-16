@@ -30,6 +30,10 @@ echo "==========================================================================
 "$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_session_staff_assignment_dialog.gd"
 "$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_uncovered_center_hours_calculation.gd"
 "$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_center_hours_staffing_and_capabilities.gd"
+"$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_spelling_assistance_and_sync.gd"
+"$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_sms_reply_composer.gd"
+"$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_email_digital_member_pass.gd"
+"$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_sms_digital_member_pass.gd"
 echo "✅ All test suites passed cleanly."
 
 echo "=============================================================================="
@@ -48,7 +52,15 @@ if [ -f "$TARGET_PCK" ]; then
     mkdir -p "$TARGET_APP/Contents/Resources"
     cp -f "$TARGET_PCK" "$RESOURCE_PCK"
     touch "$TARGET_APP"
-    echo "✅ App Bundle Package Updated: $RESOURCE_PCK"
+    echo "✅ Build App Bundle Package Updated: $RESOURCE_PCK"
+
+    # Also update installed /Applications/StudyCenterHub.app if present
+    if [ -d "/Applications/StudyCenterHub.app" ]; then
+        mkdir -p "/Applications/StudyCenterHub.app/Contents/Resources"
+        cp -f "$TARGET_PCK" "/Applications/StudyCenterHub.app/Contents/Resources/StudyCenterHub-Desktop-Production.pck"
+        touch "/Applications/StudyCenterHub.app"
+        echo "✅ Installed App Bundle Updated: /Applications/StudyCenterHub.app/Contents/Resources/StudyCenterHub-Desktop-Production.pck"
+    fi
 else
     echo "❌ ERROR: Exported PCK missing at $TARGET_PCK"
     exit 1
@@ -60,6 +72,10 @@ echo "==========================================================================
 ls -ld "$TARGET_APP"
 ls -lh "$TARGET_PCK"
 ls -lh "$RESOURCE_PCK"
+if [ -d "/Applications/StudyCenterHub.app" ]; then
+    ls -ld "/Applications/StudyCenterHub.app"
+    ls -lh "/Applications/StudyCenterHub.app/Contents/Resources/StudyCenterHub-Desktop-Production.pck"
+fi
 
 echo "=============================================================================="
 echo "5. VERIFYING PRODUCTION DATABASE PRESERVATION"

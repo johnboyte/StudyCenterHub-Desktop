@@ -66,7 +66,35 @@ var _weather_http_client: HTTPRequest
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	add_to_group("app_shell")
+
 	_init_database()
+	_apply_pd008_theme_styles()
+	_populate_team_leaders()
+	_init_weather_client()
+	_update_date_and_weather()
+	_connect_nav_signals()
+	top_header_bar.resized.connect(_adjust_content_area_offset)
+
+	var init_view = OS.get_environment("STUDYCENTERHUB_INITIAL_VIEW")
+	if init_view != "":
+		switch_view(init_view)
+	else:
+		switch_view("home")
+
+	_start_auto_sync()
+
+	_apply_window_title()
+	call_deferred("_apply_window_title")
+	get_tree().create_timer(0.2).timeout.connect(_apply_window_title)
+
+func _apply_window_title() -> void:
+	var env_mode = OS.get_environment("STUDYCENTERHUB_ENV")
+	if env_mode == "production":
+		DisplayServer.window_set_title("StudyCenterHub - Desktop")
+	elif env_mode == "staging":
+		DisplayServer.window_set_title("StudyCenterHub - Desktop (Staging)")
+	else:
+		DisplayServer.window_set_title("StudyCenterHub - Desktop (Development)")
 	
 	# Startup Twilio & Database Log
 	var tw_conf = {"account_sid": "", "auth_token": "", "phone_number": ""}
@@ -76,19 +104,6 @@ func _ready() -> void:
 		if tw_gateway:
 			tw_conf = tw_gateway.get_twilio_config()
 	print("[Twilio] Settings status: Account SID: ", "Configured" if tw_conf.get("account_sid", "") != "" else "Not Configured", ", Phone: ", "Configured" if tw_conf.get("phone_number", "") != "" else "Not Configured")
-
-	_apply_pd008_theme_styles()
-	_populate_team_leaders()
-	_init_weather_client()
-	_update_date_and_weather()
-	_connect_nav_signals()
-	top_header_bar.resized.connect(_adjust_content_area_offset)
-	var init_view = OS.get_environment("STUDYCENTERHUB_INITIAL_VIEW")
-	if init_view != "":
-		switch_view(init_view)
-	else:
-		switch_view("home")
-	_start_auto_sync()
 
 func _start_auto_sync() -> void:
 	_sync_timer = Timer.new()
@@ -196,10 +211,16 @@ func _apply_pd008_theme_styles() -> void:
 	else:
 		badge_st.bg_color = Color(0.20, 0.38, 0.65, 1.0) # Professional Blue #3461A6
 
+	env_badge.name = "EnvBadge"
 	env_badge.add_theme_stylebox_override("panel", badge_st)
 	env_badge.add_child(env_label)
 
 	var top_hbox = $TopHeaderBar/TopMargin/TopHBox
+	var old_badge = top_hbox.get_node_or_null("EnvBadge")
+	if old_badge:
+		top_hbox.remove_child(old_badge)
+		old_badge.queue_free()
+
 	top_hbox.add_child(env_badge)
 	top_hbox.move_child(env_badge, 1) # Position right after GreetingVBox
 
@@ -465,6 +486,12 @@ func _connect_nav_signals() -> void:
 	if btn_nav_reports: btn_nav_reports.pressed.connect(func(): switch_view("reports"))
 	if btn_nav_settings: btn_nav_settings.pressed.connect(func(): switch_view("settings"))
 
+	var nav_vbox = $SidebarPanel/SidebarMargin/SidebarVBox/NavScroll/NavVBox
+	var old_kiosk = nav_vbox.get_node_or_null("BtnNavKiosk")
+	if old_kiosk:
+		nav_vbox.remove_child(old_kiosk)
+		old_kiosk.queue_free()
+
 	# Dynamically create Kiosk Mode nav button
 	btn_nav_kiosk = Button.new()
 	btn_nav_kiosk.name = "BtnNavKiosk"
@@ -475,7 +502,6 @@ func _connect_nav_signals() -> void:
 	btn_nav_kiosk.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	btn_nav_kiosk.pressed.connect(func(): switch_view("kiosk"))
 
-	var nav_vbox = $SidebarPanel/SidebarMargin/SidebarVBox/NavScroll/NavVBox
 	nav_vbox.add_child(btn_nav_kiosk)
 
 func switch_view(view_name: String, params: Dictionary = {}) -> bool:

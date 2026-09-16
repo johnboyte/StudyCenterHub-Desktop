@@ -601,13 +601,36 @@ class InlineSpellingOverlay extends Control:
 	func _init(te: TextEdit):
 		text_edit = te
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
-		set_anchors_preset(Control.PRESET_FULL_RECT)
+		z_index = 10
+		anchor_left = 0.0
+		anchor_top = 0.0
+		anchor_right = 1.0
+		anchor_bottom = 1.0
+		offset_left = 0.0
+		offset_top = 0.0
+		offset_right = 0.0
+		offset_bottom = 0.0
+
+	func _notification(what: int) -> void:
+		if what == NOTIFICATION_ENTER_TREE or what == NOTIFICATION_RESIZED or what == NOTIFICATION_VISIBILITY_CHANGED:
+			if text_edit and is_instance_valid(text_edit):
+				queue_redraw()
 
 	func _draw() -> void:
 		if not text_edit or not is_instance_valid(text_edit):
 			return
 
 		var total_lines = text_edit.get_line_count()
+		var font = text_edit.get_theme_font("font")
+		var font_size = text_edit.get_theme_font_size("font_size")
+		var line_height = text_edit.get_line_height()
+
+		var sb = text_edit.get_theme_stylebox("normal")
+		var pad_left = sb.get_margin(SIDE_LEFT) if sb else 4.0
+		var pad_top = sb.get_margin(SIDE_TOP) if sb else 4.0
+
+		var scroll_v = text_edit.scroll_vertical if "scroll_vertical" in text_edit else 0
+		var scroll_h = text_edit.scroll_horizontal if "scroll_horizontal" in text_edit else 0
 
 		for line_idx in range(total_lines):
 			var line_str = text_edit.get_line(line_idx)
@@ -615,56 +638,64 @@ class InlineSpellingOverlay extends Control:
 				continue
 
 			var issues = SpellingAssistanceHelper.check_text(line_str)
+			if issues.size() == 0:
+				continue
+
+			var line_top_y = pad_top + (line_idx * line_height) - (scroll_v * line_height)
+			var line_baseline_y = line_top_y + line_height - 3.0
+
 			for iss in issues:
 				var start_col = int(iss["start"])
 				var end_col = int(iss["end"])
 
-				var current_line_y = -1.0
-				var run_x_start = -1.0
-				var run_x_end = -1.0
+				var x_start = pad_left - scroll_h
+				var x_end = pad_left - scroll_h
 
-				for c in range(start_col, end_col):
-					var p1 = text_edit.get_pos_at_line_column(line_idx, c)
-					var p2 = text_edit.get_pos_at_line_column(line_idx, c + 1)
+				if font:
+					x_start += font.get_string_size(line_str.left(start_col), HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
+					x_end += font.get_string_size(line_str.left(end_col), HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
 
-					if p1.x >= 0 and p1.y >= 0:
-						if current_line_y < 0 or abs(p1.y - current_line_y) > 2.0:
-							if run_x_start >= 0 and run_x_end > run_x_start:
-								_draw_word_wave(run_x_start, run_x_end, current_line_y + 2.0)
-							current_line_y = p1.y
-							run_x_start = p1.x
-							run_x_end = p2.x
-						else:
-							run_x_end = p2.x
+				# Fallback if get_pos_at_line_column returns valid non-negative coordinates
+				var p1 = text_edit.get_pos_at_line_column(line_idx, start_col)
+				var p2 = text_edit.get_pos_at_line_column(line_idx, end_col)
+				if p1.x >= 0 and p1.y >= 0 and p2.x >= 0:
+					x_start = p1.x
+					x_end = p2.x
+					line_baseline_y = p1.y + line_height - 3.0
 
-				if run_x_start >= 0 and run_x_end > run_x_start:
-					_draw_word_wave(run_x_start, run_x_end, current_line_y + 2.0)
+				if x_start >= 0 and x_end > x_start:
+					_draw_word_wave(x_start, x_end, line_baseline_y)
 
 	func _draw_word_wave(x_start: float, x_end: float, y_baseline: float) -> void:
 		var wave_pts = PackedVector2Array()
 		var x = x_start
 		var wave_up = true
 		while x <= x_end:
-			var y_off = -1.0 if wave_up else 1.0
+			var y_off = -1.5 if wave_up else 1.5
 			wave_pts.append(Vector2(x, y_baseline + y_off))
 			x += 2.5
 			wave_up = not wave_up
 
 		if wave_pts.size() >= 2:
-			draw_polyline(wave_pts, Color(0.95, 0.25, 0.25, 0.95), 1.2, true)
+			draw_polyline(wave_pts, Color(0.95, 0.20, 0.20, 0.95), 1.5, true)
 
 static func attach_inline_spell_check(text_edit: TextEdit) -> void:
 	if not text_edit or not is_instance_valid(text_edit):
 		return
+
+	for child in text_edit.get_children():
+		if child is InlineSpellingOverlay:
+			return
 
 	# Rule Compliance: App-Wide Blinking Cursor / Caret Rule
 	text_edit.caret_blink = true
 	text_edit.add_theme_color_override("caret_color", Color(0.12, 0.16, 0.22, 1.0))
 	text_edit.context_menu_enabled = true
 
-	# Attach Overlay Drawer for Red Squiggly Underline ONLY (text font color is untouched)
+	# Attach Overlay Drawer for Red Squiggly Underline
 	var overlay = InlineSpellingOverlay.new(text_edit)
 	text_edit.add_child(overlay)
+	overlay.z_index = 10
 
 	var redraw_cb = func():
 		if is_instance_valid(overlay):
@@ -676,16 +707,40 @@ static func attach_inline_spell_check(text_edit: TextEdit) -> void:
 	if text_edit.has_signal("scroll_horizontal_changed"):
 		text_edit.scroll_horizontal_changed.connect(redraw_cb)
 	text_edit.resized.connect(redraw_cb)
+	text_edit.focus_entered.connect(redraw_cb)
 
 	# Right-Click / Control-Click Context Menu Correction
 	text_edit.gui_input.connect(func(event: InputEvent):
 		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
 			var click_pos = event.position
+			var font = text_edit.get_theme_font("font")
+			var font_size = text_edit.get_theme_font_size("font_size")
+			var line_height = text_edit.get_line_height()
+
+			var sb = text_edit.get_theme_stylebox("normal")
+			var pad_left = sb.get_margin(SIDE_LEFT) if sb else 4.0
+			var pad_top = sb.get_margin(SIDE_TOP) if sb else 4.0
+			var scroll_v = text_edit.scroll_vertical if "scroll_vertical" in text_edit else 0
+			var scroll_h = text_edit.scroll_horizontal if "scroll_horizontal" in text_edit else 0
+
 			var line_col = text_edit.get_line_column_at_pos(click_pos)
 			var target_line = line_col.y
 			var target_col = line_col.x
 
+			if target_line < 0 or target_line >= text_edit.get_line_count():
+				target_line = int(clamp(floor((click_pos.y - pad_top + scroll_v) / line_height), 0, text_edit.get_line_count() - 1))
+
 			var line_str = text_edit.get_line(target_line)
+			if target_col < 0 or target_col > line_str.length():
+				var cur_x = pad_left - scroll_h
+				target_col = 0
+				for c in range(line_str.length()):
+					var char_w = font.get_string_size(line_str.substr(c, 1), HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
+					if click_pos.x < cur_x + (char_w / 2.0):
+						break
+					cur_x += char_w
+					target_col = c + 1
+
 			var issues = check_text(line_str)
 			var matched_issue = null
 
@@ -751,7 +806,6 @@ static func attach_inline_spell_check(text_edit: TextEdit) -> void:
 							var issue_start = int(matched_issue["start"])
 							var issue_end = int(matched_issue["end"])
 
-							# Construct global character offset in full text
 							var global_start = 0
 							for i in range(target_line):
 								global_start += text_edit.get_line(i).length() + 1
