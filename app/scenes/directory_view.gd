@@ -845,6 +845,11 @@ func _invalidate_photo_cache(person_uuid: String) -> void:
 		_photo_cache.erase(person_uuid)
 
 func _create_texture_from_base64(base64_str: String) -> ImageTexture:
+	var img = _create_image_from_base64(base64_str)
+	if not img: return null
+	return ImageTexture.create_from_image(img)
+
+func _create_image_from_base64(base64_str: String) -> Image:
 	var b64_data = base64_str.strip_edges()
 	if b64_data == "" or b64_data.to_lower() == "null" or b64_data.to_lower() == "<null>":
 		return null
@@ -859,69 +864,142 @@ func _create_texture_from_base64(base64_str: String) -> ImageTexture:
 		err = img.load_png_from_buffer(buffer)
 	if err != OK:
 		return null
-	return ImageTexture.create_from_image(img)
+	return img
+
+func _open_photo_lightbox(person_name: String, texture: Texture2D) -> void:
+	if not texture: return
+
+	var backdrop = ColorRect.new()
+	backdrop.color = Color(0.04, 0.07, 0.12, 0.85)
+	backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(backdrop)
+
+	var center = CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	backdrop.add_child(center)
+
+	var card = PanelContainer.new()
+	card.custom_minimum_size = Vector2(500, 540)
+	var card_st = StyleBoxFlat.new()
+	card_st.bg_color = Color(0.10, 0.14, 0.22, 1.0)
+	card_st.border_width_left = 1; card_st.border_width_top = 1; card_st.border_width_right = 1; card_st.border_width_bottom = 1
+	card_st.border_color = Color(0.24, 0.35, 0.50, 1.0)
+	card_st.corner_radius_top_left = 12; card_st.corner_radius_top_right = 12; card_st.corner_radius_bottom_left = 12; card_st.corner_radius_bottom_right = 12
+	card_st.content_margin_left = 20; card_st.content_margin_top = 16; card_st.content_margin_right = 20; card_st.content_margin_bottom = 20
+	card.add_theme_stylebox_override("panel", card_st)
+	center.add_child(card)
+
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 14)
+	card.add_child(vbox)
+
+	var hdr_hbox = HBoxContainer.new()
+	hdr_hbox.size_flags_horizontal = SIZE_EXPAND_FILL
+
+	var name_lbl = Label.new()
+	name_lbl.text = person_name
+	name_lbl.add_theme_font_size_override("font_size", 18)
+	name_lbl.add_theme_color_override("font_color", Color(0.95, 0.97, 1.0))
+	name_lbl.size_flags_horizontal = SIZE_EXPAND_FILL
+	hdr_hbox.add_child(name_lbl)
+
+	var btn_close = Button.new()
+	btn_close.text = "✖"
+	btn_close.custom_minimum_size = Vector2(32, 32)
+	btn_close.add_theme_font_size_override("font_size", 14)
+	btn_close.pressed.connect(func(): backdrop.queue_free())
+	hdr_hbox.add_child(btn_close)
+	vbox.add_child(hdr_hbox)
+
+	var img_rect = TextureRect.new()
+	img_rect.texture = texture
+	img_rect.custom_minimum_size = Vector2(460, 460)
+	img_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	img_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	vbox.add_child(img_rect)
+
+	backdrop.gui_input.connect(func(event: InputEvent):
+		if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+			backdrop.queue_free()
+		elif event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+			backdrop.queue_free()
+	)
 
 func _create_roster_row_button(p: Dictionary, index: int) -> Button:
 	var btn = Button.new()
-	btn.custom_minimum_size = Vector2(0, 68)
+	btn.custom_minimum_size = Vector2(0, 84)
 	btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
 
 	var margin = MarginContainer.new()
 	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
 	margin.mouse_filter = Control.MOUSE_FILTER_PASS
-	margin.add_theme_constant_override("margin_left", 16)
-	margin.add_theme_constant_override("margin_top", 10)
-	margin.add_theme_constant_override("margin_right", 16)
-	margin.add_theme_constant_override("margin_bottom", 10)
+	margin.add_theme_constant_override("margin_left", 14)
+	margin.add_theme_constant_override("margin_top", 8)
+	margin.add_theme_constant_override("margin_right", 14)
+	margin.add_theme_constant_override("margin_bottom", 8)
 
 	var hbox = HBoxContainer.new()
 	hbox.mouse_filter = Control.MOUSE_FILTER_PASS
-	hbox.add_theme_constant_override("separation", 16)
+	hbox.add_theme_constant_override("separation", 14)
 
 	var first_name = p.get("first_name", "")
 	var last_name = p.get("last_name", "")
 	var initials = (first_name.left(1) + last_name.left(1)).to_upper()
+	var full_person_name = (first_name + " " + last_name).strip_edges()
 
 	var photo_tex = _get_cached_photo_texture(str(p.get("person_uuid", "")), String(p.get("profile_photo")) if p.get("profile_photo") != null else "")
 	if photo_tex:
 		var avatar_rect = TextureRect.new()
 		avatar_rect.texture = photo_tex
-		avatar_rect.custom_minimum_size = Vector2(42, 42)
+		avatar_rect.custom_minimum_size = Vector2(48, 48)
 		avatar_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		avatar_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+		avatar_rect.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		avatar_rect.mouse_filter = Control.MOUSE_FILTER_STOP
+
+		var _p_name = full_person_name
+		var _p_tex = photo_tex
+		avatar_rect.gui_input.connect(func(event: InputEvent):
+			if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+				_open_photo_lightbox(_p_name, _p_tex)
+				get_viewport().set_input_as_handled()
+		)
 		hbox.add_child(avatar_rect)
 	else:
 		var avatar = Label.new()
 		avatar.text = initials
-		avatar.custom_minimum_size = Vector2(42, 42)
+		avatar.custom_minimum_size = Vector2(48, 48)
 		avatar.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		avatar.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		avatar.add_theme_font_size_override("font_size", 15)
+		avatar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		avatar.add_theme_font_size_override("font_size", 16)
 
 		var av_style = StyleBoxFlat.new()
 		av_style.bg_color = Color(0.20, 0.26, 0.36, 1.0)
-		av_style.corner_radius_top_left = 21
-		av_style.corner_radius_top_right = 21
-		av_style.corner_radius_bottom_left = 21
-		av_style.corner_radius_bottom_right = 21
+		av_style.corner_radius_top_left = 24
+		av_style.corner_radius_top_right = 24
+		av_style.corner_radius_bottom_left = 24
+		av_style.corner_radius_bottom_right = 24
 		avatar.add_theme_stylebox_override("normal", av_style)
+		avatar.mouse_filter = Control.MOUSE_FILTER_PASS
 		hbox.add_child(avatar)
 
 	var vbox_text = VBoxContainer.new()
 	vbox_text.custom_minimum_size = Vector2(180, 0)
+	vbox_text.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	vbox_text.add_theme_constant_override("separation", 2)
 
 	var name_label = Label.new()
 	name_label.name = "NameLabel"
-	name_label.text = first_name + " " + last_name
+	name_label.text = full_person_name
 	name_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	name_label.add_theme_font_size_override("font_size", 18)
+	name_label.add_theme_font_size_override("font_size", 16)
 	name_label.add_theme_color_override("font_color", Color(0.95, 0.97, 1.0))
 	vbox_text.add_child(name_label)
 
 	var id_label = Label.new()
 	id_label.text = p.get("human_id", "")
-	id_label.add_theme_font_size_override("font_size", 14)
+	id_label.add_theme_font_size_override("font_size", 13)
 	id_label.add_theme_color_override("font_color", Color(0.75, 0.82, 0.92))
 	vbox_text.add_child(id_label)
 
@@ -935,13 +1013,12 @@ func _create_roster_row_button(p: Dictionary, index: int) -> Button:
 	if ay_str != "": c_parts.append(ay_str)
 	if mj_str != "": c_parts.append(mj_str)
 
-	if c_parts.size() > 0:
-		var campus_info_lbl = Label.new()
-		campus_info_lbl.text = " • ".join(c_parts)
-		campus_info_lbl.add_theme_font_size_override("font_size", 12)
-		campus_info_lbl.add_theme_color_override("font_color", Color(0.40, 0.75, 0.95, 1.0))
-		campus_info_lbl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-		vbox_text.add_child(campus_info_lbl)
+	var campus_info_lbl = Label.new()
+	campus_info_lbl.text = " • ".join(c_parts) if c_parts.size() > 0 else ""
+	campus_info_lbl.add_theme_font_size_override("font_size", 12)
+	campus_info_lbl.add_theme_color_override("font_color", Color(0.40, 0.75, 0.95, 1.0))
+	campus_info_lbl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	vbox_text.add_child(campus_info_lbl)
 
 	hbox.add_child(vbox_text)
 
@@ -1253,6 +1330,14 @@ func _populate_profile_section(p: Dictionary) -> void:
 		photo_rect.custom_minimum_size = Vector2(96, 96)
 		photo_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		photo_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+		photo_rect.mouse_filter = Control.MOUSE_FILTER_STOP
+		var _cur_b64_rect = raw_photo_b64
+		photo_rect.gui_input.connect(func(event: InputEvent):
+			if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+				var img_to_edit = _create_image_from_base64(_cur_b64_rect)
+				if img_to_edit:
+					_open_image_editor(img_to_edit, _active_photo_callback)
+		)
 		p_hbox.add_child(photo_rect)
 	else:
 		var fn = _clean_str(p.get("first_name", ""))
@@ -1287,6 +1372,19 @@ func _populate_profile_section(p: Dictionary) -> void:
 
 	var btns_hbox = HBoxContainer.new()
 	btns_hbox.add_theme_constant_override("separation", 10)
+
+	if has_photo:
+		var btn_crop_existing = Button.new()
+		btn_crop_existing.text = "✂️ Crop & Zoom Photo"
+		btn_crop_existing.custom_minimum_size = Vector2(175, 40)
+		btn_crop_existing.add_theme_font_size_override("font_size", 15)
+		var _cur_b64_btn = raw_photo_b64
+		btn_crop_existing.pressed.connect(func():
+			var img_to_edit = _create_image_from_base64(_cur_b64_btn)
+			if img_to_edit:
+				_open_image_editor(img_to_edit, _active_photo_callback)
+		)
+		btns_hbox.add_child(btn_crop_existing)
 
 	var btn_camera_photo = Button.new()
 	btn_camera_photo.text = "📸 Retake Photo" if has_photo else "📷 Take Photo"
