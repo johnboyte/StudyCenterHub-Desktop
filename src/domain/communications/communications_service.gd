@@ -772,7 +772,70 @@ func get_ivr_voice_settings() -> Dictionary:
 		return {"voice_name": str(res["data"][0]["voice_name"]), "language": str(res["data"][0]["language"])}
 	return {"voice_name": "Polly.Joanna-Generative", "language": "en-US"}
 
+static func normalize_phone_digits(phone_str: String) -> String:
+	var digits = ""
+	for i in range(phone_str.length()):
+		var ch = phone_str[i]
+		if ch >= '0' and ch <= '9':
+			digits += ch
+	if digits.length() >= 10:
+		return digits.substr(digits.length() - 10)
+	return digits
+
+func resolve_person_by_phone(phone_str: String) -> Dictionary:
+	if not db or phone_str == "":
+		return {"matched": false, "person_id": 0, "name": "", "phone": phone_str}
+	var target = normalize_phone_digits(phone_str)
+	if target.length() < 7:
+		return {"matched": false, "person_id": 0, "name": "", "phone": phone_str}
+	
+	var res = db.execute("SELECT id, person_uuid, human_id, first_name, last_name, phone, sms_consent FROM people;")
+	if not res["success"] or res["data"].size() == 0:
+		return {"matched": false, "person_id": 0, "name": "", "phone": phone_str}
+	
+	var matches = []
+	for p in res["data"]:
+		var p_phone = str(p.get("phone", ""))
+		if normalize_phone_digits(p_phone) == target:
+			matches.append(p)
+			
+	if matches.size() == 1:
+		var p = matches[0]
+		var fn = str(p.get("first_name", ""))
+		var ln = str(p.get("last_name", ""))
+		var name = (fn + " " + ln).strip_edges()
+		if name == "" or name == "<null>":
+			name = str(p.get("human_id", "Unknown Member"))
+		return {
+			"matched": true,
+			"ambiguous": false,
+			"person_id": int(p["id"]),
+			"name": name,
+			"phone": str(p["phone"]),
+			"person": p
+		}
+	elif matches.size() > 1:
+		# Multiple people share this phone number — do NOT guess per requirement 4
+		return {
+			"matched": false,
+			"ambiguous": true,
+			"matches_count": matches.size(),
+			"person_id": 0,
+			"name": "",
+			"phone": phone_str
+		}
+	else:
+		return {
+			"matched": false,
+			"ambiguous": false,
+			"person_id": 0,
+			"name": "",
+			"phone": phone_str
+		}
+
 func get_voicemails() -> Array:
+	if not db: return []
+	
 	var supervisor_name = ""
 	var setting_res = db.execute("SELECT setting_value FROM app_settings WHERE setting_key = 'ACTIVE_SUPERVISOR' LIMIT 1;")
 	if setting_res["success"] and setting_res["data"].size() > 0:
@@ -793,6 +856,9 @@ func get_voicemails() -> Array:
 			if eligible_general != null and int(eligible_general) == 0:
 				filter_assigned_only = true
 
+	var items = []
+
+	# 1. Fetch Voicemails (unconsolidated, 1 card per recording)
 	var q_vm = """
 		SELECT 'voicemail' AS item_type,
 		       v.voicemail_uuid AS item_uuid,
@@ -806,64 +872,144 @@ func get_voicemails() -> Array:
 		       v.due_date,
 		       v.internal_notes,
 		       v.created_at,
-		       CASE 
-		         WHEN p.first_name IS NOT NULL THEN TRIM(p.first_name || ' ' || p.last_name)
-		         ELSE 'Unassigned'
-		       END AS assignee_name,
+		       COALESCE(p.first_name || ' ' || p.last_name, 'Unassigned') AS assignee_name,
 		       v.assigned_person_id,
-		       CASE 
-		         WHEN c.first_name IS NOT NULL THEN TRIM(c.first_name || ' ' || c.last_name)
-		         ELSE ''
-		       END AS matched_caller_name
+		       '' AS matched_caller_name
 		FROM voicemails v
 		LEFT JOIN people p ON v.assigned_person_id = p.id
-		LEFT JOIN people c ON (v.caller_phone = c.phone OR REPLACE(REPLACE(REPLACE(REPLACE(v.caller_phone, '-', ''), ' ', ''), '(', ''), ')', '') = REPLACE(REPLACE(REPLACE(REPLACE(c.phone, '-', ''), ' ', ''), '(', ''), ')', ''))
 	"""
-	
-	var q_sms = """
-		SELECT 'sms' AS item_type,
-		       COALESCE(s.message_sid, 'sms_' || s.id) AS item_uuid,
-		       CASE 
-		         WHEN c.first_name IS NOT NULL THEN TRIM(c.first_name || ' ' || c.last_name)
-		         ELSE 'SMS Caller'
-		       END AS caller_name,
-		       COALESCE(s.from_phone_e164, '') AS caller_phone,
-		       0 AS duration_sec,
-		       COALESCE(s.raw_body, '') AS transcription,
-		       '' AS recording_url,
-		       CASE 
-		         WHEN LOWER(s.follow_up_status) = 'in_progress' THEN 'in_progress'
-		         WHEN LOWER(s.follow_up_status) = 'waiting' THEN 'waiting'
-		         WHEN LOWER(s.follow_up_status) = 'completed' THEN 'completed'
-		         ELSE 'new'
-		       END AS status,
-		       'Medium' AS priority,
-		       '' AS due_date,
-		       COALESCE(s.notes, '') AS internal_notes,
-		       s.received_at AS created_at,
-		       COALESCE(NULLIF(s.assigned_to, ''), 'Unassigned') AS assignee_name,
-		       NULL AS assigned_person_id,
-		       CASE 
-		         WHEN c.first_name IS NOT NULL THEN TRIM(c.first_name || ' ' || c.last_name)
-		         ELSE ''
-		       END AS matched_caller_name
-		FROM inbound_sms_log s
-		LEFT JOIN people c ON (s.from_phone_e164 = c.phone OR REPLACE(REPLACE(REPLACE(REPLACE(s.from_phone_e164, '-', ''), ' ', ''), '(', ''), ')', '') = REPLACE(REPLACE(REPLACE(REPLACE(c.phone, '-', ''), ' ', ''), '(', ''), ')', ''))
-	"""
-	
-	var params = []
-	if filter_assigned_only:
+	var vm_params = []
+	if filter_assigned_only and active_person_id > 0:
 		q_vm += " WHERE v.assigned_person_id = ? "
-		params.append(active_person_id)
-		
-		q_sms += " WHERE s.assigned_to = ? "
-		params.append(supervisor_name)
-		
-	var q = q_vm + " UNION ALL " + q_sms + " ORDER BY created_at DESC;"
-	
-	var res = db.execute(q, params)
-	if res["success"]: return res["data"]
-	return []
+		vm_params.append(active_person_id)
+	q_vm += " ORDER BY v.created_at DESC;"
+
+	var vm_res = db.execute(q_vm, vm_params)
+	if vm_res["success"]:
+		for vm in vm_res["data"]:
+			var caller_num = str(vm.get("caller_phone", ""))
+			var p_match = resolve_person_by_phone(caller_num)
+			if p_match.get("matched", false):
+				vm["matched_caller_name"] = p_match["name"]
+				if vm.get("caller_name") == "" or vm.get("caller_name") == "Unknown Caller":
+					vm["caller_name"] = p_match["name"]
+				if vm.get("assigned_person_id") == null or int(vm.get("assigned_person_id", 0)) == 0:
+					vm["assigned_person_id"] = p_match["person_id"]
+			items.append(vm)
+
+	# 2. Fetch & Consolidate Inbound SMS (1 card per normalized phone number)
+	var q_sms = """
+		SELECT id, message_sid, from_phone_e164, to_phone_e164, raw_body, 
+		       follow_up_status, assigned_to, notes, matched_person_id, is_read, received_at
+		FROM inbound_sms_log
+	"""
+	var sms_params = []
+	if filter_assigned_only and supervisor_name != "":
+		q_sms += " WHERE assigned_to = ? "
+		sms_params.append(supervisor_name)
+	q_sms += " ORDER BY received_at DESC, id DESC;"
+
+	var sms_res = db.execute(q_sms, sms_params)
+	if sms_res["success"] and sms_res["data"].size() > 0:
+		var sms_groups = {} # key: normalized_phone_digits -> Array
+		for row in sms_res["data"]:
+			var phone_str = str(row.get("from_phone_e164", ""))
+			var norm = normalize_phone_digits(phone_str)
+			if norm == "": norm = phone_str
+			if not sms_groups.has(norm):
+				sms_groups[norm] = []
+			sms_groups[norm].append(row)
+
+		for norm_key in sms_groups.keys():
+			var group = sms_groups[norm_key] # ordered newest first
+			var latest = group[0]
+			var phone_str = str(latest.get("from_phone_e164", ""))
+			var p_match = resolve_person_by_phone(phone_str)
+
+			var matched_name = ""
+			var caller_name = "SMS Caller"
+			var has_matched = false
+			if p_match.get("matched", false):
+				matched_name = p_match["name"]
+				caller_name = matched_name
+				has_matched = true
+			elif p_match.get("ambiguous", false):
+				caller_name = "SMS Caller"
+			else:
+				caller_name = phone_str
+
+			var has_new = false
+			var has_in_progress = false
+			var has_waiting = false
+			var all_completed = true
+			var unread_cnt = 0
+
+			for msg in group:
+				var st = str(msg.get("follow_up_status", "new")).to_lower()
+				if msg.get("is_read", 0) == 0:
+					unread_cnt += 1
+				if st == "new" or st == "unassigned":
+					has_new = true
+					all_completed = false
+				elif st == "in_progress":
+					has_in_progress = true
+					all_completed = false
+				elif st == "waiting":
+					has_waiting = true
+					all_completed = false
+				elif st != "completed":
+					all_completed = false
+
+			var final_status = "new"
+			if has_new: final_status = "new"
+			elif has_in_progress: final_status = "in_progress"
+			elif has_waiting: final_status = "waiting"
+			elif all_completed: final_status = "completed"
+
+			var sid = str(latest.get("message_sid", ""))
+			if sid == "": sid = "sms_" + str(latest.get("id"))
+
+			var sms_item = {
+				"item_type": "sms",
+				"item_uuid": sid,
+				"caller_name": caller_name,
+				"caller_phone": phone_str,
+				"normalized_phone": norm_key,
+				"duration_sec": 0,
+				"transcription": str(latest.get("raw_body", "")),
+				"recording_url": "",
+				"status": final_status,
+				"priority": "Medium",
+				"due_date": "",
+				"internal_notes": str(latest.get("notes", "")),
+				"created_at": str(latest.get("received_at", "")),
+				"assignee_name": str(latest.get("assigned_to", "")).strip_edges() if str(latest.get("assigned_to", "")).strip_edges() != "" else "Unassigned",
+				"assigned_person_id": p_match.get("person_id") if has_matched else null,
+				"matched_caller_name": matched_name,
+				"unread_count": unread_cnt,
+				"msg_count": group.size()
+			}
+			items.append(sms_item)
+
+	var _get_priority_weight = func(p_str: String) -> int:
+		match p_str.strip_edges().to_lower():
+			"emergency": return 0
+			"high": return 1
+			"medium": return 2
+			"low": return 3
+			_: return 2
+
+	items.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		var w_a = _get_priority_weight.call(str(a.get("priority", "Medium")))
+		var w_b = _get_priority_weight.call(str(b.get("priority", "Medium")))
+		if w_a != w_b:
+			return w_a < w_b
+		var date_a = str(a.get("created_at", ""))
+		var date_b = str(b.get("created_at", ""))
+		return date_a > date_b
+	)
+
+	return items
 
 func link_phone_to_person(phone_str: String, person_id: int) -> Dictionary:
 	if not db or person_id <= 0: return {"success": false, "error": "Invalid person ID"}
@@ -991,6 +1137,75 @@ func delete_voicemail(vm_uuid: String) -> bool:
 		db.execute("UPDATE inbound_event_queue SET processed = 1 WHERE payload_json LIKE ? OR provider_event_id = ?;", ["%" + rec_sid + "%", rec_sid])
 
 	return res["success"]
+
+func delete_sms_item(item_uuid: String) -> bool:
+	if not db or item_uuid == "": return false
+	var res = db.execute("DELETE FROM inbound_sms_log WHERE message_sid = ? OR ('sms_' || id) = ?;", [item_uuid, item_uuid])
+	return res["success"]
+
+func get_sms_conversation_thread(phone_str: String) -> Array:
+	if not db or phone_str == "": return []
+	var target_digits = normalize_phone_digits(phone_str)
+	if target_digits == "": return []
+
+	var thread = []
+
+	# 1. Fetch Inbound SMS
+	var in_res = db.execute("SELECT id, message_sid, from_phone_e164, raw_body, received_at, follow_up_status, is_read, matched_person_id FROM inbound_sms_log ORDER BY id ASC;")
+	if in_res["success"] and in_res["data"].size() > 0:
+		for row in in_res["data"]:
+			var p_digits = normalize_phone_digits(str(row.get("from_phone_e164", "")))
+			if p_digits == target_digits:
+				thread.append({
+					"id": row.get("id"),
+					"direction": "inbound",
+					"channel": "SMS",
+					"sender_name": "Inbound Caller",
+					"body": str(row.get("raw_body", "")),
+					"created_at": str(row.get("received_at", "")),
+					"status": "received"
+				})
+
+	# 2. Fetch Outbound SMS from communications_log
+	var out_res = db.execute("SELECT id, message_uuid, recipient_person_id, recipient_name, recipient_contact, channel, message_body, status, sent_by_user, created_at FROM communications_log WHERE UPPER(channel) LIKE '%SMS%' ORDER BY id ASC;")
+	if out_res["success"] and out_res["data"].size() > 0:
+		for row in out_res["data"]:
+			var p_digits = normalize_phone_digits(str(row.get("recipient_contact", "")))
+			if p_digits == target_digits:
+				var sent_by = str(row.get("sent_by_user", "")).strip_edges()
+				if sent_by == "" or sent_by == "<null>": sent_by = "Real Life"
+				thread.append({
+					"id": row.get("id"),
+					"direction": "outbound",
+					"channel": "SMS",
+					"sender_name": sent_by,
+					"body": str(row.get("message_body", "")),
+					"created_at": str(row.get("created_at", "")),
+					"status": str(row.get("status", "sent"))
+				})
+
+	# 3. Fetch Outbound / Seeded SMS from threaded_conversations if present
+	var th_res = db.execute("SELECT id, thread_uuid, caller_phone, direction, channel, message_text, status, created_at FROM threaded_conversations ORDER BY id ASC;")
+	if th_res["success"] and th_res["data"].size() > 0:
+		for row in th_res["data"]:
+			var p_digits = normalize_phone_digits(str(row.get("caller_phone", "")))
+			if p_digits == target_digits:
+				var dir_str = str(row.get("direction", "inbound"))
+				thread.append({
+					"id": row.get("id"),
+					"direction": dir_str,
+					"channel": "SMS",
+					"sender_name": "Inbound Caller" if dir_str == "inbound" else "Real Life",
+					"body": str(row.get("message_text", "")),
+					"created_at": str(row.get("created_at", "")),
+					"status": str(row.get("status", "sent"))
+				})
+
+	thread.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return str(a.get("created_at", "")) < str(b.get("created_at", ""))
+	)
+
+	return thread
 
 func get_work_item_notes(item_uuid: String) -> Array:
 	if not db or item_uuid == "": return []

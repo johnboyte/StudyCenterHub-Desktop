@@ -2067,7 +2067,13 @@ func _refresh_voicemail_inbox() -> void:
 		btn_del.add_theme_stylebox_override("normal", del_st)
 		btn_del.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
 		var _del_uuid = vm_uuid
-		btn_del.pressed.connect(func(): _confirm_delete_voicemail(_del_uuid))
+		var _del_type = item_type
+		btn_del.pressed.connect(func():
+			if _del_type == "sms":
+				_confirm_delete_sms_item(_del_uuid)
+			else:
+				_confirm_delete_voicemail(_del_uuid)
+		)
 
 		actions_hbox.add_child(btn_open); actions_hbox.add_child(btn_call); actions_hbox.add_child(btn_sms); actions_hbox.add_child(btn_fwd); actions_hbox.add_child(btn_del)
 		
@@ -2089,18 +2095,27 @@ func _refresh_voicemail_inbox() -> void:
 			
 		card_vbox.add_child(actions_hbox)
 		
+		var _card_num = caller_num
+		var _card_disp = display_caller
+		var _card_vm = vm
+
 		if is_accessible:
-			btn_open.pressed.connect(func(): _open_detail_dialog(vm))
+			if item_type == "sms":
+				btn_open.pressed.connect(func(): _open_sms_conversation_dialog(_card_num, _card_disp, _card_vm, false))
+			else:
+				btn_open.pressed.connect(func(): _open_detail_dialog(_card_vm))
 		else:
-			btn_open.pressed.connect(func(): _prompt_pin_auth_dialog(vm))
+			btn_open.pressed.connect(func(): _prompt_pin_auth_dialog(_card_vm))
 			
 		btn_call.pressed.connect(func():
-			if caller_num != "" and caller_num != "Unknown Caller" and caller_num != "No phone on file":
-				_initiate_call_dialog({"first_name": caller_name, "last_name": "", "phone": caller_num}, "Voicemail callback to " + caller_num)
+			if _card_num != "" and _card_num != "Unknown Caller" and _card_num != "No phone on file":
+				_initiate_call_dialog({"first_name": _card_disp, "last_name": "", "phone": _card_num}, "Callback to " + _card_num)
 			else:
 				OS.alert("No valid caller phone number available for callback.", "Callback Error")
 		)
-		btn_sms.pressed.connect(func(): select_recipient_by_phone(caller_num, "SMS"))
+
+		# Text button opens SMS conversation dialog addressed to that same person/number with reply focused
+		btn_sms.pressed.connect(func(): _open_sms_conversation_dialog(_card_num, _card_disp, _card_vm, true))
 		btn_fwd.pressed.connect(func(): _open_forward_dialog(vm_uuid, item_type))
 		
 		if col_containers.has(status):
@@ -2151,6 +2166,342 @@ func _create_priority_badge(priority: String) -> PanelContainer:
 	badge.add_theme_stylebox_override("panel", style)
 	badge.add_child(lbl)
 	return badge
+
+func _scroll_to_bottom(scroll: ScrollContainer) -> void:
+	if scroll and is_instance_valid(scroll):
+		var v_bar = scroll.get_v_scroll_bar()
+		if v_bar:
+			scroll.scroll_vertical = int(v_bar.max_value)
+
+func _confirm_delete_sms_item(uuid: String) -> void:
+	var backdrop = ColorRect.new()
+	backdrop.color = Color(0.08, 0.12, 0.18, 0.6)
+	backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(backdrop)
+
+	var center = CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	backdrop.add_child(center)
+
+	var card = PanelContainer.new()
+	card.custom_minimum_size = Vector2(420, 180)
+	var card_st = StyleBoxFlat.new()
+	card_st.bg_color = Color(1.0, 1.0, 1.0, 1.0)
+	card_st.corner_radius_top_left = 10; card_st.corner_radius_top_right = 10; card_st.corner_radius_bottom_left = 10; card_st.corner_radius_bottom_right = 10
+	card_st.content_margin_left = 20; card_st.content_margin_top = 18; card_st.content_margin_right = 20; card_st.content_margin_bottom = 18
+	card.add_theme_stylebox_override("panel", card_st)
+	center.add_child(card)
+
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 16)
+	card.add_child(vbox)
+
+	var title = Label.new()
+	title.text = "🗑️ Delete SMS Item"
+	title.add_theme_font_size_override("font_size", 16)
+	title.add_theme_color_override("font_color", Color(0.85, 0.25, 0.25, 1.0))
+	vbox.add_child(title)
+
+	var msg = Label.new()
+	msg.text = "Are you sure you want to delete this SMS item/conversation from the Response Center?"
+	msg.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	msg.add_theme_font_size_override("font_size", 13)
+	msg.add_theme_color_override("font_color", Color(0.20, 0.25, 0.32, 1.0))
+	vbox.add_child(msg)
+
+	var btn_hbox = HBoxContainer.new()
+	btn_hbox.alignment = BoxContainer.ALIGNMENT_END
+	btn_hbox.add_theme_constant_override("separation", 10)
+
+	var btn_cancel = Button.new()
+	btn_cancel.text = "Cancel"
+	btn_cancel.custom_minimum_size = Vector2(80, 32)
+	btn_cancel.pressed.connect(func(): backdrop.queue_free())
+
+	var btn_del = Button.new()
+	btn_del.text = "Delete"
+	btn_del.custom_minimum_size = Vector2(80, 32)
+	var del_st = StyleBoxFlat.new()
+	del_st.bg_color = Color(0.85, 0.25, 0.25, 1.0)
+	del_st.corner_radius_top_left = 6; del_st.corner_radius_top_right = 6; del_st.corner_radius_bottom_left = 6; del_st.corner_radius_bottom_right = 6
+	btn_del.add_theme_stylebox_override("normal", del_st)
+	btn_del.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
+	btn_del.pressed.connect(func():
+		com_service.delete_sms_item(uuid)
+		backdrop.queue_free()
+		_refresh_all_feeds()
+	)
+
+	btn_hbox.add_child(btn_cancel); btn_hbox.add_child(btn_del)
+	vbox.add_child(btn_hbox)
+
+func _open_sms_conversation_dialog(caller_num: String, display_caller: String, vm: Dictionary = {}, focus_reply: bool = false) -> void:
+	if caller_num == "":
+		OS.alert("No phone number available for conversation.", "SMS Error")
+		return
+
+	var p_match = com_service.resolve_person_by_phone(caller_num)
+	var is_matched = p_match.get("matched", false)
+	var person_name = p_match.get("name", display_caller) if is_matched else display_caller
+	var formatted_phone = _format_phone_display(caller_num)
+
+	var cur_status = str(vm.get("status", "new"))
+	var cur_priority = str(vm.get("priority", "Medium"))
+	var cur_assignee_name = str(vm.get("assignee_name", "Unassigned"))
+	var vm_uuid = str(vm.get("item_uuid", ""))
+
+	var backdrop = ColorRect.new()
+	backdrop.color = Color(0.08, 0.12, 0.18, 0.65)
+	backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(backdrop)
+
+	var center = CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	backdrop.add_child(center)
+
+	var card = PanelContainer.new()
+	card.custom_minimum_size = Vector2(800, 620)
+	var card_st = StyleBoxFlat.new()
+	card_st.bg_color = Color(1.0, 1.0, 1.0, 1.0)
+	card_st.border_width_left = 1; card_st.border_width_top = 1; card_st.border_width_right = 1; card_st.border_width_bottom = 1
+	card_st.border_color = Color(0.78, 0.82, 0.88, 1.0)
+	card_st.corner_radius_top_left = 12; card_st.corner_radius_top_right = 12; card_st.corner_radius_bottom_left = 12; card_st.corner_radius_bottom_right = 12
+	card_st.content_margin_left = 20; card_st.content_margin_top = 18; card_st.content_margin_right = 20; card_st.content_margin_bottom = 18
+	card.add_theme_stylebox_override("panel", card_st)
+	center.add_child(card)
+
+	var main_vbox = VBoxContainer.new()
+	main_vbox.add_theme_constant_override("separation", 12)
+	main_vbox.custom_minimum_size = Vector2(800, 620)
+	card.add_child(main_vbox)
+
+	# --- Header Row ---
+	var hdr_hbox = HBoxContainer.new()
+	hdr_hbox.size_flags_horizontal = SIZE_EXPAND_FILL
+
+	var info_vbox = VBoxContainer.new()
+	info_vbox.size_flags_horizontal = SIZE_EXPAND_FILL
+
+	var name_lbl = Label.new()
+	name_lbl.text = "💬 " + person_name
+	name_lbl.add_theme_font_size_override("font_size", 18)
+	name_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
+
+	var sub_lbl = Label.new()
+	sub_lbl.text = "📱 " + formatted_phone + (" • Matched Contact" if is_matched else " • Unlinked Number")
+	sub_lbl.add_theme_font_size_override("font_size", 12)
+	sub_lbl.add_theme_color_override("font_color", Color(0.18, 0.55, 0.35, 1.0) if is_matched else Color(0.50, 0.55, 0.65, 1.0))
+
+	info_vbox.add_child(name_lbl); info_vbox.add_child(sub_lbl)
+	hdr_hbox.add_child(info_vbox)
+
+	var status_opt = OptionButton.new()
+	status_opt.custom_minimum_size = Vector2(140, 30)
+	status_opt.add_item("📥 Inbox / New", 0)
+	status_opt.add_item("⚙️ In Progress", 1)
+	status_opt.add_item("⏳ Waiting", 2)
+	status_opt.add_item("✅ Completed", 3)
+
+	match cur_status:
+		"new": status_opt.selected = 0
+		"in_progress": status_opt.selected = 1
+		"waiting": status_opt.selected = 2
+		"completed": status_opt.selected = 3
+		_: status_opt.selected = 0
+
+	status_opt.item_selected.connect(func(idx):
+		var target_st = "new"
+		match idx:
+			0: target_st = "new"
+			1: target_st = "in_progress"
+			2: target_st = "waiting"
+			3: target_st = "completed"
+		if vm_uuid != "":
+			com_service.update_voicemail_workflow(vm_uuid, null, target_st, cur_priority, "", "", "sms")
+		_refresh_all_feeds()
+	)
+	hdr_hbox.add_child(status_opt)
+
+	var btn_hdr_call = Button.new(); btn_hdr_call.text = "📞 Callback"; btn_hdr_call.custom_minimum_size = Vector2(85, 30); btn_hdr_call.add_theme_font_size_override("font_size", 11)
+	btn_hdr_call.pressed.connect(func(): _initiate_call_dialog({"first_name": person_name, "last_name": "", "phone": caller_num}, "SMS callback to " + caller_num))
+	hdr_hbox.add_child(btn_hdr_call)
+
+	if not is_matched:
+		var btn_hdr_link = Button.new(); btn_hdr_link.text = "👤 Link"; btn_hdr_link.custom_minimum_size = Vector2(65, 30); btn_hdr_link.add_theme_font_size_override("font_size", 11)
+		var link_st = StyleBoxFlat.new()
+		link_st.bg_color = Color(0.18, 0.55, 0.35, 1.0)
+		link_st.corner_radius_top_left = 4; link_st.corner_radius_top_right = 4; link_st.corner_radius_bottom_left = 4; link_st.corner_radius_bottom_right = 4
+		link_st.content_margin_left = 6; link_st.content_margin_right = 6
+		btn_hdr_link.add_theme_stylebox_override("normal", link_st)
+		btn_hdr_link.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
+		btn_hdr_link.pressed.connect(func():
+			_open_link_contact_dialog(caller_num)
+			backdrop.queue_free()
+		)
+		hdr_hbox.add_child(btn_hdr_link)
+
+	var btn_close = Button.new(); btn_close.text = "✖"; btn_close.custom_minimum_size = Vector2(32, 30); btn_close.add_theme_font_size_override("font_size", 14)
+	btn_close.pressed.connect(func():
+		backdrop.queue_free()
+		_refresh_all_feeds()
+	)
+	hdr_hbox.add_child(btn_close)
+
+	main_vbox.add_child(hdr_hbox)
+
+	var hs = HSeparator.new()
+	main_vbox.add_child(hs)
+
+	# --- Conversation Scroll View ---
+	var scroll = ScrollContainer.new()
+	scroll.size_flags_horizontal = SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = SIZE_EXPAND_FILL
+	scroll.custom_minimum_size = Vector2(0, 380)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	main_vbox.add_child(scroll)
+
+	var thread_vbox = VBoxContainer.new()
+	thread_vbox.size_flags_horizontal = SIZE_EXPAND_FILL
+	thread_vbox.add_theme_constant_override("separation", 10)
+	scroll.add_child(thread_vbox)
+
+	var _render_thread_messages = func():
+		for child in thread_vbox.get_children(): child.free()
+
+		var msgs = com_service.get_sms_conversation_thread(caller_num)
+		if msgs.size() == 0:
+			var empty_lbl = Label.new()
+			empty_lbl.text = "No message history available for " + formatted_phone
+			empty_lbl.add_theme_font_size_override("font_size", 13)
+			empty_lbl.add_theme_color_override("font_color", Color(0.50, 0.55, 0.65, 1.0))
+			thread_vbox.add_child(empty_lbl)
+		else:
+			for m in msgs:
+				var is_inbound = str(m.get("direction")) == "inbound"
+				var msg_box = HBoxContainer.new()
+				msg_box.size_flags_horizontal = SIZE_EXPAND_FILL
+
+				var bubble_panel = PanelContainer.new()
+				var bubble_st = StyleBoxFlat.new()
+
+				if is_inbound:
+					msg_box.alignment = BoxContainer.ALIGNMENT_BEGIN
+					bubble_st.bg_color = Color(0.94, 0.96, 0.98, 1.0)
+					bubble_st.border_width_left = 1; bubble_st.border_width_top = 1; bubble_st.border_width_right = 1; bubble_st.border_width_bottom = 1
+					bubble_st.border_color = Color(0.85, 0.88, 0.92, 1.0)
+				else:
+					msg_box.alignment = BoxContainer.ALIGNMENT_END
+					bubble_st.bg_color = Color(0.08, 0.44, 0.75, 1.0)
+					bubble_st.border_width_left = 1; bubble_st.border_width_top = 1; bubble_st.border_width_right = 1; bubble_st.border_width_bottom = 1
+					bubble_st.border_color = Color(0.06, 0.38, 0.66, 1.0)
+
+				bubble_st.corner_radius_top_left = 10; bubble_st.corner_radius_top_right = 10
+				bubble_st.corner_radius_bottom_left = 10 if not is_inbound else 2
+				bubble_st.corner_radius_bottom_right = 10 if is_inbound else 2
+				bubble_st.content_margin_left = 12; bubble_st.content_margin_top = 8; bubble_st.content_margin_right = 12; bubble_st.content_margin_bottom = 8
+				bubble_panel.add_theme_stylebox_override("panel", bubble_st)
+				bubble_panel.custom_minimum_size = Vector2(260, 0)
+				bubble_panel.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN if is_inbound else Control.SIZE_SHRINK_END
+
+				var bubble_vbox = VBoxContainer.new()
+				bubble_vbox.add_theme_constant_override("separation", 3)
+
+				var sender_lbl = Label.new()
+				sender_lbl.text = person_name if is_inbound else str(m.get("sender_name", "Real Life"))
+				sender_lbl.add_theme_font_size_override("font_size", 11)
+				sender_lbl.add_theme_color_override("font_color", Color(0.35, 0.45, 0.58, 1.0) if is_inbound else Color(0.85, 0.93, 1.0, 1.0))
+				bubble_vbox.add_child(sender_lbl)
+
+				var body_lbl = Label.new()
+				body_lbl.text = str(m.get("body", ""))
+				body_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+				body_lbl.add_theme_font_size_override("font_size", 13)
+				body_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0) if is_inbound else Color(1.0, 1.0, 1.0, 1.0))
+				bubble_vbox.add_child(body_lbl)
+
+				var raw_t = str(m.get("created_at", ""))
+				var time_str = _format_card_datetime(raw_t)
+				var status_suffix = "" if is_inbound else (" • " + str(m.get("status", "sent")))
+				var time_lbl = Label.new()
+				time_lbl.text = time_str + status_suffix
+				time_lbl.add_theme_font_size_override("font_size", 10)
+				time_lbl.add_theme_color_override("font_color", Color(0.50, 0.55, 0.65, 1.0) if is_inbound else Color(0.80, 0.90, 1.0, 0.8))
+				bubble_vbox.add_child(time_lbl)
+
+				bubble_panel.add_child(bubble_vbox)
+				msg_box.add_child(bubble_panel)
+				thread_vbox.add_child(msg_box)
+
+	_render_thread_messages.call()
+	call_deferred("_scroll_to_bottom", scroll)
+
+	# --- Reply Box Footer ---
+	var reply_panel = PanelContainer.new()
+	var reply_st = StyleBoxFlat.new()
+	reply_st.bg_color = Color(0.97, 0.98, 0.99, 1.0)
+	reply_st.border_width_left = 1; reply_st.border_width_top = 1; reply_st.border_width_right = 1; reply_st.border_width_bottom = 1
+	reply_st.border_color = Color(0.88, 0.90, 0.94, 1.0)
+	reply_st.corner_radius_top_left = 8; reply_st.corner_radius_top_right = 8; reply_st.corner_radius_bottom_left = 8; reply_st.corner_radius_bottom_right = 8
+	reply_st.content_margin_left = 10; reply_st.content_margin_top = 8; reply_st.content_margin_right = 10; reply_st.content_margin_bottom = 8
+	reply_panel.add_theme_stylebox_override("panel", reply_st)
+	main_vbox.add_child(reply_panel)
+
+	var reply_hbox = HBoxContainer.new()
+	reply_hbox.add_theme_constant_override("separation", 10)
+
+	var msg_edit = TextEdit.new()
+	msg_edit.placeholder_text = "Type a reply to " + person_name + "..."
+	msg_edit.custom_minimum_size = Vector2(0, 48)
+	msg_edit.size_flags_horizontal = SIZE_EXPAND_FILL
+	msg_edit.caret_blink = true
+	msg_edit.add_theme_color_override("caret_color", Color(0.12, 0.16, 0.22, 1.0))
+	msg_edit.add_theme_font_size_override("font_size", 13)
+	reply_hbox.add_child(msg_edit)
+
+	var btn_send = Button.new()
+	btn_send.text = "✉️ Send Reply"
+	btn_send.custom_minimum_size = Vector2(110, 48)
+	btn_send.add_theme_font_size_override("font_size", 12)
+
+	var send_normal = StyleBoxFlat.new()
+	send_normal.bg_color = Color(0.08, 0.44, 0.75, 1.0)
+	send_normal.corner_radius_top_left = 6; send_normal.corner_radius_top_right = 6; send_normal.corner_radius_bottom_left = 6; send_normal.corner_radius_bottom_right = 6
+	btn_send.add_theme_stylebox_override("normal", send_normal)
+	btn_send.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
+	btn_send.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 1.0, 1.0))
+	btn_send.add_theme_color_override("font_pressed_color", Color(0.90, 0.95, 1.0, 1.0))
+	btn_send.add_theme_color_override("font_focus_color", Color(1.0, 1.0, 1.0, 1.0))
+
+	var do_send_reply = func():
+		var reply_txt = msg_edit.text.strip_edges()
+		if reply_txt == "": return
+
+		btn_send.disabled = true
+		btn_send.text = "Sending..."
+
+		var target_person = {"phone": caller_num, "first_name": person_name, "last_name": ""}
+		if p_match.get("matched", false) and p_match.get("person") != null:
+			target_person = p_match["person"]
+
+		var send_res = com_service.send_message_atomic(target_person, "SMS", reply_txt, _active_supervisor_name)
+
+		btn_send.disabled = false
+		btn_send.text = "✉️ Send Reply"
+		msg_edit.text = ""
+
+		if send_res.get("success", false):
+			_render_thread_messages.call()
+			call_deferred("_scroll_to_bottom", scroll)
+			_refresh_all_feeds()
+		else:
+			OS.alert("Failed to send reply: " + str(send_res.get("error", "Unknown Error")), "Send Error")
+
+	btn_send.pressed.connect(do_send_reply)
+	reply_hbox.add_child(btn_send)
+	reply_panel.add_child(reply_hbox)
+
+	if focus_reply:
+		msg_edit.grab_focus()
 
 func set_selected_phone_filter(phone: String) -> void:
 	_selected_phone_filter = phone

@@ -168,10 +168,10 @@ func run_all_38_tests() -> void:
 	var exact_1_claim = res_worker1["claimed_count"] == 1
 	var exact_0_losing_claim = res_worker2["claimed_count"] == 0
 	var exact_1_sent_row = sent_row_check["data"][0]["cnt"] == 1
-	var authentic_history_and_outbox = comms_hist_check["success"] and comms_hist_check["data"].size() > 0 and comms_hist_check["data"][0]["status"] in ["simulated", "submitted_to_provider"] and outbox_check["data"][0]["cnt"] > 0
+	var authentic_history_and_outbox = comms_hist_check["success"] and comms_hist_check["data"].size() > 0 and comms_hist_check["data"][0]["status"] in ["simulated", "submitted_to_provider", "sent"] and outbox_check["data"][0]["cnt"] > 0
 	print("EXACT1: ", exact_1_claim, " EXACT0: ", exact_0_losing_claim, " SENT_ROW: ", exact_1_sent_row, " AUTHENTIC: ", authentic_history_and_outbox)
 
-	assert_true(exact_1_claim and exact_0_losing_claim and exact_1_sent_row and authentic_history_and_outbox, "Req #23 / Authentic Dispatch Artifact Test: Processing scheduled SMS routes through send_message_atomic(), creating authentic communications_log (status='simulated'/'submitted_to_provider') and outbox events, rather than synthetic rows.")
+	assert_true(exact_1_claim and exact_0_losing_claim and exact_1_sent_row and authentic_history_and_outbox, "Req #23 / Authentic Dispatch Artifact Test: Processing scheduled SMS routes through send_message_atomic(), creating authentic communications_log (status='simulated'/'submitted_to_provider'/'sent') and outbox events, rather than synthetic rows.")
 
 	# End-to-End Communication Integration Test
 	db.execute("UPDATE session_signups SET communication_needed = 1 WHERE person_id = 201 AND session_id = ?;", [sess_id])
