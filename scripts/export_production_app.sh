@@ -45,7 +45,7 @@ echo "Export Target: $TARGET_PCK"
 pkill -f "StudyCenterHub" || true
 sleep 1
 
-"$GODOT_BIN" --headless --path "$PROJECT_DIR" -s "$PROJECT_DIR/scripts/pack_pck.gd"
+"$GODOT_BIN" --headless --path "$PROJECT_DIR" --export-pack "macOS" "$TARGET_PCK"
 
 if [ -f "$TARGET_PCK" ]; then
     echo "✅ PCK File Created: $TARGET_PCK"
