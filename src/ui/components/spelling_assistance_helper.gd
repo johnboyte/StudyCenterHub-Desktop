@@ -626,16 +626,6 @@ class InlineSpellingOverlay extends Control:
 			size = text_edit.size
 
 		var total_lines = text_edit.get_line_count()
-		var font = text_edit.get_theme_font("font")
-		var font_size = text_edit.get_theme_font_size("font_size")
-		var line_height = text_edit.get_line_height()
-
-		var sb = text_edit.get_theme_stylebox("normal")
-		var pad_left = sb.get_margin(SIDE_LEFT) if sb else 4.0
-		var pad_top = sb.get_margin(SIDE_TOP) if sb else 4.0
-
-		var scroll_v = text_edit.scroll_vertical if "scroll_vertical" in text_edit else 0
-		var scroll_h = text_edit.scroll_horizontal if "scroll_horizontal" in text_edit else 0
 
 		for line_idx in range(total_lines):
 			var line_str = text_edit.get_line(line_idx)
@@ -646,30 +636,30 @@ class InlineSpellingOverlay extends Control:
 			if issues.size() == 0:
 				continue
 
-			var line_top_y = pad_top + (line_idx * line_height) - (scroll_v * line_height)
-			var line_baseline_y = line_top_y + line_height - 3.0
-
 			for iss in issues:
 				var start_col = int(iss["start"])
 				var end_col = int(iss["end"])
+				if start_col < 0 or end_col <= start_col or end_col > line_str.length():
+					continue
 
-				var x_start = pad_left - scroll_h
-				var x_end = pad_left - scroll_h
+				# Derive exact rendered glyph bounding box directly from Godot 4 TextEdit C++ layout engine
+				var r_start = text_edit.get_rect_at_line_column(line_idx, start_col)
+				var r_end = text_edit.get_rect_at_line_column(line_idx, end_col - 1)
 
-				if font:
-					x_start += font.get_string_size(line_str.left(start_col), HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
-					x_end += font.get_string_size(line_str.left(end_col), HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
+				# Skip if word is currently scrolled off-screen or unrendered
+				if r_start.position.x < 0 or r_start.position.y < 0 or r_end.position.x < 0:
+					continue
 
-				# Fallback if get_pos_at_line_column returns valid non-negative coordinates
-				var p1 = text_edit.get_pos_at_line_column(line_idx, start_col)
-				var p2 = text_edit.get_pos_at_line_column(line_idx, end_col)
-				if p1.x >= 0 and p1.y >= 0 and p2.x >= 0:
-					x_start = p1.x
-					x_end = p2.x
-					line_baseline_y = p1.y + line_height - 3.0
+				var x_start = float(r_start.position.x)
+				var x_end = float(r_end.position.x + r_end.size.x)
+				var y_baseline = float(r_start.position.y + r_start.size.y - 2.0)
+
+				# Ensure underline is within visible vertical viewport
+				if y_baseline < 0 or y_baseline > text_edit.size.y:
+					continue
 
 				if x_start >= 0 and x_end > x_start:
-					_draw_word_wave(x_start, x_end, line_baseline_y)
+					_draw_word_wave(x_start, x_end, y_baseline)
 
 	func _draw_word_wave(x_start: float, x_end: float, y_baseline: float) -> void:
 		var wave_pts = PackedVector2Array()
