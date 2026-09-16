@@ -210,6 +210,13 @@ static func check_text(text: String) -> Array:
 static func ignore_word(word: String) -> void:
 	_ignored_words[word.to_lower()] = true
 
+static func add_word_to_dictionary(word: String) -> void:
+	_ensure_dictionary_loaded()
+	var lower = word.to_lower()
+	_valid_word_set[lower] = true
+	if not _candidate_word_list.has(lower):
+		_candidate_word_list.append(lower)
+
 func attach_to_text_edit(text_edit: TextEdit, parent_container: Container) -> Control:
 	var spell_card = PanelContainer.new()
 	spell_card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -336,6 +343,27 @@ func attach_to_text_edit(text_edit: TextEdit, parent_container: Container) -> Co
 			_update_spelling_bar.call_deferred()
 		)
 		sug_container.add_child(btn_ignore)
+
+		# Render Add to Dict button
+		var btn_add_dict = Button.new()
+		btn_add_dict.text = "➕ Add to Dict"
+		btn_add_dict.custom_minimum_size = Vector2(90, 28)
+		btn_add_dict.add_theme_font_size_override("font_size", 12)
+		var add_s = StyleBoxFlat.new()
+		add_s.bg_color = Color(0.18, 0.42, 0.32, 1.0)
+		add_s.corner_radius_top_left = 4
+		add_s.corner_radius_top_right = 4
+		add_s.corner_radius_bottom_left = 4
+		add_s.corner_radius_bottom_right = 4
+		add_s.content_margin_left = 8
+		add_s.content_margin_right = 8
+		btn_add_dict.add_theme_stylebox_override("normal", add_s)
+		btn_add_dict.add_theme_color_override("font_color", Color(0.85, 0.95, 0.90, 1.0))
+		btn_add_dict.pressed.connect(func():
+			add_word_to_dictionary(word)
+			_update_spelling_bar.call_deferred()
+		)
+		sug_container.add_child(btn_add_dict)
 
 		# Render Next Issue button if multiple issues exist
 		if current_issues.size() > 1:

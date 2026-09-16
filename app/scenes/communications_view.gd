@@ -9,6 +9,7 @@ const CommunicationsServiceScript = preload("res://src/domain/communications/com
 const WorkQueueHeaderBarScene = preload("res://app/scenes/components/work_queue_header_bar.tscn")
 const QueueControllerScript = preload("res://src/domain/work_queue/queue_controller.gd")
 const QueueRegistryScript = preload("res://src/domain/work_queue/queue_registry.gd")
+const SpellingAssistanceHelperScript = preload("res://src/ui/components/spelling_assistance_helper.gd")
 
 var db: RefCounted:
 	set(value):
@@ -2260,7 +2261,7 @@ func _open_sms_conversation_dialog(caller_num: String, display_caller: String, v
 	backdrop.add_child(center)
 
 	var card = PanelContainer.new()
-	card.custom_minimum_size = Vector2(800, 620)
+	card.custom_minimum_size = Vector2(850, 680)
 	var card_st = StyleBoxFlat.new()
 	card_st.bg_color = Color(1.0, 1.0, 1.0, 1.0)
 	card_st.border_width_left = 1; card_st.border_width_top = 1; card_st.border_width_right = 1; card_st.border_width_bottom = 1
@@ -2272,7 +2273,7 @@ func _open_sms_conversation_dialog(caller_num: String, display_caller: String, v
 
 	var main_vbox = VBoxContainer.new()
 	main_vbox.add_theme_constant_override("separation", 12)
-	main_vbox.custom_minimum_size = Vector2(800, 620)
+	main_vbox.custom_minimum_size = Vector2(850, 680)
 	card.add_child(main_vbox)
 
 	# --- Header Row ---
@@ -2356,7 +2357,7 @@ func _open_sms_conversation_dialog(caller_num: String, display_caller: String, v
 	var scroll = ScrollContainer.new()
 	scroll.size_flags_horizontal = SIZE_EXPAND_FILL
 	scroll.size_flags_vertical = SIZE_EXPAND_FILL
-	scroll.custom_minimum_size = Vector2(0, 380)
+	scroll.custom_minimum_size = Vector2(0, 300)
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	main_vbox.add_child(scroll)
 
@@ -2436,48 +2437,146 @@ func _open_sms_conversation_dialog(caller_num: String, display_caller: String, v
 	call_deferred("_scroll_to_bottom", scroll)
 
 	# --- Reply Box Footer ---
+	# --- Reply Box Footer (Two-Step Confirmation) ---
 	var reply_panel = PanelContainer.new()
 	var reply_st = StyleBoxFlat.new()
 	reply_st.bg_color = Color(0.97, 0.98, 0.99, 1.0)
 	reply_st.border_width_left = 1; reply_st.border_width_top = 1; reply_st.border_width_right = 1; reply_st.border_width_bottom = 1
 	reply_st.border_color = Color(0.88, 0.90, 0.94, 1.0)
 	reply_st.corner_radius_top_left = 8; reply_st.corner_radius_top_right = 8; reply_st.corner_radius_bottom_left = 8; reply_st.corner_radius_bottom_right = 8
-	reply_st.content_margin_left = 10; reply_st.content_margin_top = 8; reply_st.content_margin_right = 10; reply_st.content_margin_bottom = 8
+	reply_st.content_margin_left = 12; reply_st.content_margin_top = 10; reply_st.content_margin_right = 12; reply_st.content_margin_bottom = 10
 	reply_panel.add_theme_stylebox_override("panel", reply_st)
 	main_vbox.add_child(reply_panel)
 
-	var reply_hbox = HBoxContainer.new()
-	reply_hbox.add_theme_constant_override("separation", 10)
+	# --- Step 1: Compose VBox ---
+	var compose_vbox = VBoxContainer.new()
+	compose_vbox.add_theme_constant_override("separation", 8)
+	reply_panel.add_child(compose_vbox)
 
 	var msg_edit = TextEdit.new()
 	msg_edit.placeholder_text = "Type a reply to " + person_name + "..."
-	msg_edit.custom_minimum_size = Vector2(0, 48)
+	msg_edit.custom_minimum_size = Vector2(0, 135)
 	msg_edit.size_flags_horizontal = SIZE_EXPAND_FILL
+	msg_edit.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
 	msg_edit.caret_blink = true
 	msg_edit.add_theme_color_override("caret_color", Color(0.12, 0.16, 0.22, 1.0))
-	msg_edit.add_theme_font_size_override("font_size", 13)
-	reply_hbox.add_child(msg_edit)
+	msg_edit.add_theme_font_size_override("font_size", 14)
+	msg_edit.context_menu_enabled = true
+	compose_vbox.add_child(msg_edit)
 
-	var btn_send = Button.new()
-	btn_send.text = "✉️ Send Reply"
-	btn_send.custom_minimum_size = Vector2(110, 48)
-	btn_send.add_theme_font_size_override("font_size", 12)
+	if SpellingAssistanceHelperScript:
+		var spell_inst = SpellingAssistanceHelperScript.new()
+		spell_inst.attach_to_text_edit(msg_edit, compose_vbox)
+
+	var compose_action_hbox = HBoxContainer.new()
+	compose_action_hbox.add_theme_constant_override("separation", 10)
+
+	var hint_lbl = Label.new()
+	hint_lbl.text = "💡 Multiline SMS Composer • Real-time spell check active"
+	hint_lbl.add_theme_font_size_override("font_size", 11)
+	hint_lbl.add_theme_color_override("font_color", Color(0.45, 0.50, 0.60, 1.0))
+	hint_lbl.size_flags_horizontal = SIZE_EXPAND_FILL
+	compose_action_hbox.add_child(hint_lbl)
+
+	var btn_review_send = Button.new()
+	btn_review_send.text = "✉️ Send Reply"
+	btn_review_send.custom_minimum_size = Vector2(130, 40)
+	btn_review_send.add_theme_font_size_override("font_size", 13)
 
 	var send_normal = StyleBoxFlat.new()
 	send_normal.bg_color = Color(0.08, 0.44, 0.75, 1.0)
 	send_normal.corner_radius_top_left = 6; send_normal.corner_radius_top_right = 6; send_normal.corner_radius_bottom_left = 6; send_normal.corner_radius_bottom_right = 6
-	btn_send.add_theme_stylebox_override("normal", send_normal)
-	btn_send.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
-	btn_send.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 1.0, 1.0))
-	btn_send.add_theme_color_override("font_pressed_color", Color(0.90, 0.95, 1.0, 1.0))
-	btn_send.add_theme_color_override("font_focus_color", Color(1.0, 1.0, 1.0, 1.0))
+	btn_review_send.add_theme_stylebox_override("normal", send_normal)
+	btn_review_send.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
+	btn_review_send.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 1.0, 1.0))
+	btn_review_send.add_theme_color_override("font_pressed_color", Color(0.90, 0.95, 1.0, 1.0))
+	btn_review_send.add_theme_color_override("font_focus_color", Color(1.0, 1.0, 1.0, 1.0))
 
-	var do_send_reply = func():
+	compose_action_hbox.add_child(btn_review_send)
+	compose_vbox.add_child(compose_action_hbox)
+
+	# --- Step 2: Preview VBox (Phone Message Bubble Presentation) ---
+	var preview_vbox = VBoxContainer.new()
+	preview_vbox.add_theme_constant_override("separation", 10)
+	preview_vbox.visible = false
+	reply_panel.add_child(preview_vbox)
+
+	var prev_hdr_lbl = Label.new()
+	prev_hdr_lbl.text = "📱 Confirm Outbound SMS to " + person_name + " (" + formatted_phone + ")"
+	prev_hdr_lbl.add_theme_font_size_override("font_size", 13)
+	prev_hdr_lbl.add_theme_color_override("font_color", Color(0.18, 0.28, 0.42, 1.0))
+	preview_vbox.add_child(prev_hdr_lbl)
+
+	var bubble_panel = PanelContainer.new()
+	var bubble_st = StyleBoxFlat.new()
+	bubble_st.bg_color = Color(0.08, 0.44, 0.75, 1.0)
+	bubble_st.border_width_left = 1; bubble_st.border_width_top = 1; bubble_st.border_width_right = 1; bubble_st.border_width_bottom = 1
+	bubble_st.border_color = Color(0.06, 0.38, 0.66, 1.0)
+	bubble_st.corner_radius_top_left = 12; bubble_st.corner_radius_top_right = 12; bubble_st.corner_radius_bottom_left = 12; bubble_st.corner_radius_bottom_right = 2
+	bubble_st.content_margin_left = 14; bubble_st.content_margin_top = 10; bubble_st.content_margin_right = 14; bubble_st.content_margin_bottom = 10
+	bubble_panel.add_theme_stylebox_override("panel", bubble_st)
+	bubble_panel.size_flags_horizontal = SIZE_EXPAND_FILL
+	bubble_panel.custom_minimum_size = Vector2(0, 70)
+
+	var preview_body_lbl = Label.new()
+	preview_body_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	preview_body_lbl.add_theme_font_size_override("font_size", 14)
+	preview_body_lbl.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
+	bubble_panel.add_child(preview_body_lbl)
+	preview_vbox.add_child(bubble_panel)
+
+	var prev_action_hbox = HBoxContainer.new()
+	prev_action_hbox.add_theme_constant_override("separation", 10)
+
+	var btn_back_edit = Button.new()
+	btn_back_edit.text = "↩️ Back to Edit"
+	btn_back_edit.custom_minimum_size = Vector2(130, 38)
+	btn_back_edit.add_theme_font_size_override("font_size", 12)
+
+	var back_st = StyleBoxFlat.new()
+	back_st.bg_color = Color(0.30, 0.35, 0.45, 1.0)
+	back_st.corner_radius_top_left = 6; back_st.corner_radius_top_right = 6; back_st.corner_radius_bottom_left = 6; back_st.corner_radius_bottom_right = 6
+	btn_back_edit.add_theme_stylebox_override("normal", back_st)
+	btn_back_edit.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
+	prev_action_hbox.add_child(btn_back_edit)
+
+	var spacer = Control.new()
+	spacer.size_flags_horizontal = SIZE_EXPAND_FILL
+	prev_action_hbox.add_child(spacer)
+
+	var btn_confirm_send = Button.new()
+	btn_confirm_send.text = "✉️ Send Now"
+	btn_confirm_send.custom_minimum_size = Vector2(140, 38)
+	btn_confirm_send.add_theme_font_size_override("font_size", 13)
+	btn_confirm_send.add_theme_stylebox_override("normal", send_normal)
+	btn_confirm_send.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
+	prev_action_hbox.add_child(btn_confirm_send)
+
+	preview_vbox.add_child(prev_action_hbox)
+
+	# --- Transitions & Sending Logic ---
+	btn_review_send.pressed.connect(func():
+		var reply_txt = msg_edit.text.strip_edges()
+		if reply_txt == "": return
+		preview_body_lbl.text = msg_edit.text
+		compose_vbox.visible = false
+		preview_vbox.visible = true
+	)
+
+	btn_back_edit.pressed.connect(func():
+		preview_vbox.visible = false
+		compose_vbox.visible = true
+		msg_edit.grab_focus()
+	)
+
+	btn_confirm_send.pressed.connect(func():
 		var reply_txt = msg_edit.text.strip_edges()
 		if reply_txt == "": return
 
-		btn_send.disabled = true
-		btn_send.text = "Sending..."
+		# Double-click prevention
+		btn_confirm_send.disabled = true
+		btn_back_edit.disabled = true
+		btn_confirm_send.text = "Sending..."
 
 		var target_person = {"phone": caller_num, "first_name": person_name, "last_name": ""}
 		if p_match.get("matched", false) and p_match.get("person") != null:
@@ -2485,20 +2584,20 @@ func _open_sms_conversation_dialog(caller_num: String, display_caller: String, v
 
 		var send_res = com_service.send_message_atomic(target_person, "SMS", reply_txt, _active_supervisor_name)
 
-		btn_send.disabled = false
-		btn_send.text = "✉️ Send Reply"
-		msg_edit.text = ""
+		btn_confirm_send.disabled = false
+		btn_back_edit.disabled = false
+		btn_confirm_send.text = "✉️ Send Now"
 
 		if send_res.get("success", false):
+			msg_edit.text = ""
+			preview_vbox.visible = false
+			compose_vbox.visible = true
 			_render_thread_messages.call()
 			call_deferred("_scroll_to_bottom", scroll)
 			_refresh_all_feeds()
 		else:
 			OS.alert("Failed to send reply: " + str(send_res.get("error", "Unknown Error")), "Send Error")
-
-	btn_send.pressed.connect(do_send_reply)
-	reply_hbox.add_child(btn_send)
-	reply_panel.add_child(reply_hbox)
+	)
 
 	if focus_reply:
 		msg_edit.grab_focus()
