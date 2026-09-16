@@ -620,6 +620,11 @@ class InlineSpellingOverlay extends Control:
 		if not text_edit or not is_instance_valid(text_edit):
 			return
 
+		# Force overlay size & position to match parent TextEdit bounds exactly
+		if size != text_edit.size or position != Vector2.ZERO:
+			position = Vector2.ZERO
+			size = text_edit.size
+
 		var total_lines = text_edit.get_line_count()
 		var font = text_edit.get_theme_font("font")
 		var font_size = text_edit.get_theme_font_size("font_size")
@@ -697,17 +702,23 @@ static func attach_inline_spell_check(text_edit: TextEdit) -> void:
 	text_edit.add_child(overlay)
 	overlay.z_index = 10
 
-	var redraw_cb = func():
-		if is_instance_valid(overlay):
+	var update_overlay = func():
+		if is_instance_valid(overlay) and is_instance_valid(text_edit):
+			overlay.position = Vector2.ZERO
+			overlay.size = text_edit.size
 			overlay.queue_redraw()
 
-	text_edit.text_changed.connect(redraw_cb)
+	update_overlay.call()
+
+	text_edit.text_changed.connect(update_overlay)
 	if text_edit.has_signal("scroll_vertical_changed"):
-		text_edit.scroll_vertical_changed.connect(redraw_cb)
+		text_edit.scroll_vertical_changed.connect(update_overlay)
 	if text_edit.has_signal("scroll_horizontal_changed"):
-		text_edit.scroll_horizontal_changed.connect(redraw_cb)
-	text_edit.resized.connect(redraw_cb)
-	text_edit.focus_entered.connect(redraw_cb)
+		text_edit.scroll_horizontal_changed.connect(update_overlay)
+	text_edit.resized.connect(update_overlay)
+	text_edit.focus_entered.connect(update_overlay)
+	text_edit.tree_entered.connect(update_overlay)
+	text_edit.item_rect_changed.connect(update_overlay)
 
 	# Right-Click / Control-Click Context Menu Correction
 	text_edit.gui_input.connect(func(event: InputEvent):
@@ -814,17 +825,17 @@ static func attach_inline_spell_check(text_edit: TextEdit) -> void:
 
 							text_edit.text = full_txt.left(global_start) + sug_val + full_txt.substr(global_end)
 							text_edit.text_changed.emit()
-							redraw_cb.call()
+							update_overlay.call()
 
 						elif act == "ignore":
 							ignore_word(target_word)
 							text_edit.text_changed.emit()
-							redraw_cb.call()
+							update_overlay.call()
 
 						elif act == "add_dict":
 							add_word_to_dictionary(target_word)
 							text_edit.text_changed.emit()
-							redraw_cb.call()
+							update_overlay.call()
 
 						elif act == "edit_cut":
 							text_edit.cut()
