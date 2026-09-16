@@ -755,6 +755,12 @@ static func attach_inline_spell_check(text_edit: TextEdit) -> void:
 
 				var target_word = str(matched_issue["word"])
 				var sugs: Array = matched_issue["suggestions"]
+				var issue_start = int(matched_issue["start"])
+				var issue_end = int(matched_issue["end"])
+
+				var target_word_range = func():
+					if not text_edit.has_selection():
+						text_edit.select(target_line, issue_start, target_line, issue_end)
 
 				var popup = PopupMenu.new()
 				text_edit.add_child(popup)
@@ -796,6 +802,17 @@ static func attach_inline_spell_check(text_edit: TextEdit) -> void:
 				popup.set_item_metadata(item_idx, { "action": "edit_paste" })
 				item_idx += 1
 
+				popup.add_item("🗑️ Delete", item_idx)
+				popup.set_item_metadata(item_idx, { "action": "edit_delete" })
+				item_idx += 1
+
+				popup.add_separator()
+				item_idx += 1
+
+				popup.add_item("全 Select All", item_idx)
+				popup.set_item_metadata(item_idx, { "action": "edit_select_all" })
+				item_idx += 1
+
 				popup.id_pressed.connect(func(id: int):
 					var idx = popup.get_item_index(id)
 					var meta = popup.get_item_metadata(idx)
@@ -803,17 +820,8 @@ static func attach_inline_spell_check(text_edit: TextEdit) -> void:
 						var act = meta.get("action", "")
 						if act == "replace":
 							var sug_val = str(meta.get("val", ""))
-							var full_txt = text_edit.text
-							var issue_start = int(matched_issue["start"])
-							var issue_end = int(matched_issue["end"])
-
-							var global_start = 0
-							for i in range(target_line):
-								global_start += text_edit.get_line(i).length() + 1
-							global_start += issue_start
-							var global_end = global_start + (issue_end - issue_start)
-
-							text_edit.text = full_txt.left(global_start) + sug_val + full_txt.substr(global_end)
+							target_word_range.call()
+							text_edit.insert_text_at_caret(sug_val)
 							text_edit.text_changed.emit()
 							update_overlay.call()
 
@@ -828,11 +836,29 @@ static func attach_inline_spell_check(text_edit: TextEdit) -> void:
 							update_overlay.call()
 
 						elif act == "edit_cut":
+							target_word_range.call()
 							text_edit.cut()
+							text_edit.text_changed.emit()
+							update_overlay.call()
+
 						elif act == "edit_copy":
+							target_word_range.call()
 							text_edit.copy()
+
 						elif act == "edit_paste":
+							target_word_range.call()
 							text_edit.paste()
+							text_edit.text_changed.emit()
+							update_overlay.call()
+
+						elif act == "edit_delete":
+							target_word_range.call()
+							text_edit.delete_selection()
+							text_edit.text_changed.emit()
+							update_overlay.call()
+
+						elif act == "edit_select_all":
+							text_edit.select_all()
 
 					popup.queue_free()
 				)
