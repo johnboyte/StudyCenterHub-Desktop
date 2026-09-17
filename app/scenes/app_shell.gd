@@ -63,6 +63,10 @@ const DEFAULT_SUBTITLES: Dictionary = {
 var _sync_timer: Timer
 var _is_syncing: bool = false
 var _weather_http_client: HTTPRequest
+var _comms_svc: RefCounted = null
+var _sync_svc: RefCounted = null
+var _twilio_config_cached: bool = false
+var _view_scene_cache: Dictionary = {}
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -82,11 +86,45 @@ func _ready() -> void:
 	else:
 		switch_view("home")
 
-	_start_auto_sync()
-
 	_apply_window_title()
-	call_deferred("_apply_window_title")
-	get_tree().create_timer(0.2).timeout.connect(_apply_window_title)
+	call_deferred("_prewarm_all_view_scenes")
+	call_deferred("_start_auto_sync")
+
+var _prewarm_queue: Array = [
+	{"name": "people", "path": "res://app/scenes/directory_view.tscn"},
+	{"name": "communications", "path": "res://app/scenes/communications_view.tscn"},
+	{"name": "schedules", "path": "res://app/scenes/schedules_view.tscn"},
+	{"name": "attendance", "path": "res://app/scenes/attendance_view.tscn"},
+	{"name": "administration", "path": "res://app/scenes/administration_view.tscn"},
+	{"name": "reports", "path": "res://app/scenes/reports_view.tscn"},
+	{"name": "volunteers", "path": "res://app/scenes/volunteers_view.tscn"},
+	{"name": "pathways", "path": "res://app/scenes/pathways_view.tscn"},
+	{"name": "settings", "path": "res://app/scenes/settings_view.tscn"}
+]
+
+func _prewarm_all_view_scenes() -> void:
+	_prewarm_next_scene()
+
+func _prewarm_next_scene() -> void:
+	if _prewarm_queue.is_empty():
+		return
+	var item = _prewarm_queue.pop_front()
+	var v_name = item["name"]
+	var v_path = item["path"]
+	if not _view_scene_cache.has(v_name):
+		var res = load(v_path)
+		if res:
+			_view_scene_cache[v_name] = res
+	if not _prewarm_queue.is_empty():
+		get_tree().create_timer(0.05).timeout.connect(_prewarm_next_scene)
+
+func _get_view_scene(view_name: String, path: String) -> PackedScene:
+	if _view_scene_cache.has(view_name) and _view_scene_cache[view_name] != null:
+		return _view_scene_cache[view_name]
+	var scene_res = load(path)
+	if scene_res:
+		_view_scene_cache[view_name] = scene_res
+	return scene_res
 
 func _apply_window_title() -> void:
 	var env_mode = OS.get_environment("STUDYCENTERHUB_ENV")
@@ -97,14 +135,15 @@ func _apply_window_title() -> void:
 	else:
 		DisplayServer.window_set_title("StudyCenterHub - Desktop (Development)")
 	
-	# Startup Twilio & Database Log
-	var tw_conf = {"account_sid": "", "auth_token": "", "phone_number": ""}
-	var TwilioGateway = load("res://src/infrastructure/messaging/twilio_gateway_service.gd")
-	if TwilioGateway:
-		var tw_gateway = TwilioGateway.new(db)
-		if tw_gateway:
-			tw_conf = tw_gateway.get_twilio_config()
-	print("[Twilio] Settings status: Account SID: ", "Configured" if tw_conf.get("account_sid", "") != "" else "Not Configured", ", Phone: ", "Configured" if tw_conf.get("phone_number", "") != "" else "Not Configured")
+	if not _twilio_config_cached and db:
+		_twilio_config_cached = true
+		var tw_conf = {"account_sid": "", "auth_token": "", "phone_number": ""}
+		var TwilioGateway = load("res://src/infrastructure/messaging/twilio_gateway_service.gd")
+		if TwilioGateway:
+			var tw_gateway = TwilioGateway.new(db)
+			if tw_gateway:
+				tw_conf = tw_gateway.get_twilio_config()
+		print("[Twilio] Settings status: Account SID: ", "Configured" if tw_conf.get("account_sid", "") != "" else "Not Configured", ", Phone: ", "Configured" if tw_conf.get("phone_number", "") != "" else "Not Configured")
 
 func _start_auto_sync() -> void:
 	_sync_timer = Timer.new()
@@ -113,25 +152,29 @@ func _start_auto_sync() -> void:
 	_sync_timer.one_shot = false
 	_sync_timer.timeout.connect(_on_sync_timer_tick)
 	add_child(_sync_timer)
-	# Run first sync immediately after startup
-	call_deferred("_on_sync_timer_tick")
+	# Run initial operating hours publish once on startup
+	if db:
+		_sync_svc = GatewaySyncScript.new(db, self)
+		_sync_svc.publish_operating_hours()
 
 func _on_sync_timer_tick() -> void:
 	_update_date_and_weather()
 	if _is_syncing or not db:
 		return
 	_is_syncing = true
-	var comms_svc = CommunicationsServiceScript.new(db)
-	comms_svc.process_scheduled_communications_atomic("app_shell_worker")
+	
+	if not _comms_svc:
+		_comms_svc = CommunicationsServiceScript.new(db)
+	_comms_svc.process_scheduled_communications_atomic("app_shell_worker")
 
-	var sync_svc = GatewaySyncScript.new(db, self)
-	sync_svc.publish_operating_hours()
-	sync_svc.sync_now(func(result: Dictionary):
+	if not _sync_svc:
+		_sync_svc = GatewaySyncScript.new(db, self)
+	
+	_sync_svc.sync_now(func(result: Dictionary):
 		var processor = InboundEventProcessorScript.new(db, self)
 		processor.process_pending_events(func(proc_result: Dictionary):
 			var count = int(proc_result.get("processed_count", 0))
-			print("[AutoSync] Processed ", count, " pending events. Pushing ACKs...")
-			sync_svc.push_acknowledgements_now(func(_ack_res):
+			_sync_svc.push_acknowledgements_now(func(_ack_res):
 				_is_syncing = false
 				if count > 0:
 					get_tree().call_group("sync_listeners", "on_inbound_events_processed", count)
@@ -329,6 +372,10 @@ func _get_weather_icon(code: int, is_day: int) -> String:
 		return "⛈️"
 	return "☀️"
 
+var _last_weather_fetch_unix: int = 0
+var _cached_scripture_text: String = ""
+var _cached_scripture_ref: String = ""
+
 func _update_date_and_weather() -> void:
 	if date_pill:
 		var date_dict = Time.get_date_dict_from_system()
@@ -352,12 +399,21 @@ func _update_date_and_weather() -> void:
 					weather_str = val
 		weather_pill.text = weather_str
 
-	_fetch_live_weather()
+	var now = Time.get_unix_time_from_system()
+	if now - _last_weather_fetch_unix > 900: # 15 minutes
+		_last_weather_fetch_unix = int(now)
+		_fetch_live_weather()
 
 func _update_sidebar_scripture_card() -> void:
 	var verse_lbl = get_node_or_null("SidebarPanel/SidebarMargin/SidebarVBox/ScriptureCard/ScriptureMargin/ScriptureVBox/VerseTextLabel")
 	var ref_lbl = get_node_or_null("SidebarPanel/SidebarMargin/SidebarVBox/ScriptureCard/ScriptureMargin/ScriptureVBox/VerseRefLabel")
 	if not verse_lbl or not ref_lbl:
+		return
+
+	if _cached_scripture_text != "":
+		verse_lbl.text = _cached_scripture_text
+		ref_lbl.text = _cached_scripture_ref
+		ref_lbl.visible = true
 		return
 
 	if not db:
@@ -382,8 +438,10 @@ func _update_sidebar_scripture_card() -> void:
 				ov_ref = v
 
 	if ov_enabled and ov_text.strip_edges() != "":
-		verse_lbl.text = ov_text.strip_edges()
-		ref_lbl.text = ("— " + ov_ref.strip_edges()) if ov_ref.strip_edges() != "" else "— Center Announcement"
+		_cached_scripture_text = ov_text.strip_edges()
+		_cached_scripture_ref = ("— " + ov_ref.strip_edges()) if ov_ref.strip_edges() != "" else "— Center Announcement"
+		verse_lbl.text = _cached_scripture_text
+		ref_lbl.text = _cached_scripture_ref
 		ref_lbl.visible = true
 		return
 
@@ -402,12 +460,16 @@ func _update_sidebar_scripture_card() -> void:
 		if not v_text.begins_with("“") and not v_text.begins_with("\""):
 			v_text = "“" + v_text + "”"
 		
-		verse_lbl.text = v_text
-		ref_lbl.text = "— " + v_ref
+		_cached_scripture_text = v_text
+		_cached_scripture_ref = "— " + v_ref
+		verse_lbl.text = _cached_scripture_text
+		ref_lbl.text = _cached_scripture_ref
 		ref_lbl.visible = true
 	else:
-		verse_lbl.text = "“Trust in the LORD with all your heart...”"
-		ref_lbl.text = "— Proverbs 3:5-6"
+		_cached_scripture_text = "“Trust in the LORD with all your heart...”"
+		_cached_scripture_ref = "— Proverbs 3:5-6"
+		verse_lbl.text = _cached_scripture_text
+		ref_lbl.text = _cached_scripture_ref
 
 func _update_header_for_current_view(first_name: String = "") -> void:
 	_update_date_and_weather()
@@ -544,13 +606,13 @@ func switch_view(view_name: String, params: Dictionary = {}) -> bool:
 				child.queue_free()
 
 	if view_name == "home":
-		var scene_res = load("res://app/scenes/home_view.tscn")
+		var scene_res = _get_view_scene("home", "res://app/scenes/home_view.tscn")
 		if scene_res:
 			current_view_node = scene_res.instantiate()
 			if current_view_node.has_method("set_app_shell"):
 				current_view_node.set_app_shell(self)
 	elif view_name == "people":
-		var scene_res = load("res://app/scenes/directory_view.tscn")
+		var scene_res = _get_view_scene("people", "res://app/scenes/directory_view.tscn")
 		if scene_res:
 			current_view_node = scene_res.instantiate()
 			if "db" in current_view_node:
@@ -558,49 +620,49 @@ func switch_view(view_name: String, params: Dictionary = {}) -> bool:
 			if "read_service" in current_view_node:
 				current_view_node.read_service = read_service
 	elif view_name == "administration":
-		var scene_res = load("res://app/scenes/administration_view.tscn")
+		var scene_res = _get_view_scene("administration", "res://app/scenes/administration_view.tscn")
 		if scene_res:
 			current_view_node = scene_res.instantiate()
 			if "db" in current_view_node:
 				current_view_node.db = db
 	elif view_name == "communications":
-		var scene_res = load("res://app/scenes/communications_view.tscn")
+		var scene_res = _get_view_scene("communications", "res://app/scenes/communications_view.tscn")
 		if scene_res:
 			current_view_node = scene_res.instantiate()
 			if "db" in current_view_node:
 				current_view_node.db = db
 	elif view_name == "schedules":
-		var scene_res = load("res://app/scenes/schedules_view.tscn")
+		var scene_res = _get_view_scene("schedules", "res://app/scenes/schedules_view.tscn")
 		if scene_res:
 			current_view_node = scene_res.instantiate()
 			if "db" in current_view_node:
 				current_view_node.db = db
 	elif view_name == "volunteers":
-		var scene_res = load("res://app/scenes/volunteers_view.tscn")
+		var scene_res = _get_view_scene("volunteers", "res://app/scenes/volunteers_view.tscn")
 		if scene_res:
 			current_view_node = scene_res.instantiate()
 			if "db" in current_view_node:
 				current_view_node.db = db
 	elif view_name == "reports":
-		var scene_res = load("res://app/scenes/reports_view.tscn")
+		var scene_res = _get_view_scene("reports", "res://app/scenes/reports_view.tscn")
 		if scene_res:
 			current_view_node = scene_res.instantiate()
 			if "db" in current_view_node:
 				current_view_node.db = db
 	elif view_name == "settings":
-		var scene_res = load("res://app/scenes/settings_view.tscn")
+		var scene_res = _get_view_scene("settings", "res://app/scenes/settings_view.tscn")
 		if scene_res:
 			current_view_node = scene_res.instantiate()
 			if "db" in current_view_node:
 				current_view_node.db = db
 	elif view_name == "pathways":
-		var scene_res = load("res://app/scenes/pathways_view.tscn")
+		var scene_res = _get_view_scene("pathways", "res://app/scenes/pathways_view.tscn")
 		if scene_res:
 			current_view_node = scene_res.instantiate()
 			if "db" in current_view_node:
 				current_view_node.db = db
 	elif view_name == "attendance":
-		var scene_res = load("res://app/scenes/attendance_view.tscn")
+		var scene_res = _get_view_scene("attendance", "res://app/scenes/attendance_view.tscn")
 		if scene_res:
 			current_view_node = scene_res.instantiate()
 			if "db" in current_view_node:
