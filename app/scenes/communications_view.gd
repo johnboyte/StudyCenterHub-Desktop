@@ -2690,7 +2690,7 @@ func _open_sms_conversation_dialog(caller_num: String, display_caller: String, v
 	btn_schedule_send.pressed.connect(func():
 		var reply_txt = msg_edit.text.strip_edges()
 		if reply_txt == "": return
-		_open_schedule_sms_dialog(p_match, caller_num, person_name, reply_txt, msg_edit, preview_vbox, compose_vbox, scroll)
+		_open_schedule_sms_dialog(p_match, caller_num, person_name, reply_txt, msg_edit, preview_vbox, compose_vbox, scroll, _render_thread_messages)
 	)
 
 	btn_confirm_send.pressed.connect(func():
@@ -2726,7 +2726,7 @@ func _open_sms_conversation_dialog(caller_num: String, display_caller: String, v
 	if focus_reply:
 		msg_edit.grab_focus()
 
-func _open_schedule_sms_dialog(p_match: Dictionary, caller_num: String, person_name: String, reply_txt: String, msg_edit: TextEdit, preview_vbox: VBoxContainer, compose_vbox: VBoxContainer, scroll: ScrollContainer) -> void:
+func _open_schedule_sms_dialog(p_match: Dictionary, caller_num: String, person_name: String, reply_txt: String, msg_edit: TextEdit, preview_vbox: VBoxContainer, compose_vbox: VBoxContainer, scroll: ScrollContainer, render_thread_cb: Callable = Callable()) -> void:
 	var canvas_layer = CanvasLayer.new()
 	canvas_layer.layer = 128
 
@@ -2977,7 +2977,8 @@ func _open_schedule_sms_dialog(p_match: Dictionary, caller_num: String, person_n
 			msg_edit.text = ""
 			preview_vbox.visible = false
 			compose_vbox.visible = true
-			_render_thread_messages.call()
+			if render_thread_cb.is_valid():
+				render_thread_cb.call()
 			call_deferred("_scroll_to_bottom", scroll)
 			_refresh_all_feeds()
 			OS.alert("SMS scheduled for " + res["display_time"] + " to " + person_name + ".", "Schedule Confirmed")

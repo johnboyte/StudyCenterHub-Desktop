@@ -56,7 +56,7 @@ func verify_production() -> void:
 	print("  ✓ 4. Spelling assistance engine verified in Production mode.")
 
 	# 5. Create Person-linked Task in Production
-	var task_uuid = "task_prod_" + str(Time.get_ticks_msec())
+	var task_uuid = "task_prod_" + str(Time.get_ticks_usec())
 	var task_sql = """
 	INSERT INTO staff_tasks_index (task_uuid, title, description, due_date, priority, status, linked_human_id, linked_human_name)
 	VALUES (?, ?, ?, datetime('now', '+1 day'), 'high', 'open', ?, ?);
