@@ -54,6 +54,15 @@ func _ensure_db_dir() -> void:
 
 func execute(sql: String, args: Array = []) -> Dictionary:
 	var formatted_sql = _format_sql(sql, args)
+	
+	# HARD TEST SAFETY GUARD: Prevent test scripts from modifying Production DB
+	if _is_production_database_path(db_path) and _is_mutating_sql(formatted_sql):
+		if _is_test_execution_context() and OS.get_environment("STUDYCENTERHUB_ALLOW_PROD_TEST_MUTATIONS") != "1":
+			printerr("❌ HARD SAFETY GUARD: Mutating SQL statement refused against Production database during test execution!")
+			printerr("   Target Path: ", db_path)
+			printerr("   Attempted Query: ", formatted_sql)
+			return {"success": false, "error": "HARD SAFETY GUARD: Test mutating query refused on Production DB", "data": []}
+
 	if formatted_sql.to_upper().contains("UPDATE ") and not formatted_sql.to_upper().contains("SELECT "):
 		formatted_sql += ";\nSELECT changes() AS affected_rows;"
 	
@@ -138,3 +147,28 @@ func _format_sql(sql: String, args: Array) -> String:
 			formatted = formatted.left(pos) + val_str + formatted.substr(pos + 1)
 			curr_pos = pos + val_str.length()
 	return formatted
+
+func _is_production_database_path(path: String) -> bool:
+	var f_name = path.get_file().to_lower()
+	return f_name == "studycenterhub_production.db" or path.to_lower().contains("studycenterhub_production.db")
+
+func _is_mutating_sql(sql_text: String) -> bool:
+	var clean = sql_text.strip_edges().to_upper()
+	var verbs = ["INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE", "REPLACE", "TRUNCATE"]
+	for v in verbs:
+		if clean.begins_with(v) or clean.contains("\n" + v + " ") or clean.contains("; " + v + " "):
+			return true
+	return false
+
+func _is_test_execution_context() -> bool:
+	var cmd_args = OS.get_cmdline_args()
+	for arg in cmd_args:
+		var lower_arg = str(arg).to_lower()
+		if lower_arg.contains("tests/") or lower_arg.contains("test_") or lower_arg.contains("verify_production"):
+			return true
+	var stack = get_stack()
+	for frame in stack:
+		var source = str(frame.get("source", "")).to_lower()
+		if source.contains("tests/") or source.contains("test_") or source.contains("verify_production"):
+			return true
+	return false
