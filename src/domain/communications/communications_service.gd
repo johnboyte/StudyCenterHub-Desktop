@@ -707,15 +707,25 @@ func process_scheduled_communications_atomic(worker_id: String = "worker_primary
 				var detail = "Dispatched %d sent, %d failed, %d excluded" % [sent_cnt, fail_cnt, exc_cnt]
 				db.execute("UPDATE scheduled_communications SET status = ?, status_detail = ? WHERE id = ?;", [final_status, detail, sched_id])
 			else:
-				# Fallback: Query people table directly if no signups exist for demo session
-				var p_gen = db.execute("SELECT id, person_uuid, first_name, last_name, phone, email, sms_consent FROM people WHERE phone IS NOT NULL AND phone != '' LIMIT 1;")
-				if p_gen["success"] and p_gen["data"].size() > 0:
-					var target_p = p_gen["data"][0]
+				# 1-on-1 SMS dispatch or Fallback: check if audience is a phone number / constituent match
+				var target_p = {}
+				var resolved = resolve_person_by_phone(audience)
+				if resolved.get("matched", false) and resolved.get("person") != null:
+					target_p = resolved["person"]
+				elif normalize_phone_digits(audience).length() >= 7:
+					target_p = {"phone": audience, "first_name": "Valued Member", "last_name": ""}
+				else:
+					var p_gen = db.execute("SELECT id, person_uuid, first_name, last_name, phone, email, sms_consent FROM people WHERE phone IS NOT NULL AND phone != '' LIMIT 1;")
+					if p_gen["success"] and p_gen["data"].size() > 0:
+						target_p = p_gen["data"][0]
+
+				if not target_p.is_empty():
 					var fn = str(target_p.get("first_name", "Participant"))
 					var final_body = body.replace("{first_name}", fn)
 					var d_res = send_message_atomic(target_p, channel, final_body, creator, image_path)
-					var final_status = "sent" if d_res["success"] else "failed"
-					db.execute("UPDATE scheduled_communications SET status = ?, status_detail = 'Dispatched target fallback' WHERE id = ?;", [final_status, sched_id])
+					var final_status = "sent" if d_res.get("success", false) else "failed"
+					var err_d = str(d_res.get("error", "Dispatched scheduled SMS"))
+					db.execute("UPDATE scheduled_communications SET status = ?, status_detail = ? WHERE id = ?;", [final_status, err_d, sched_id])
 				else:
 					db.execute("UPDATE scheduled_communications SET status = 'failed', status_detail = 'No recipients found' WHERE id = ?;", [sched_id])
 

@@ -8,6 +8,7 @@ const MigrationsRunnerScript = preload("res://src/infrastructure/database/migrat
 const DirectoryReadServiceScript = preload("res://src/domain/directory/directory_read_service.gd")
 const GatewaySyncScript = preload("res://src/domain/sync/gateway_sync_service.gd")
 const InboundEventProcessorScript = preload("res://src/domain/sync/inbound_event_processor.gd")
+const CommunicationsServiceScript = preload("res://src/domain/communications/communications_service.gd")
 const PublicQrSignDialogScript = preload("res://app/scenes/public_qr_sign_dialog.gd")
 
 const HomeViewScript = preload("res://app/scenes/home_view.gd")
@@ -120,6 +121,9 @@ func _on_sync_timer_tick() -> void:
 	if _is_syncing or not db:
 		return
 	_is_syncing = true
+	var comms_svc = CommunicationsServiceScript.new(db)
+	comms_svc.process_scheduled_communications_atomic("app_shell_worker")
+
 	var sync_svc = GatewaySyncScript.new(db, self)
 	sync_svc.publish_operating_hours()
 	sync_svc.sync_now(func(result: Dictionary):

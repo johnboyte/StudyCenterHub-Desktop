@@ -92,6 +92,9 @@ func _test_spelling_assistance_engine() -> void:
 	assert(not flagged_words.has("and"), "'and' must NOT be flagged!")
 	print("✓ PASS: 'tha', 'thak', 'resturant' flagged correctly while valid words ('restaurant', 'that', 'than', 'thank', 'the', 'and') accepted.")
 
+	# Short Word & Sentence Classification Audit Regression Test
+	_test_short_words_and_sentences_classification(db)
+
 	# Test Session Ignore Action
 	SpellingAssistanceHelperScript.ignore_word("hwe")
 	var re_check = SpellingAssistanceHelperScript.check_text("te hwe te hasehg")
@@ -101,6 +104,87 @@ func _test_spelling_assistance_engine() -> void:
 			hwe_still_flagged = true
 	assert(not hwe_still_flagged, "hwe must be ignored after ignore_word() call!")
 	print("✓ PASS: Ignore action successfully suppressed 'hwe' in session.")
+
+func _test_short_words_and_sentences_classification(database: RefCounted) -> void:
+	print("--- Testing Curated Short-Word Dictionary Authority & Full Sentences ---")
+
+	var valid_2_letter = [
+		"is", "it", "in", "on", "of", "to", "we", "he", "me", "my",
+		"be", "by", "or", "if", "as", "at", "an", "am", "no", "so", "up", "us", "do", "go"
+	]
+	var valid_3_letter = [
+		"and", "are", "but", "can", "did", "for", "get", "had", "has", "her",
+		"him", "his", "how", "its", "may", "not", "now", "one", "our", "out",
+		"she", "the", "too", "two", "was", "way", "who", "why", "you"
+	]
+
+	for w in valid_2_letter:
+		assert(SpellingAssistanceHelperScript.is_word_valid(w), "2-letter word '" + w + "' MUST be valid!")
+	print("✓ PASS: All 24 standard 2-letter words verified valid.")
+
+	for w in valid_3_letter:
+		assert(SpellingAssistanceHelperScript.is_word_valid(w), "3-letter word '" + w + "' MUST be valid!")
+	print("✓ PASS: All 29 standard 3-letter words verified valid.")
+
+	# Invalid short dictionary noise / typos
+	var invalid_words = ["tha", "thak", "resturant"]
+	for w in invalid_words:
+		assert(not SpellingAssistanceHelperScript.is_word_valid(w), "Word '" + w + "' MUST be invalid/flagged!")
+	print("✓ PASS: Invalid words ('tha', 'thak', 'resturant') verified flagged.")
+
+	# 1. Sentences that MUST HAVE ZERO spelling errors:
+	var zero_error_sentences = [
+		"that is the way",
+		"this is the way to go",
+		"we can do it now",
+		"he and she went to the store",
+		"thank you for helping us today",
+		"I will meet you at the restaurant",
+		"we are looking forward to seeing you",
+		"John and Tess are coming tonight"
+	]
+
+	for s in zero_error_sentences:
+		var issues = SpellingAssistanceHelperScript.check_text(s)
+		assert(issues.size() == 0, "Sentence '" + s + "' expected 0 spelling issues, got: " + str(issues))
+	print("✓ PASS: All 8 required normal English sentences produced 0 false positive spelling errors.")
+
+	# 2. Sentences that MUST produce spelling errors and correct suggestions:
+	var error_test_cases = [
+		{"text": "tha is the way", "word": "tha", "expected_sug": "the"},
+		{"text": "I went to the resturant", "word": "resturant", "expected_sug": "restaurant"},
+		{"text": "thak you for helping", "word": "thak", "expected_sug": "thank"},
+		{"text": "we wil meet you there", "word": "wil", "expected_sug": "will"},
+		{"text": "this sentnce has an error", "word": "sentnce", "expected_sug": "sentence"},
+		{"text": "this is a tess", "word": "tess", "expected_sug": ""}
+	]
+
+	for tc in error_test_cases:
+		var issues = SpellingAssistanceHelperScript.check_text(tc["text"])
+		assert(issues.size() >= 1, "Sentence '" + tc["text"] + "' expected error for '" + tc["word"] + "', got 0 issues.")
+		var found_word = false
+		for iss in issues:
+			if iss["word"] == tc["word"]:
+				found_word = true
+				if tc["expected_sug"] != "":
+					assert(iss["suggestions"].has(tc["expected_sug"]), "Expected suggestion '" + tc["expected_sug"] + "' for '" + tc["word"] + "', got: " + str(iss["suggestions"]))
+		assert(found_word, "Word '" + tc["word"] + "' must be flagged in '" + tc["text"] + "'")
+	print("✓ PASS: All 6 required error sentences produced correct misspellings and suggestions.")
+
+	# 3. Proper Name Capitalization Rule Verification
+	assert(SpellingAssistanceHelperScript.is_word_valid("Tess"), "'Tess' (TitleCase) MUST be valid as a proper name.")
+	assert(not SpellingAssistanceHelperScript.is_word_valid("tess"), "'tess' (lowercase) MUST be flagged as misspelled.")
+	assert(SpellingAssistanceHelperScript.is_word_valid("John"), "'John' (TitleCase) MUST be valid as a proper name.")
+	print("✓ PASS: Proper-name capitalization rules verified ('Tess' valid, 'tess' flagged).")
+
+	# 4. Contact Name Ingestion from Database
+	database.execute("INSERT OR REPLACE INTO people (id, person_uuid, human_id, first_name, last_name, status) VALUES (900, 'usr_t_900', 'P-900', 'Arthur', 'Pendleton', 'active');")
+	SpellingAssistanceHelperScript.load_contact_names_from_db(database)
+
+	assert(SpellingAssistanceHelperScript.is_word_valid("Arthur"), "DB constituent name 'Arthur' (TitleCase) MUST be valid.")
+	assert(SpellingAssistanceHelperScript.is_word_valid("Pendleton"), "DB constituent name 'Pendleton' (TitleCase) MUST be valid.")
+	assert(not SpellingAssistanceHelperScript.is_word_valid("pendleton"), "Lowercase 'pendleton' MUST be flagged.")
+	print("✓ PASS: Contact names dynamically ingested from database and validated under proper-name rules.")
 
 func _test_note_editing_lifecycle() -> void:
 	print("\n--- 2. Testing Note Editing Lifecycle Across All 4 Note Types ---")

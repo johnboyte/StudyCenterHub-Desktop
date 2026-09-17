@@ -1717,6 +1717,98 @@ func _refresh_communications_log() -> void:
 	title_lbl.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
 	vbox.add_child(title_lbl)
 
+	# --- Pending Scheduled Messages Management Section ---
+	var sched_res = db.execute("SELECT id, schedule_uuid, audience, channel, message_body, scheduled_time_local, status, created_at FROM scheduled_communications WHERE status = 'scheduled' ORDER BY scheduled_time_local ASC;")
+	if sched_res["success"] and sched_res["data"].size() > 0:
+		var sched_hdr = Label.new()
+		sched_hdr.text = "⏰ Pending Scheduled Outbox (" + str(sched_res["data"].size()) + ")"
+		sched_hdr.add_theme_font_size_override("font_size", 16)
+		sched_hdr.add_theme_color_override("font_color", Color(0.10, 0.45, 0.70, 1.0))
+		vbox.add_child(sched_hdr)
+
+		for s_item in sched_res["data"]:
+			var s_id = int(s_item.get("id", 0))
+			var aud = str(s_item.get("audience", ""))
+			var ch = str(s_item.get("channel", "SMS"))
+			var body_txt = str(s_item.get("message_body", ""))
+			var sch_time = str(s_item.get("scheduled_time_local", ""))
+
+			var rec_name = aud
+			var resolved = com_service.resolve_person_by_phone(aud)
+			if resolved.get("matched", false) and resolved.get("person") != null:
+				var p = resolved["person"]
+				var fn = str(p.get("first_name", ""))
+				var ln = str(p.get("last_name", ""))
+				rec_name = (fn + " " + ln).strip_edges() + " (" + aud + ")"
+
+			var item_panel = PanelContainer.new()
+			var item_st = StyleBoxFlat.new()
+			item_st.bg_color = Color(0.95, 0.97, 1.0, 1.0)
+			item_st.border_width_left = 1; item_st.border_width_top = 1; item_st.border_width_right = 1; item_st.border_width_bottom = 1
+			item_st.border_color = Color(0.80, 0.88, 0.96, 1.0)
+			item_st.corner_radius_top_left = 6; item_st.corner_radius_top_right = 6; item_st.corner_radius_bottom_left = 6; item_st.corner_radius_bottom_right = 6
+			item_st.content_margin_left = 10; item_st.content_margin_top = 8; item_st.content_margin_right = 10; item_st.content_margin_bottom = 8
+			item_panel.add_theme_stylebox_override("panel", item_st)
+
+			var item_hbox = HBoxContainer.new()
+			item_hbox.add_theme_constant_override("separation", 10)
+
+			var info_vbox = VBoxContainer.new()
+			info_vbox.size_flags_horizontal = SIZE_EXPAND_FILL
+			info_vbox.add_theme_constant_override("separation", 2)
+
+			var l_hdr = Label.new()
+			l_hdr.text = "📱 " + rec_name + " • " + ch + " | Scheduled: " + sch_time
+			l_hdr.add_theme_font_size_override("font_size", 13)
+			l_hdr.add_theme_color_override("font_color", Color(0.12, 0.24, 0.40, 1.0))
+			info_vbox.add_child(l_hdr)
+
+			var l_body = Label.new()
+			l_body.text = "\"" + body_txt + "\""
+			l_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			l_body.add_theme_font_size_override("font_size", 12)
+			l_body.add_theme_color_override("font_color", Color(0.30, 0.36, 0.45, 1.0))
+			info_vbox.add_child(l_body)
+			item_hbox.add_child(info_vbox)
+
+			var btn_now = Button.new()
+			btn_now.text = "⚡ Send Now"
+			btn_now.custom_minimum_size = Vector2(95, 30)
+			btn_now.add_theme_font_size_override("font_size", 11)
+			btn_now.pressed.connect(func():
+				var target_p = {}
+				var res_p = com_service.resolve_person_by_phone(aud)
+				if res_p.get("matched", false) and res_p.get("person") != null:
+					target_p = res_p["person"]
+				else:
+					target_p = {"phone": aud, "first_name": "Valued Member", "last_name": ""}
+				
+				var d_res = com_service.send_message_atomic(target_p, ch, body_txt, _active_supervisor_name)
+				if d_res.get("success", false):
+					db.execute("UPDATE scheduled_communications SET status = 'sent', status_detail = 'Manual Immediate Dispatch' WHERE id = ?;", [s_id])
+					_refresh_all_feeds()
+				else:
+					OS.alert("Failed to send scheduled message: " + str(d_res.get("error", "Error")), "Dispatch Error")
+			)
+			item_hbox.add_child(btn_now)
+
+			var btn_canc = Button.new()
+			btn_canc.text = "🚫 Cancel"
+			btn_canc.custom_minimum_size = Vector2(80, 30)
+			btn_canc.add_theme_font_size_override("font_size", 11)
+			btn_canc.pressed.connect(func():
+				db.execute("UPDATE scheduled_communications SET status = 'cancelled' WHERE id = ?;", [s_id])
+				_refresh_all_feeds()
+			)
+			item_hbox.add_child(btn_canc)
+
+			item_panel.add_child(item_hbox)
+			vbox.add_child(item_panel)
+
+		var sep = HSeparator.new()
+		vbox.add_child(sep)
+
+	# --- Sent Communications History ---
 	var logs = com_service.get_recent_communications()
 	if logs.size() > 0:
 		for item in logs:
@@ -2552,12 +2644,30 @@ func _open_sms_conversation_dialog(caller_num: String, display_caller: String, v
 	spacer.size_flags_horizontal = SIZE_EXPAND_FILL
 	prev_action_hbox.add_child(spacer)
 
+	var btn_schedule_send = Button.new()
+	btn_schedule_send.text = "📅 Schedule Send"
+	btn_schedule_send.custom_minimum_size = Vector2(140, 38)
+	btn_schedule_send.add_theme_font_size_override("font_size", 13)
+
+	var sched_btn_st = StyleBoxFlat.new()
+	sched_btn_st.bg_color = Color(0.12, 0.52, 0.52, 1.0)
+	sched_btn_st.corner_radius_top_left = 6; sched_btn_st.corner_radius_top_right = 6; sched_btn_st.corner_radius_bottom_left = 6; sched_btn_st.corner_radius_bottom_right = 6
+	btn_schedule_send.add_theme_stylebox_override("normal", sched_btn_st)
+	btn_schedule_send.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
+	btn_schedule_send.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 1.0, 1.0))
+	btn_schedule_send.add_theme_color_override("font_pressed_color", Color(0.90, 1.0, 0.95, 1.0))
+	btn_schedule_send.add_theme_color_override("font_focus_color", Color(1.0, 1.0, 1.0, 1.0))
+	prev_action_hbox.add_child(btn_schedule_send)
+
 	var btn_confirm_send = Button.new()
 	btn_confirm_send.text = "✉️ Send Now"
 	btn_confirm_send.custom_minimum_size = Vector2(140, 38)
 	btn_confirm_send.add_theme_font_size_override("font_size", 13)
 	btn_confirm_send.add_theme_stylebox_override("normal", send_normal)
 	btn_confirm_send.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
+	btn_confirm_send.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 1.0, 1.0))
+	btn_confirm_send.add_theme_color_override("font_pressed_color", Color(0.90, 0.95, 1.0, 1.0))
+	btn_confirm_send.add_theme_color_override("font_focus_color", Color(1.0, 1.0, 1.0, 1.0))
 	prev_action_hbox.add_child(btn_confirm_send)
 
 	preview_vbox.add_child(prev_action_hbox)
@@ -2575,6 +2685,12 @@ func _open_sms_conversation_dialog(caller_num: String, display_caller: String, v
 		preview_vbox.visible = false
 		compose_vbox.visible = true
 		msg_edit.grab_focus()
+	)
+
+	btn_schedule_send.pressed.connect(func():
+		var reply_txt = msg_edit.text.strip_edges()
+		if reply_txt == "": return
+		_open_schedule_sms_dialog(p_match, caller_num, person_name, reply_txt, msg_edit, preview_vbox, compose_vbox, scroll)
 	)
 
 	btn_confirm_send.pressed.connect(func():
@@ -2609,6 +2725,269 @@ func _open_sms_conversation_dialog(caller_num: String, display_caller: String, v
 
 	if focus_reply:
 		msg_edit.grab_focus()
+
+func _open_schedule_sms_dialog(p_match: Dictionary, caller_num: String, person_name: String, reply_txt: String, msg_edit: TextEdit, preview_vbox: VBoxContainer, compose_vbox: VBoxContainer, scroll: ScrollContainer) -> void:
+	var canvas_layer = CanvasLayer.new()
+	canvas_layer.layer = 128
+
+	var backdrop = ColorRect.new()
+	backdrop.color = Color(0.08, 0.12, 0.18, 0.65)
+	backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
+	canvas_layer.add_child(backdrop)
+
+	var center = CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	backdrop.add_child(center)
+
+	var card = PanelContainer.new()
+	var card_st = StyleBoxFlat.new()
+	card_st.bg_color = Color(1.0, 1.0, 1.0, 1.0)
+	card_st.border_width_left = 1; card_st.border_width_top = 1; card_st.border_width_right = 1; card_st.border_width_bottom = 1
+	card_st.border_color = Color(0.78, 0.82, 0.88, 1.0)
+	card_st.corner_radius_top_left = 12; card_st.corner_radius_top_right = 12; card_st.corner_radius_bottom_left = 12; card_st.corner_radius_bottom_right = 12
+	card_st.content_margin_left = 20; card_st.content_margin_top = 16; card_st.content_margin_right = 20; card_st.content_margin_bottom = 18
+	card.add_theme_stylebox_override("panel", card_st)
+	center.add_child(card)
+
+	var main_vbox = VBoxContainer.new()
+	main_vbox.add_theme_constant_override("separation", 14)
+	main_vbox.custom_minimum_size = Vector2(440, 0)
+	card.add_child(main_vbox)
+
+	var title_lbl = Label.new()
+	title_lbl.text = "📅 Schedule Outbound SMS"
+	title_lbl.add_theme_font_size_override("font_size", 18)
+	title_lbl.add_theme_color_override("font_color", Color(0.10, 0.16, 0.24, 1.0))
+	main_vbox.add_child(title_lbl)
+
+	var formatted_phone = com_service.normalize_phone_digits(caller_num) if com_service else caller_num
+	var rec_lbl = Label.new()
+	rec_lbl.text = "Recipient: " + person_name + " (" + formatted_phone + ")"
+	rec_lbl.add_theme_font_size_override("font_size", 13)
+	rec_lbl.add_theme_color_override("font_color", Color(0.35, 0.42, 0.52, 1.0))
+	main_vbox.add_child(rec_lbl)
+
+	var prev_card = PanelContainer.new()
+	var prev_st = StyleBoxFlat.new()
+	prev_st.bg_color = Color(0.96, 0.97, 0.98, 1.0)
+	prev_st.border_width_left = 1; prev_st.border_width_top = 1; prev_st.border_width_right = 1; prev_st.border_width_bottom = 1
+	prev_st.border_color = Color(0.85, 0.88, 0.92, 1.0)
+	prev_st.corner_radius_top_left = 8; prev_st.corner_radius_top_right = 8; prev_st.corner_radius_bottom_left = 8; prev_st.corner_radius_bottom_right = 8
+	prev_st.content_margin_left = 12; prev_st.content_margin_top = 8; prev_st.content_margin_right = 12; prev_st.content_margin_bottom = 8
+	prev_card.add_theme_stylebox_override("panel", prev_st)
+
+	var prev_body = Label.new()
+	prev_body.text = "SMS Body: \"" + reply_txt + "\""
+	prev_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	prev_body.add_theme_font_size_override("font_size", 13)
+	prev_body.add_theme_color_override("font_color", Color(0.20, 0.26, 0.35, 1.0))
+	prev_card.add_child(prev_body)
+	main_vbox.add_child(prev_card)
+
+	var dt_vbox = VBoxContainer.new()
+	dt_vbox.add_theme_constant_override("separation", 8)
+
+	var dt_lbl = Label.new()
+	dt_lbl.text = "Select Future Date & Time:"
+	dt_lbl.add_theme_font_size_override("font_size", 14)
+	dt_lbl.add_theme_color_override("font_color", Color(0.12, 0.16, 0.22, 1.0))
+	dt_vbox.add_child(dt_lbl)
+
+	var picker_hbox = HBoxContainer.new()
+	picker_hbox.add_theme_constant_override("separation", 8)
+
+	var sys_dt = Time.get_datetime_dict_from_system()
+	var cur_year = int(sys_dt.get("year", 2026))
+	var cur_month = int(sys_dt.get("month", 9))
+	var cur_day = int(sys_dt.get("day", 17))
+
+	var tom_day = cur_day + 1
+	var tom_month = cur_month
+	var tom_year = cur_year
+	if tom_day > 28:
+		tom_day = 1
+		tom_month += 1
+		if tom_month > 12:
+			tom_month = 1
+			tom_year += 1
+
+	var default_date_str = "%02d/%02d/%04d" % [tom_month, tom_day, tom_year]
+
+	var date_edit = LineEdit.new()
+	date_edit.text = default_date_str
+	date_edit.placeholder_text = "MM/DD/YYYY"
+	date_edit.custom_minimum_size = Vector2(130, 36)
+	date_edit.caret_blink = true
+	date_edit.add_theme_color_override("caret_color", Color(0.12, 0.16, 0.22, 1.0))
+	date_edit.add_theme_font_size_override("font_size", 13)
+	picker_hbox.add_child(date_edit)
+
+	var btn_cal = Button.new()
+	btn_cal.text = "📅"
+	btn_cal.tooltip_text = "Open Calendar Picker"
+	btn_cal.custom_minimum_size = Vector2(36, 36)
+	picker_hbox.add_child(btn_cal)
+
+	var opt_hour = OptionButton.new()
+	opt_hour.custom_minimum_size = Vector2(60, 36)
+	for h in range(1, 13):
+		opt_hour.add_item("%02d" % h)
+	opt_hour.select(8)
+
+	var opt_min = OptionButton.new()
+	opt_min.custom_minimum_size = Vector2(60, 36)
+	for m in range(0, 60, 5):
+		opt_min.add_item("%02d" % m)
+	opt_min.select(0)
+
+	var opt_ampm = OptionButton.new()
+	opt_ampm.custom_minimum_size = Vector2(65, 36)
+	opt_ampm.add_item("AM")
+	opt_ampm.add_item("PM")
+	opt_ampm.select(0)
+
+	picker_hbox.add_child(opt_hour)
+	picker_hbox.add_child(opt_min)
+	picker_hbox.add_child(opt_ampm)
+	dt_vbox.add_child(picker_hbox)
+	main_vbox.add_child(dt_vbox)
+
+	var val_lbl = Label.new()
+	val_lbl.add_theme_font_size_override("font_size", 13)
+	main_vbox.add_child(val_lbl)
+
+	var act_hbox = HBoxContainer.new()
+	act_hbox.add_theme_constant_override("separation", 10)
+	act_hbox.alignment = HBoxContainer.ALIGNMENT_END
+
+	var btn_cancel = Button.new()
+	btn_cancel.text = "Cancel"
+	btn_cancel.custom_minimum_size = Vector2(100, 36)
+	btn_cancel.add_theme_font_size_override("font_size", 13)
+	btn_cancel.pressed.connect(func(): canvas_layer.queue_free())
+	act_hbox.add_child(btn_cancel)
+
+	var btn_confirm_sched = Button.new()
+	btn_confirm_sched.text = "📅 Confirm Schedule"
+	btn_confirm_sched.custom_minimum_size = Vector2(160, 36)
+	btn_confirm_sched.add_theme_font_size_override("font_size", 13)
+
+	var confirm_sched_st = StyleBoxFlat.new()
+	confirm_sched_st.bg_color = Color(0.08, 0.44, 0.75, 1.0)
+	confirm_sched_st.corner_radius_top_left = 6; confirm_sched_st.corner_radius_top_right = 6; confirm_sched_st.corner_radius_bottom_left = 6; confirm_sched_st.corner_radius_bottom_right = 6
+	btn_confirm_sched.add_theme_stylebox_override("normal", confirm_sched_st)
+	btn_confirm_sched.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
+	btn_confirm_sched.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 1.0, 1.0))
+	btn_confirm_sched.add_theme_color_override("font_pressed_color", Color(0.90, 0.95, 1.0, 1.0))
+	btn_confirm_sched.add_theme_color_override("font_focus_color", Color(1.0, 1.0, 1.0, 1.0))
+	act_hbox.add_child(btn_confirm_sched)
+	main_vbox.add_child(act_hbox)
+
+	var get_scheduled_datetime_info = func() -> Dictionary:
+		var raw_d = date_edit.text.strip_edges()
+
+		if raw_d.length() == 8 and raw_d.is_valid_int():
+			raw_d = raw_d.substr(0, 2) + "/" + raw_d.substr(2, 2) + "/" + raw_d.substr(4, 4)
+			date_edit.text = raw_d
+		elif raw_d.length() == 6 and raw_d.is_valid_int():
+			var yy = int(raw_d.substr(4, 2))
+			var yyyy = (2000 + yy) if yy < 50 else (1900 + yy)
+			raw_d = raw_d.substr(0, 2) + "/" + raw_d.substr(2, 2) + "/" + str(yyyy)
+			date_edit.text = raw_d
+
+		var parts = raw_d.split("/")
+		if parts.size() != 3:
+			return {"valid": false, "error": "Invalid date format. Use MM/DD/YYYY."}
+
+		var m = int(parts[0])
+		var d = int(parts[1])
+		var y = int(parts[2])
+
+		if m < 1 or m > 12 or d < 1 or d > 31 or y < 2024:
+			return {"valid": false, "error": "Invalid date value."}
+
+		var h_12 = opt_hour.selected + 1
+		var min_val = opt_min.selected * 5
+		var is_pm = opt_ampm.selected == 1
+
+		var h_24 = h_12
+		if is_pm and h_12 < 12:
+			h_24 = h_12 + 12
+		elif not is_pm and h_12 == 12:
+			h_24 = 0
+
+		var target_dict = {
+			"year": y,
+			"month": m,
+			"day": d,
+			"hour": h_24,
+			"minute": min_val,
+			"second": 0
+		}
+
+		var target_unix = Time.get_unix_time_from_datetime_dict(target_dict)
+		var now_unix = Time.get_unix_time_from_system()
+
+		if target_unix <= now_unix:
+			return {"valid": false, "error": "⚠️ Scheduled time must be in the future."}
+
+		var iso_local = "%04d-%02d-%02d %02d:%02d:00" % [y, m, d, h_24, min_val]
+		var ampm_str = "PM" if is_pm else "AM"
+		var display_time = "%02d/%02d/%04d %02d:%02d %s" % [m, d, y, h_12, min_val, ampm_str]
+
+		return {
+			"valid": true,
+			"iso_local": iso_local,
+			"display_time": display_time,
+			"error": ""
+		}
+
+	var update_validation = func():
+		var res = get_scheduled_datetime_info.call()
+		if not res["valid"]:
+			val_lbl.text = res["error"]
+			val_lbl.add_theme_color_override("font_color", Color(0.85, 0.25, 0.20, 1.0))
+			btn_confirm_sched.disabled = true
+		else:
+			val_lbl.text = "⏰ Scheduled for: " + res["display_time"]
+			val_lbl.add_theme_color_override("font_color", Color(0.08, 0.44, 0.75, 1.0))
+			btn_confirm_sched.disabled = false
+
+	date_edit.text_changed.connect(func(_t): update_validation.call())
+	opt_hour.item_selected.connect(func(_idx): update_validation.call())
+	opt_min.item_selected.connect(func(_idx): update_validation.call())
+	opt_ampm.item_selected.connect(func(_idx): update_validation.call())
+
+	btn_cal.pressed.connect(func():
+		_open_calendar_picker_dialog(func(sel_date: String):
+			date_edit.text = sel_date
+			update_validation.call()
+		, date_edit.text, date_edit)
+	)
+
+	btn_confirm_sched.pressed.connect(func():
+		var res = get_scheduled_datetime_info.call()
+		if not res["valid"]: return
+
+		btn_confirm_sched.disabled = true
+
+		var sched_res = com_service.schedule_message_atomic(0, caller_num, "SMS", reply_txt, res["iso_local"], _active_supervisor_name)
+		if sched_res.get("success", false) or sched_res.get("schedule_uuid", "") != "":
+			canvas_layer.queue_free()
+			msg_edit.text = ""
+			preview_vbox.visible = false
+			compose_vbox.visible = true
+			_render_thread_messages.call()
+			call_deferred("_scroll_to_bottom", scroll)
+			_refresh_all_feeds()
+			OS.alert("SMS scheduled for " + res["display_time"] + " to " + person_name + ".", "Schedule Confirmed")
+		else:
+			btn_confirm_sched.disabled = false
+			OS.alert("Failed to schedule SMS: " + str(sched_res.get("error", "Database error")), "Scheduling Failed")
+	)
+
+	add_child(canvas_layer)
+	update_validation.call()
 
 func set_selected_phone_filter(phone: String) -> void:
 	_selected_phone_filter = phone
