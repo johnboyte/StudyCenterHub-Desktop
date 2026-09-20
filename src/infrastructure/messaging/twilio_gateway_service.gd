@@ -146,14 +146,15 @@ func make_outbound_call_async(caller_node: Node, to_phone: String, callback: Cal
 			"error": "Failed to initiate outbound call request (Error code: " + str(err) + ")"
 		})
 
-func send_twilio_sms_async(caller_node: Node, to_phone: String, message_body: String, callback: Callable) -> void:
+func send_twilio_sms_async(caller_node: Node, to_phone: String, message_body: String, callback: Callable, media_url: String = "") -> void:
 	var config = get_twilio_config()
 	var formatted_to = format_e164_phone(to_phone)
 	var formatted_from = format_e164_phone(config["phone_number"])
 
 	if is_demo_config():
-		var demo_sid = "SM" + _generate_uuid().replace("-", "").left(30)
-		print("Dispatched Simulated SMS from ", formatted_from, " to ", formatted_to, " | Message SID: ", demo_sid)
+		var demo_sid = "MM" if media_url != "" else "SM"
+		demo_sid += _generate_uuid().replace("-", "").left(30)
+		print("Dispatched Simulated ", ("MMS" if media_url != "" else "SMS"), " from ", formatted_from, " to ", formatted_to, " | Message SID: ", demo_sid, (" | MediaUrl: " + media_url if media_url != "" else ""))
 		callback.call({
 			"success": true,
 			"is_live": false,
@@ -161,7 +162,7 @@ func send_twilio_sms_async(caller_node: Node, to_phone: String, message_body: St
 			"twilio_msg_sid": demo_sid,
 			"to_phone": formatted_to,
 			"from_phone": formatted_from,
-			"message": "Simulated dispatch (Demo Mode). Save live Twilio Account SID & Auth Token to deliver real SMS text messages to mobile phones."
+			"message": "Simulated dispatch (Demo Mode). Save live Twilio Account SID & Auth Token to deliver real SMS/MMS messages to mobile phones."
 		})
 		return
 
@@ -176,6 +177,8 @@ func send_twilio_sms_async(caller_node: Node, to_phone: String, message_body: St
 	]
 
 	var body = "To=" + formatted_to.uri_encode() + "&From=" + formatted_from.uri_encode() + "&Body=" + message_body.uri_encode()
+	if media_url != "":
+		body += "&MediaUrl=" + media_url.uri_encode()
 	var url = "https://api.twilio.com/2010-04-01/Accounts/" + config["account_sid"] + "/Messages.json"
 
 	http_request.request_completed.connect(func(result: int, response_code: int, _r_headers: PackedStringArray, body_bytes: PackedByteArray):

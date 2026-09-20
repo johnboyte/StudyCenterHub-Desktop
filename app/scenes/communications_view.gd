@@ -60,6 +60,19 @@ var template_dropdown: OptionButton = null
 var btn_send_message: Button = null
 var message_body_edit: TextEdit = null
 var char_count_label: Label = null
+
+# Attachment Members
+var current_attachment_path: String = ""
+var attachment_card: PanelContainer = null
+var attachment_drop_zone: PanelContainer = null
+var attachment_preview_box: PanelContainer = null
+var attachment_thumbnail: TextureRect = null
+var attachment_info_label: Label = null
+var btn_choose_image: Button = null
+var btn_remove_image: Button = null
+var btn_replace_image: Button = null
+var channel_mms_indicator: Label = null
+
 @onready var composer_card: PanelContainer = %ComposerCard
 @onready var voicemail_card: PanelContainer = %VoicemailCard
 @onready var threads_card: PanelContainer = %ThreadsCard
@@ -690,8 +703,9 @@ func _setup_communicate_send_composer() -> void:
 	btn_schedule_message.text = "🕒 Schedule Message"
 	btn_schedule_message.custom_minimum_size = Vector2(165, 38)
 	btn_schedule_message.disabled = true
-	btn_schedule_message.tooltip_text = "TODO: Scheduling disabled in current pass"
+	btn_schedule_message.tooltip_text = "Type a message or attach an image to schedule"
 	_style_disabled_button(btn_schedule_message)
+	btn_schedule_message.pressed.connect(_on_schedule_message_pressed)
 	row3.add_child(btn_schedule_message)
 
 	composer_vbox.add_child(row3)
@@ -727,10 +741,16 @@ func _setup_communicate_send_composer() -> void:
 		_reparent_node(char_count_label, msg_section)
 
 		if not message_body_edit.text_changed.is_connected(_update_character_count):
-			message_body_edit.text_changed.connect(_update_character_count)
+			message_body_edit.text_changed.connect(func():
+				_update_character_count()
+				_update_composer_validation()
+			)
 
 		composer_vbox.add_child(msg_section)
 		_update_character_count()
+
+	# Row 5: Attachment Area
+	_setup_attachment_area(composer_vbox)
 
 func _reparent_node(node: Node, new_parent: Node) -> void:
 	if not node or not new_parent: return
@@ -738,6 +758,240 @@ func _reparent_node(node: Node, new_parent: Node) -> void:
 	if p:
 		p.remove_child(node)
 	new_parent.add_child(node)
+
+func _setup_attachment_area(parent_vbox: VBoxContainer) -> void:
+	if attachment_card and is_instance_valid(attachment_card):
+		return
+
+	attachment_card = PanelContainer.new()
+	var card_st = StyleBoxFlat.new()
+	card_st.bg_color = Color(0.97, 0.98, 1.0, 1.0)
+	card_st.border_width_left = 1; card_st.border_width_top = 1; card_st.border_width_right = 1; card_st.border_width_bottom = 1
+	card_st.border_color = Color(0.82, 0.86, 0.92, 1.0)
+	card_st.corner_radius_top_left = 8; card_st.corner_radius_top_right = 8; card_st.corner_radius_bottom_left = 8; card_st.corner_radius_bottom_right = 8
+	card_st.content_margin_left = 12; card_st.content_margin_top = 10; card_st.content_margin_right = 12; card_st.content_margin_bottom = 10
+	attachment_card.add_theme_stylebox_override("panel", card_st)
+	attachment_card.custom_minimum_size = Vector2(660, 0)
+	attachment_card.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 8)
+	attachment_card.add_child(vbox)
+
+	var hdr_hbox = HBoxContainer.new()
+	hdr_hbox.add_theme_constant_override("separation", 10)
+
+	var att_hdr = Label.new()
+	att_hdr.text = "ATTACH FLYER / IMAGE"
+	att_hdr.add_theme_font_size_override("font_size", 13)
+	att_hdr.add_theme_color_override("font_color", Color(0.20, 0.25, 0.35, 1.0))
+	hdr_hbox.add_child(att_hdr)
+
+	channel_mms_indicator = Label.new()
+	channel_mms_indicator.text = "📱 SMS Text"
+	channel_mms_indicator.add_theme_font_size_override("font_size", 12)
+	channel_mms_indicator.add_theme_color_override("font_color", Color(0.15, 0.45, 0.85, 1.0))
+	hdr_hbox.add_child(channel_mms_indicator)
+
+	vbox.add_child(hdr_hbox)
+
+	# 1. Drop Zone (Visible when no image attached)
+	attachment_drop_zone = PanelContainer.new()
+	var dz_st = StyleBoxFlat.new()
+	dz_st.bg_color = Color(0.94, 0.96, 0.99, 1.0)
+	dz_st.border_width_left = 2; dz_st.border_width_top = 2; dz_st.border_width_right = 2; dz_st.border_width_bottom = 2
+	dz_st.border_color = Color(0.65, 0.75, 0.88, 1.0)
+	dz_st.corner_radius_top_left = 6; dz_st.corner_radius_top_right = 6; dz_st.corner_radius_bottom_left = 6; dz_st.corner_radius_bottom_right = 6
+	dz_st.content_margin_left = 14; dz_st.content_margin_top = 10; dz_st.content_margin_right = 14; dz_st.content_margin_bottom = 10
+	attachment_drop_zone.add_theme_stylebox_override("panel", dz_st)
+
+	var dz_hbox = HBoxContainer.new()
+	dz_hbox.add_theme_constant_override("separation", 12)
+	attachment_drop_zone.add_child(dz_hbox)
+
+	var dz_lbl = Label.new()
+	dz_lbl.text = "📎 Drag flyer / image here (PNG, JPG, WEBP, HEIC) or"
+	dz_lbl.add_theme_font_size_override("font_size", 13)
+	dz_lbl.add_theme_color_override("font_color", Color(0.30, 0.35, 0.45, 1.0))
+	dz_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	dz_hbox.add_child(dz_lbl)
+
+	btn_choose_image = Button.new()
+	btn_choose_image.text = "📂 Choose Image"
+	btn_choose_image.custom_minimum_size = Vector2(130, 32)
+	_style_secondary_button(btn_choose_image)
+	btn_choose_image.pressed.connect(_open_image_file_dialog)
+	dz_hbox.add_child(btn_choose_image)
+
+	vbox.add_child(attachment_drop_zone)
+
+	# 2. Preview Container (Visible when image attached)
+	attachment_preview_box = PanelContainer.new()
+	var prev_st = StyleBoxFlat.new()
+	prev_st.bg_color = Color(1.0, 1.0, 1.0, 1.0)
+	prev_st.border_width_left = 1; prev_st.border_width_top = 1; prev_st.border_width_right = 1; prev_st.border_width_bottom = 1
+	prev_st.border_color = Color(0.20, 0.55, 0.90, 1.0)
+	prev_st.corner_radius_top_left = 6; prev_st.corner_radius_top_right = 6; prev_st.corner_radius_bottom_left = 6; prev_st.corner_radius_bottom_right = 6
+	prev_st.content_margin_left = 10; prev_st.content_margin_top = 8; prev_st.content_margin_right = 10; prev_st.content_margin_bottom = 8
+	attachment_preview_box.add_theme_stylebox_override("panel", prev_st)
+	attachment_preview_box.visible = false
+
+	var prev_hbox = HBoxContainer.new()
+	prev_hbox.add_theme_constant_override("separation", 12)
+	attachment_preview_box.add_child(prev_hbox)
+
+	attachment_thumbnail = TextureRect.new()
+	attachment_thumbnail.custom_minimum_size = Vector2(64, 64)
+	attachment_thumbnail.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	attachment_thumbnail.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	prev_hbox.add_child(attachment_thumbnail)
+
+	var info_vbox = VBoxContainer.new()
+	info_vbox.add_theme_constant_override("separation", 2)
+	info_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+	attachment_info_label = Label.new()
+	attachment_info_label.text = "flyer.png"
+	attachment_info_label.add_theme_font_size_override("font_size", 13)
+	attachment_info_label.add_theme_color_override("font_color", Color(0.12, 0.16, 0.22, 1.0))
+	attachment_info_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	info_vbox.add_child(attachment_info_label)
+
+	prev_hbox.add_child(info_vbox)
+
+	var btn_vbox = VBoxContainer.new()
+	btn_vbox.add_theme_constant_override("separation", 4)
+
+	btn_replace_image = Button.new()
+	btn_replace_image.text = "🔄 Replace"
+	btn_replace_image.custom_minimum_size = Vector2(90, 28)
+	_style_secondary_button(btn_replace_image)
+	btn_replace_image.pressed.connect(_open_image_file_dialog)
+	btn_vbox.add_child(btn_replace_image)
+
+	btn_remove_image = Button.new()
+	btn_remove_image.text = "❌ Remove"
+	btn_remove_image.custom_minimum_size = Vector2(90, 28)
+	_style_secondary_button(btn_remove_image)
+	btn_remove_image.pressed.connect(_clear_attached_image)
+	btn_vbox.add_child(btn_remove_image)
+
+	prev_hbox.add_child(btn_vbox)
+	vbox.add_child(attachment_preview_box)
+
+	parent_vbox.add_child(attachment_card)
+
+	# Connect window file drop listener
+	var win = get_window()
+	if win and not win.files_dropped.is_connected(_on_window_files_dropped):
+		win.files_dropped.connect(_on_window_files_dropped)
+
+	if channel_dropdown and not channel_dropdown.item_selected.is_connected(_on_channel_selected_change):
+		channel_dropdown.item_selected.connect(_on_channel_selected_change)
+
+	_update_composer_validation()
+
+func _on_channel_selected_change(_idx: int) -> void:
+	_update_composer_validation()
+
+func _set_attached_image(file_path: String) -> void:
+	if not com_service:
+		com_service = CommunicationsServiceScript.new(db)
+	
+	var ch = channel_dropdown.get_item_text(channel_dropdown.selected) if (channel_dropdown and channel_dropdown.selected >= 0 and channel_dropdown.selected < channel_dropdown.get_item_count()) else "SMS Text"
+	var val = com_service.validate_attachment(file_path, ch)
+	if not val.get("valid", false):
+		OS.alert(val.get("reason", "Invalid image attachment."), "Attachment Invalid")
+		return
+
+	var target_path = val.get("processed_path", file_path)
+	if target_path == "": target_path = file_path
+	current_attachment_path = target_path
+
+	# Load texture preview
+	var img = Image.new()
+	var err = img.load(target_path)
+	if err == OK:
+		var tex = ImageTexture.create_from_image(img)
+		attachment_thumbnail.texture = tex
+		var f_size_mb = 0.0
+		var f = FileAccess.open(target_path, FileAccess.READ)
+		if f: f_size_mb = f.get_length() / (1024.0 * 1024.0)
+		attachment_info_label.text = "📎 " + target_path.get_file() + "\nDimensions: %dx%d px | Size: %.2f MB" % [img.get_width(), img.get_height(), f_size_mb]
+	else:
+		attachment_thumbnail.texture = null
+		attachment_info_label.text = "📎 " + target_path.get_file()
+
+	attachment_drop_zone.visible = false
+	attachment_preview_box.visible = true
+	_update_composer_validation()
+
+func _clear_attached_image() -> void:
+	current_attachment_path = ""
+	if attachment_thumbnail: attachment_thumbnail.texture = null
+	if attachment_info_label: attachment_info_label.text = ""
+	if attachment_preview_box: attachment_preview_box.visible = false
+	if attachment_drop_zone: attachment_drop_zone.visible = true
+	_update_composer_validation()
+
+func _on_window_files_dropped(files: PackedStringArray) -> void:
+	if not is_visible_in_tree(): return
+	if files.size() > 0:
+		var dropped_file = files[0]
+		var ext = dropped_file.get_extension().to_lower()
+		if ext in ["png", "jpg", "jpeg", "webp", "heic", "heif"]:
+			_set_attached_image(dropped_file)
+
+func _open_image_file_dialog() -> void:
+	var dlg = FileDialog.new()
+	dlg.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	dlg.access = FileDialog.ACCESS_FILESYSTEM
+	dlg.add_filter("*.png, *.jpg, *.jpeg, *.webp, *.heic, *.heif", "Flyer / Image Files")
+	dlg.title = "Select Flyer or Graphic Image"
+	dlg.size = Vector2i(750, 500)
+	dlg.file_selected.connect(func(path: String):
+		_set_attached_image(path)
+		dlg.queue_free()
+	)
+	dlg.close_requested.connect(func(): dlg.queue_free())
+	add_child(dlg)
+	dlg.popup_centered()
+
+func _update_composer_validation() -> void:
+	var body = message_body_edit.text.strip_edges() if message_body_edit else ""
+	var has_content = (body != "" or current_attachment_path != "")
+	var has_recipients = (current_eligible_recipients.size() > 0)
+	var can_send = has_content and has_recipients
+	var channel_text = channel_dropdown.get_item_text(channel_dropdown.selected) if (channel_dropdown and channel_dropdown.selected >= 0 and channel_dropdown.selected < channel_dropdown.get_item_count()) else "SMS Text"
+
+	if channel_text.contains("SMS"):
+		if current_attachment_path != "":
+			if channel_mms_indicator:
+				channel_mms_indicator.text = "🖼️ MMS (Picture Message)"
+				channel_mms_indicator.visible = true
+		else:
+			if channel_mms_indicator:
+				channel_mms_indicator.text = "📱 SMS Text"
+				channel_mms_indicator.visible = true
+	elif channel_text.contains("Email"):
+		if channel_mms_indicator:
+			channel_mms_indicator.text = "✉️ Email" + (" with Attachment" if current_attachment_path != "" else "")
+			channel_mms_indicator.visible = true
+
+	if btn_send_message:
+		btn_send_message.disabled = not can_send
+		if can_send:
+			_style_primary_button(btn_send_message)
+		else:
+			_style_disabled_button(btn_send_message)
+	if btn_schedule_message:
+		btn_schedule_message.disabled = not can_send
+		if can_send:
+			btn_schedule_message.tooltip_text = "Schedule message or flyer broadcast"
+			_style_primary_button(btn_schedule_message)
+		else:
+			btn_schedule_message.tooltip_text = "Select a recipient and type a message or attach an image to schedule"
+			_style_disabled_button(btn_schedule_message)
 
 func _style_dropdown_control(dd: OptionButton) -> void:
 	if not dd: return
@@ -840,9 +1094,6 @@ func _populate_dropdowns() -> void:
 				var ln = str(p.get("last_name", ""))
 				var name = (fn + " " + ln).strip_edges() + " (" + str(p.get("human_id", "")) + ")"
 				recipient_dropdown.add_item(name, i + 1)
-
-			if selected_individual_ids.size() == 0 and person_list.size() > 0:
-				selected_individual_ids.append(int(person_list[0].get("id", 0)))
 
 	_refresh_individual_chips()
 	_on_audience_type_selected(0)
@@ -1112,7 +1363,7 @@ func _update_audience_resolution() -> void:
 
 	var unique_candidates = deduped_map.values()
 
-	var ch_text = channel_dropdown.get_item_text(channel_dropdown.selected) if channel_dropdown else "SMS Text"
+	var ch_text = channel_dropdown.get_item_text(channel_dropdown.selected) if (channel_dropdown and channel_dropdown.selected >= 0 and channel_dropdown.selected < channel_dropdown.get_item_count()) else "SMS Text"
 
 	current_eligible_recipients.clear()
 	current_excluded_recipients.clear()
@@ -1130,6 +1381,8 @@ func _update_audience_resolution() -> void:
 
 	if aud_count_label:
 		aud_count_label.text = str(current_eligible_recipients.size()) + " Eligible Recipients | " + str(current_excluded_recipients.size()) + " Excluded"
+
+	_update_composer_validation()
 
 func _evaluate_person_eligibility(person: Dictionary, channel_str: String) -> Dictionary:
 	var phone = str(person.get("phone", "")).strip_edges()
@@ -1308,8 +1561,12 @@ func _on_send_message_pressed() -> void:
 	if _is_sending_group_broadcast:
 		return
 
-	var channel = channel_dropdown.get_item_text(channel_dropdown.selected) if channel_dropdown else "SMS Text"
+	var channel = channel_dropdown.get_item_text(channel_dropdown.selected) if (channel_dropdown and channel_dropdown.selected >= 0 and channel_dropdown.selected < channel_dropdown.get_item_count()) else "SMS Text"
 	var body = message_body_edit.text.strip_edges() if message_body_edit else ""
+
+	if body == "" and current_attachment_path == "":
+		OS.alert("Please type a message body, select a template, or attach an image before sending.", "Empty Message")
+		return
 
 	if selected_audience_type == "Individual" and selected_individual_ids.size() <= 1:
 		if selected_individual_ids.size() == 0:
@@ -1328,19 +1585,7 @@ func _on_send_message_pressed() -> void:
 			_initiate_call_dialog(recipient, body)
 			return
 
-		if body == "":
-			OS.alert("Please type a message body or select a template before sending.", "Empty Message")
-			return
-
-		var res = com_service.send_message_atomic(recipient, channel, body, _get_active_sender_name())
-		if res["success"]:
-			print("Individual message sent successfully: ", res["message_uuid"])
-			if message_body_edit:
-				message_body_edit.text = ""
-				_update_character_count()
-			_refresh_all_feeds()
-		else:
-			OS.alert("Failed to send message: " + str(res.get("error", "Unknown error")), "Send Error")
+		_show_individual_send_confirmation_dialog(recipient, channel, body)
 
 	else:
 		# Group / Multi-Individual Audience Send Flow
@@ -1350,139 +1595,273 @@ func _on_send_message_pressed() -> void:
 			OS.alert("No eligible recipients found for audience selection: " + selected_audience_type, "No Recipients")
 			return
 
-		if body == "":
-			OS.alert("Please type a message body or select a template before sending.", "Empty Message")
-			return
+		_show_group_send_confirmation_dialog(channel, body)
 
-		# Group Send Confirmation Modal
-		var backdrop = ColorRect.new()
-		backdrop.color = Color(0.08, 0.12, 0.18, 0.6)
-		backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
-		add_child(backdrop)
+func _show_individual_send_confirmation_dialog(recipient: Dictionary, channel: String, body: String) -> void:
+	var backdrop = ColorRect.new()
+	backdrop.color = Color(0.08, 0.12, 0.18, 0.6)
+	backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(backdrop)
 
-		var center = CenterContainer.new()
-		center.set_anchors_preset(Control.PRESET_FULL_RECT)
-		backdrop.add_child(center)
+	var center = CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	backdrop.add_child(center)
 
-		var card = PanelContainer.new()
-		var card_st = StyleBoxFlat.new()
-		card_st.bg_color = Color(1.0, 1.0, 1.0, 1.0)
-		card_st.border_width_left = 1; card_st.border_width_top = 1; card_st.border_width_right = 1; card_st.border_width_bottom = 1
-		card_st.border_color = Color(0.78, 0.82, 0.88, 1.0)
-		card_st.corner_radius_top_left = 12; card_st.corner_radius_top_right = 12; card_st.corner_radius_bottom_left = 12; card_st.corner_radius_bottom_right = 12
-		card_st.content_margin_left = 24; card_st.content_margin_top = 22; card_st.content_margin_right = 24; card_st.content_margin_bottom = 22
-		card.add_theme_stylebox_override("panel", card_st)
-		center.add_child(card)
+	var card = PanelContainer.new()
+	var card_st = StyleBoxFlat.new()
+	card_st.bg_color = Color(1.0, 1.0, 1.0, 1.0)
+	card_st.border_width_left = 1; card_st.border_width_top = 1; card_st.border_width_right = 1; card_st.border_width_bottom = 1
+	card_st.border_color = Color(0.78, 0.82, 0.88, 1.0)
+	card_st.corner_radius_top_left = 12; card_st.corner_radius_top_right = 12; card_st.corner_radius_bottom_left = 12; card_st.corner_radius_bottom_right = 12
+	card_st.content_margin_left = 24; card_st.content_margin_top = 22; card_st.content_margin_right = 24; card_st.content_margin_bottom = 22
+	card.add_theme_stylebox_override("panel", card_st)
+	center.add_child(card)
 
-		var vbox = VBoxContainer.new()
-		vbox.add_theme_constant_override("separation", 14)
-		vbox.custom_minimum_size = Vector2(480, 260)
-		card.add_child(vbox)
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 14)
+	vbox.custom_minimum_size = Vector2(480, 240)
+	card.add_child(vbox)
 
-		var title = Label.new()
-		title.text = "⚠️ Confirm Group Message"
-		title.add_theme_font_size_override("font_size", 18)
-		title.add_theme_color_override("font_color", _get_active_theme_color())
-		vbox.add_child(title)
+	var title = Label.new()
+	title.text = "✉️ Confirm Send Message"
+	title.add_theme_font_size_override("font_size", 18)
+	title.add_theme_color_override("font_color", _get_active_theme_color())
+	vbox.add_child(title)
 
-		var target_label_str = selected_audience_type
-		if selected_audience_type == "Individual":
-			target_label_str = "Individual (%d Selected)" % selected_individual_ids.size()
+	var fn = str(recipient.get("first_name", ""))
+	var ln = str(recipient.get("last_name", ""))
+	var rec_name = (fn + " " + ln).strip_edges()
+	if rec_name == "": rec_name = "Constituent"
 
-		var sms_count = 0
-		var email_count = 0
-		for p in current_eligible_recipients:
-			var eval_d = p.get("eval", {})
-			if eval_d.get("sms_ok", false): sms_count += 1
-			if eval_d.get("email_ok", false): email_count += 1
+	var ch_display = channel
+	if channel.contains("SMS") and current_attachment_path != "":
+		ch_display = "SMS / MMS (Picture Message)"
+	elif channel.contains("Email") and current_attachment_path != "":
+		ch_display = "Email with Attachment"
 
-		var confirm_text = Label.new()
-		confirm_text.text = "You are about to send " + channel + " to " + str(current_eligible_recipients.size()) + " constituents."
-		confirm_text.add_theme_font_size_override("font_size", 15)
-		confirm_text.add_theme_color_override("font_color", Color(0.12, 0.16, 0.22, 1.0))
-		confirm_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		vbox.add_child(confirm_text)
+	var confirm_text = Label.new()
+	confirm_text.text = "Send " + ch_display + " to " + rec_name + "?"
+	confirm_text.add_theme_font_size_override("font_size", 15)
+	confirm_text.add_theme_color_override("font_color", Color(0.12, 0.16, 0.22, 1.0))
+	vbox.add_child(confirm_text)
 
-		var details_box = PanelContainer.new()
-		var details_st = StyleBoxFlat.new()
-		details_st.bg_color = Color(0.96, 0.97, 0.99, 1.0)
-		details_st.corner_radius_top_left = 8; details_st.corner_radius_top_right = 8; details_st.corner_radius_bottom_left = 8; details_st.corner_radius_bottom_right = 8
-		details_st.content_margin_left = 12; details_st.content_margin_top = 10; details_st.content_margin_right = 12; details_st.content_margin_bottom = 10
-		details_box.add_theme_stylebox_override("panel", details_st)
+	var details_box = PanelContainer.new()
+	var details_st = StyleBoxFlat.new()
+	details_st.bg_color = Color(0.96, 0.97, 0.99, 1.0)
+	details_st.corner_radius_top_left = 8; details_st.corner_radius_top_right = 8; details_st.corner_radius_bottom_left = 8; details_st.corner_radius_bottom_right = 8
+	details_st.content_margin_left = 12; details_st.content_margin_top = 10; details_st.content_margin_right = 12; details_st.content_margin_bottom = 10
+	details_box.add_theme_stylebox_override("panel", details_st)
 
-		var details_vbox = VBoxContainer.new()
-		details_vbox.add_theme_constant_override("separation", 4)
+	var details_vbox = VBoxContainer.new()
+	details_vbox.add_theme_constant_override("separation", 6)
 
-		var sub_target = Label.new()
-		sub_target.text = "Audience Target: " + target_label_str
-		sub_target.add_theme_font_size_override("font_size", 13)
-		sub_target.add_theme_color_override("font_color", Color(0.20, 0.25, 0.35, 1.0))
-		details_vbox.add_child(sub_target)
+	var sub_contact = Label.new()
+	var contact_str = str(recipient.get("email", recipient.get("phone", "")))
+	sub_contact.text = "Recipient: " + rec_name + " (" + contact_str + ")"
+	sub_contact.add_theme_font_size_override("font_size", 13)
+	sub_contact.add_theme_color_override("font_color", Color(0.20, 0.25, 0.35, 1.0))
+	details_vbox.add_child(sub_contact)
 
-		if channel.contains("Both"):
-			var sub_sms = Label.new()
-			sub_sms.text = "📱 SMS Recipients: " + str(sms_count)
-			sub_sms.add_theme_font_size_override("font_size", 13)
-			sub_sms.add_theme_color_override("font_color", Color(0.15, 0.45, 0.25, 1.0))
-			details_vbox.add_child(sub_sms)
+	var sub_ch = Label.new()
+	sub_ch.text = "Delivery Channel: " + ch_display
+	sub_ch.add_theme_font_size_override("font_size", 13)
+	sub_ch.add_theme_color_override("font_color", Color(0.15, 0.45, 0.85, 1.0))
+	details_vbox.add_child(sub_ch)
 
-			var sub_email = Label.new()
-			sub_email.text = "✉️ Email Recipients: " + str(email_count)
-			sub_email.add_theme_font_size_override("font_size", 13)
-			sub_email.add_theme_color_override("font_color", Color(0.15, 0.40, 0.75, 1.0))
-			details_vbox.add_child(sub_email)
+	if current_attachment_path != "":
+		var sub_att = Label.new()
+		sub_att.text = "📎 Attached Image: " + current_attachment_path.get_file()
+		sub_att.add_theme_font_size_override("font_size", 13)
+		sub_att.add_theme_color_override("font_color", Color(0.18, 0.55, 0.35, 1.0))
+		details_vbox.add_child(sub_att)
+
+	var msg_preview = body if body != "" else "[No text message — Image flyer only]"
+	var summary_snippet = msg_preview.left(120) + ("..." if msg_preview.length() > 120 else "")
+	var sub_msg = Label.new()
+	sub_msg.text = "Message Content:\n\"" + summary_snippet + "\""
+	sub_msg.add_theme_font_size_override("font_size", 12)
+	sub_msg.add_theme_color_override("font_color", Color(0.40, 0.45, 0.55, 1.0))
+	sub_msg.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	details_vbox.add_child(sub_msg)
+
+	details_box.add_child(details_vbox)
+	vbox.add_child(details_box)
+
+	var btn_hbox = HBoxContainer.new()
+	btn_hbox.add_theme_constant_override("separation", 12)
+
+	var btn_confirm = Button.new()
+	btn_confirm.text = "Send Now"
+	btn_confirm.custom_minimum_size = Vector2(140, 36)
+	_style_primary_button(btn_confirm)
+	btn_hbox.add_child(btn_confirm)
+
+	var btn_cancel = Button.new()
+	btn_cancel.text = "Cancel"
+	btn_cancel.custom_minimum_size = Vector2(100, 36)
+	_style_secondary_button(btn_cancel)
+	btn_cancel.pressed.connect(func(): backdrop.queue_free())
+	btn_hbox.add_child(btn_cancel)
+
+	btn_confirm.pressed.connect(func():
+		backdrop.queue_free()
+		var res = com_service.send_message_atomic(recipient, channel, body, _get_active_sender_name(), current_attachment_path)
+		if res.get("success", false):
+			print("Individual message sent successfully: ", res["message_uuid"])
+			if message_body_edit:
+				message_body_edit.text = ""
+				_update_character_count()
+			_clear_attached_image()
+			_refresh_all_feeds()
 		else:
-			var sub_ch = Label.new()
-			sub_ch.text = "Channel: " + channel
-			sub_ch.add_theme_font_size_override("font_size", 13)
-			sub_ch.add_theme_color_override("font_color", Color(0.20, 0.25, 0.35, 1.0))
-			details_vbox.add_child(sub_ch)
+			OS.alert("Failed to send message: " + str(res.get("error", "Unknown error")), "Send Error")
+	)
 
-		var sub_excl = Label.new()
-		sub_excl.text = "Excluded Constituents: " + str(current_excluded_recipients.size())
-		sub_excl.add_theme_font_size_override("font_size", 13)
-		sub_excl.add_theme_color_override("font_color", Color(0.50, 0.30, 0.30, 1.0))
-		details_vbox.add_child(sub_excl)
+	vbox.add_child(btn_hbox)
 
-		var summary_snippet = body.left(120) + ("..." if body.length() > 120 else "")
-		var sub_msg = Label.new()
-		sub_msg.text = "Message Summary:\n\"" + summary_snippet + "\""
-		sub_msg.add_theme_font_size_override("font_size", 12)
-		sub_msg.add_theme_color_override("font_color", Color(0.40, 0.45, 0.55, 1.0))
-		sub_msg.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		details_vbox.add_child(sub_msg)
+func _show_group_send_confirmation_dialog(channel: String, body: String) -> void:
+	var backdrop = ColorRect.new()
+	backdrop.color = Color(0.08, 0.12, 0.18, 0.6)
+	backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(backdrop)
 
-		details_box.add_child(details_vbox)
-		vbox.add_child(details_box)
+	var center = CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	backdrop.add_child(center)
 
-		var btn_hbox = HBoxContainer.new()
-		btn_hbox.add_theme_constant_override("separation", 12)
+	var card = PanelContainer.new()
+	var card_st = StyleBoxFlat.new()
+	card_st.bg_color = Color(1.0, 1.0, 1.0, 1.0)
+	card_st.border_width_left = 1; card_st.border_width_top = 1; card_st.border_width_right = 1; card_st.border_width_bottom = 1
+	card_st.border_color = Color(0.78, 0.82, 0.88, 1.0)
+	card_st.corner_radius_top_left = 12; card_st.corner_radius_top_right = 12; card_st.corner_radius_bottom_left = 12; card_st.corner_radius_bottom_right = 12
+	card_st.content_margin_left = 24; card_st.content_margin_top = 22; card_st.content_margin_right = 24; card_st.content_margin_bottom = 22
+	card.add_theme_stylebox_override("panel", card_st)
+	center.add_child(card)
 
-		var btn_confirm = Button.new()
-		btn_confirm.text = "Send Now"
-		btn_confirm.custom_minimum_size = Vector2(140, 36)
-		_style_primary_button(btn_confirm)
-		btn_hbox.add_child(btn_confirm)
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 14)
+	vbox.custom_minimum_size = Vector2(480, 260)
+	card.add_child(vbox)
 
-		var btn_cancel = Button.new()
-		btn_cancel.text = "Cancel"
-		btn_cancel.custom_minimum_size = Vector2(100, 36)
-		_style_secondary_button(btn_cancel)
-		btn_cancel.pressed.connect(func(): backdrop.queue_free())
-		btn_hbox.add_child(btn_cancel)
+	var title = Label.new()
+	title.text = "⚠️ Confirm Group Message"
+	title.add_theme_font_size_override("font_size", 18)
+	title.add_theme_color_override("font_color", _get_active_theme_color())
+	vbox.add_child(title)
 
-		btn_confirm.pressed.connect(func():
-			if _is_sending_group_broadcast:
-				return
-			_is_sending_group_broadcast = true
-			btn_confirm.disabled = true
-			btn_confirm.text = "Sending..."
-			btn_cancel.disabled = true
-			if btn_send_message: btn_send_message.disabled = true
-			_execute_group_broadcast(channel, body, backdrop)
-		)
+	var target_label_str = selected_audience_type
+	if selected_audience_type == "Individual":
+		target_label_str = "Individual (%d Selected)" % selected_individual_ids.size()
 
-		vbox.add_child(btn_hbox)
+	var sms_count = 0
+	var email_count = 0
+	for p in current_eligible_recipients:
+		var eval_d = p.get("eval", {})
+		if eval_d.get("sms_ok", false): sms_count += 1
+		if eval_d.get("email_ok", false): email_count += 1
+
+	var ch_display = channel
+	if channel.contains("SMS") and current_attachment_path != "":
+		ch_display = "SMS / MMS (Picture Message)"
+	elif channel.contains("Email") and current_attachment_path != "":
+		ch_display = "Email with Attachment"
+
+	var confirm_text = Label.new()
+	confirm_text.text = "You are about to send " + ch_display + " to " + str(current_eligible_recipients.size()) + " constituents."
+	confirm_text.add_theme_font_size_override("font_size", 15)
+	confirm_text.add_theme_color_override("font_color", Color(0.12, 0.16, 0.22, 1.0))
+	confirm_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vbox.add_child(confirm_text)
+
+	var details_box = PanelContainer.new()
+	var details_st = StyleBoxFlat.new()
+	details_st.bg_color = Color(0.96, 0.97, 0.99, 1.0)
+	details_st.corner_radius_top_left = 8; details_st.corner_radius_top_right = 8; details_st.corner_radius_bottom_left = 8; details_st.corner_radius_bottom_right = 8
+	details_st.content_margin_left = 12; details_st.content_margin_top = 10; details_st.content_margin_right = 12; details_st.content_margin_bottom = 10
+	details_box.add_theme_stylebox_override("panel", details_st)
+
+	var details_vbox = VBoxContainer.new()
+	details_vbox.add_theme_constant_override("separation", 4)
+
+	var sub_target = Label.new()
+	sub_target.text = "Audience Target: " + target_label_str
+	sub_target.add_theme_font_size_override("font_size", 13)
+	sub_target.add_theme_color_override("font_color", Color(0.20, 0.25, 0.35, 1.0))
+	details_vbox.add_child(sub_target)
+
+	if channel.contains("Both"):
+		var sub_sms = Label.new()
+		sub_sms.text = "📱 SMS Recipients: " + str(sms_count)
+		sub_sms.add_theme_font_size_override("font_size", 13)
+		sub_sms.add_theme_color_override("font_color", Color(0.15, 0.45, 0.25, 1.0))
+		details_vbox.add_child(sub_sms)
+
+		var sub_email = Label.new()
+		sub_email.text = "✉️ Email Recipients: " + str(email_count)
+		sub_email.add_theme_font_size_override("font_size", 13)
+		sub_email.add_theme_color_override("font_color", Color(0.15, 0.40, 0.75, 1.0))
+		details_vbox.add_child(sub_email)
+	else:
+		var sub_ch = Label.new()
+		sub_ch.text = "Channel: " + ch_display
+		sub_ch.add_theme_font_size_override("font_size", 13)
+		sub_ch.add_theme_color_override("font_color", Color(0.20, 0.25, 0.35, 1.0))
+		details_vbox.add_child(sub_ch)
+
+	var sub_excl = Label.new()
+	sub_excl.text = "Excluded Constituents: " + str(current_excluded_recipients.size())
+	sub_excl.add_theme_font_size_override("font_size", 13)
+	sub_excl.add_theme_color_override("font_color", Color(0.50, 0.30, 0.30, 1.0))
+	details_vbox.add_child(sub_excl)
+
+	if current_attachment_path != "":
+		var sub_att = Label.new()
+		sub_att.text = "📎 Attached Image: " + current_attachment_path.get_file()
+		sub_att.add_theme_font_size_override("font_size", 13)
+		sub_att.add_theme_color_override("font_color", Color(0.18, 0.55, 0.35, 1.0))
+		details_vbox.add_child(sub_att)
+
+	var msg_preview = body if body != "" else "[No text message — Image flyer only]"
+	var summary_snippet = msg_preview.left(120) + ("..." if msg_preview.length() > 120 else "")
+	var sub_msg = Label.new()
+	sub_msg.text = "Message Summary:\n\"" + summary_snippet + "\""
+	sub_msg.add_theme_font_size_override("font_size", 12)
+	sub_msg.add_theme_color_override("font_color", Color(0.40, 0.45, 0.55, 1.0))
+	sub_msg.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	details_vbox.add_child(sub_msg)
+
+	details_box.add_child(details_vbox)
+	vbox.add_child(details_box)
+
+	var btn_hbox = HBoxContainer.new()
+	btn_hbox.add_theme_constant_override("separation", 12)
+
+	var btn_confirm = Button.new()
+	btn_confirm.text = "Send Now"
+	btn_confirm.custom_minimum_size = Vector2(140, 36)
+	_style_primary_button(btn_confirm)
+	btn_hbox.add_child(btn_confirm)
+
+	var btn_cancel = Button.new()
+	btn_cancel.text = "Cancel"
+	btn_cancel.custom_minimum_size = Vector2(100, 36)
+	_style_secondary_button(btn_cancel)
+	btn_cancel.pressed.connect(func(): backdrop.queue_free())
+	btn_hbox.add_child(btn_cancel)
+
+	btn_confirm.pressed.connect(func():
+		if _is_sending_group_broadcast:
+			return
+		_is_sending_group_broadcast = true
+		btn_confirm.disabled = true
+		btn_confirm.text = "Sending..."
+		btn_cancel.disabled = true
+		if btn_send_message: btn_send_message.disabled = true
+		_execute_group_broadcast(channel, body, backdrop)
+	)
+
+	vbox.add_child(btn_hbox)
 
 func _execute_group_broadcast(channel: String, body: String, backdrop: Node = null) -> void:
 	var sender_name = _get_active_sender_name()
@@ -1507,7 +1886,7 @@ func _execute_group_broadcast(channel: String, body: String, backdrop: Node = nu
 
 			if sms_ok:
 				sms_eligible_count += 1
-				var res_sms = com_service.send_message_atomic(p, "SMS Text", body, sender_name)
+				var res_sms = com_service.send_message_atomic(p, "SMS Text", body, sender_name, current_attachment_path)
 				if res_sms.get("success", false):
 					sms_sent += 1
 				else:
@@ -1515,7 +1894,7 @@ func _execute_group_broadcast(channel: String, body: String, backdrop: Node = nu
 
 			if email_ok:
 				email_eligible_count += 1
-				var res_email = com_service.send_message_atomic(p, "Email", body, sender_name)
+				var res_email = com_service.send_message_atomic(p, "Email", body, sender_name, current_attachment_path)
 				if res_email.get("success", false):
 					email_sent += 1
 				else:
@@ -1527,7 +1906,7 @@ func _execute_group_broadcast(channel: String, body: String, backdrop: Node = nu
 	elif channel.contains("SMS"):
 		sms_excluded = current_excluded_recipients.size()
 		for p in current_eligible_recipients:
-			var res_sms = com_service.send_message_atomic(p, "SMS Text", body, sender_name)
+			var res_sms = com_service.send_message_atomic(p, "SMS Text", body, sender_name, current_attachment_path)
 			if res_sms.get("success", false):
 				sms_sent += 1
 			else:
@@ -1536,7 +1915,7 @@ func _execute_group_broadcast(channel: String, body: String, backdrop: Node = nu
 	elif channel.contains("Email"):
 		email_unavailable = current_excluded_recipients.size()
 		for p in current_eligible_recipients:
-			var res_email = com_service.send_message_atomic(p, "Email", body, sender_name)
+			var res_email = com_service.send_message_atomic(p, "Email", body, sender_name, current_attachment_path)
 			if res_email.get("success", false):
 				email_sent += 1
 			else:
@@ -1551,8 +1930,11 @@ func _execute_group_broadcast(channel: String, body: String, backdrop: Node = nu
 	if (sms_sent > 0 or email_sent > 0) and message_body_edit:
 		message_body_edit.text = ""
 		_update_character_count()
+		_clear_attached_image()
 
 	_refresh_all_feeds()
+
+	_show_group_send_completion_dialog(channel, sms_sent, sms_failed, sms_excluded, email_sent, email_failed, email_unavailable)
 
 	_show_group_send_completion_dialog(channel, sms_sent, sms_failed, sms_excluded, email_sent, email_failed, email_unavailable)
 
@@ -1815,10 +2197,19 @@ func _refresh_communications_log() -> void:
 			var name = str(item.get("recipient_name", ""))
 			var ch = str(item.get("channel", ""))
 			var body = str(item.get("message_body", ""))
+			var att = str(item.get("attachment_path", ""))
 			var sent = str(item.get("created_at", ""))
 
+			var row_str = "  📤 " + name + " • " + ch
+			if att != "":
+				row_str += " | 📎 Image: " + att.get_file()
+			if body != "":
+				var snippet = body.left(60) + ("..." if body.length() > 60 else "")
+				row_str += " | \"" + snippet + "\""
+			row_str += " [" + sent + "]"
+
 			var row = Label.new()
-			row.text = "  📤 " + name + " • " + ch + " | \"" + body.left(60) + "...\" [" + sent + "]"
+			row.text = row_str
 			row.add_theme_font_size_override("font_size", 16)
 			row.add_theme_color_override("font_color", Color(0.12, 0.16, 0.22, 1.0))
 			vbox.add_child(row)
@@ -5029,3 +5420,10 @@ func _confirm_delete_voicemail(vm_uuid: String, on_deleted_callback: Callable = 
 	)
 
 
+
+
+func _on_schedule_message_pressed() -> void:
+	var body = message_body_edit.text.strip_edges() if message_body_edit else ""
+	if body == "" and current_attachment_path == "":
+		return
+	OS.alert("Message broadcast scheduling will be available in upcoming update.", "Schedule Broadcast")

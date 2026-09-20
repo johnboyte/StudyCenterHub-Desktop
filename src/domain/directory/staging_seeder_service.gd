@@ -3,6 +3,7 @@ extends RefCounted
 ## Staging-only Test Member Seeder Service
 ## Seeds the test constituent (John Boyte) idempotent logic.
 
+const SQLiteDatabaseScript = preload("res://src/infrastructure/database/sqlite_database.gd")
 const QRCredentialServiceScript = preload("res://src/domain/security/qr_credential_service.gd")
 
 var db: RefCounted
@@ -11,13 +12,11 @@ func _init(database: RefCounted) -> void:
 	db = database
 
 func seed_staging_test_member() -> void:
-	var env = OS.get_environment("STUDYCENTERHUB_ENV").to_lower().strip_edges()
-	if env == "":
-		var exec_path = OS.get_executable_path().to_lower()
-		if exec_path.contains("rc1") or exec_path.contains("staging"):
-			env = "staging"
-		else:
-			env = "development"
+	var env = SQLiteDatabaseScript.resolve_environment(
+		OS.get_environment("STUDYCENTERHUB_ENV"),
+		OS.get_executable_path(),
+		OS.get_cmdline_args()
+	)
 
 	if env != "staging":
 		print("Staging seed skipped: non-staging environment")

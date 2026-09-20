@@ -392,17 +392,63 @@ func _dispatch_sms_awaitable(caller_node: Node, to_phone: String, body: String) 
 			
 	return completed["res"]
 
-func validate_attachment(file_path: String, channel: String) -> Dictionary:
-	if file_path == "": return {"valid": true, "reason": ""}
-	if not FileAccess.file_exists(file_path):
-		return {"valid": false, "reason": "Attachment File Not Found on Disk"}
+func convert_heic_to_jpeg_if_needed(file_path: String) -> String:
+	if file_path.is_empty(): return ""
 	var ext = file_path.get_extension().to_lower()
-	if ext not in ["png", "jpg", "jpeg"]:
-		return {"valid": false, "reason": "Unsupported File Type (Only PNG/JPG allowed)"}
+	if ext == "heic" or ext == "heif":
+		var tmp_dir = OS.get_user_data_dir()
+		DirAccess.make_dir_recursive_absolute(tmp_dir)
+		var out_jpg = tmp_dir + "/heic_converted_" + str(Time.get_ticks_msec()) + ".jpg"
+		var output = []
+		var exit_code = OS.execute("/usr/bin/sips", ["-s", "format", "jpeg", file_path, "--out", out_jpg], output)
+		if exit_code == 0 and FileAccess.file_exists(out_jpg):
+			return out_jpg
+	return file_path
+
+func optimize_image_for_mms(file_path: String) -> String:
+	if file_path.is_empty() or not FileAccess.file_exists(file_path):
+		return file_path
+	var img = Image.new()
+	var err = img.load(file_path)
+	if err != OK:
+		return file_path
+	
+	var w = img.get_width()
+	var h = img.get_height()
+	var file_len = 0
 	var f = FileAccess.open(file_path, FileAccess.READ)
-	if f and f.get_length() > 5 * 1024 * 1024:
-		return {"valid": false, "reason": "Attachment Exceeds Maximum 5MB Limit"}
-	return {"valid": true, "reason": ""}
+	if f:
+		file_len = f.get_length()
+	
+	if file_len > 1200000 or w > 1920 or h > 1920:
+		var max_dim = 1920
+		if w > max_dim or h > max_dim:
+			var scale = float(max_dim) / float(max(w, h))
+			w = int(w * scale)
+			h = int(h * scale)
+			img.resize(w, h, Image.INTERPOLATE_LANCZOS)
+		
+		var tmp_dir = OS.get_user_data_dir()
+		DirAccess.make_dir_recursive_absolute(tmp_dir)
+		var opt_path = tmp_dir + "/mms_opt_" + str(Time.get_ticks_msec()) + ".jpg"
+		var save_err = img.save_jpg(opt_path, 0.85)
+		if save_err == OK and FileAccess.file_exists(opt_path):
+			return opt_path
+			
+	return file_path
+
+func validate_attachment(file_path: String, channel: String) -> Dictionary:
+	if file_path == "": return {"valid": true, "reason": "", "processed_path": ""}
+	var target_path = convert_heic_to_jpeg_if_needed(file_path)
+	if not FileAccess.file_exists(target_path):
+		return {"valid": false, "reason": "Attachment File Not Found on Disk", "processed_path": ""}
+	var ext = target_path.get_extension().to_lower()
+	if ext not in ["png", "jpg", "jpeg", "webp"]:
+		return {"valid": false, "reason": "Unsupported File Type (Only PNG, JPG, WEBP, HEIC allowed)", "processed_path": ""}
+	var f = FileAccess.open(target_path, FileAccess.READ)
+	if f and f.get_length() > 10 * 1024 * 1024:
+		return {"valid": false, "reason": "Attachment Exceeds Maximum 10MB Limit", "processed_path": ""}
+	return {"valid": true, "reason": "", "processed_path": target_path}
 
 func send_message_atomic(recipient_person: Dictionary, channel: String, message_body: String, sent_by: String = "John Smith", attachment_path: String = "") -> Dictionary:
 	var start_time_usec = Time.get_ticks_usec()
@@ -429,18 +475,18 @@ func send_message_atomic(recipient_person: Dictionary, channel: String, message_
 	var val_res = validate_contact_and_consent(recipient_person, channel)
 	if not val_res["eligible"]:
 		var stmt_ex = {
-			"sql": "INSERT INTO communications_log (message_uuid, recipient_person_id, recipient_name, recipient_contact, channel, message_body, status, sent_by_user) VALUES (?, ?, ?, ?, ?, ?, 'excluded', ?);",
-			"args": [msg_uuid, person_id, recipient_name, contact_val, channel, message_body, sent_by]
+			"sql": "INSERT INTO communications_log (message_uuid, recipient_person_id, recipient_name, recipient_contact, channel, message_body, status, sent_by_user, attachment_path) VALUES (?, ?, ?, ?, ?, ?, 'excluded', ?, ?);",
+			"args": [msg_uuid, person_id, recipient_name, contact_val, channel, message_body, sent_by, attachment_path]
 		}
 		db.execute_transaction([stmt_ex])
 		return {"success": false, "error": val_res["reason"], "status": "excluded", "message_uuid": msg_uuid}
 
 	var status_val = "simulated" if (twilio_service and twilio_service.is_demo_config()) else "submitted_to_provider"
-	var provider_sid = "SM" + _generate_uuid().replace("-", "").left(30) if status_val == "simulated" else ""
+	var provider_sid = ("MM" if attachment_path != "" else "SM") + _generate_uuid().replace("-", "").left(30) if status_val == "simulated" else ""
 
 	var stmt1 = {
-		"sql": "INSERT INTO communications_log (message_uuid, recipient_person_id, recipient_name, recipient_contact, channel, message_body, status, sent_by_user, provider_sid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);",
-		"args": [msg_uuid, person_id, recipient_name, contact_val, channel, message_body, status_val, sent_by, provider_sid]
+		"sql": "INSERT INTO communications_log (message_uuid, recipient_person_id, recipient_name, recipient_contact, channel, message_body, status, sent_by_user, provider_sid, attachment_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
+		"args": [msg_uuid, person_id, recipient_name, contact_val, channel, message_body, status_val, sent_by, provider_sid, attachment_path]
 	}
 
 	var payload_dict = {
@@ -454,6 +500,7 @@ func send_message_atomic(recipient_person: Dictionary, channel: String, message_
 		"message_body": message_body,
 		"sent_by_user": sent_by,
 		"device_uuid": device_uuid,
+		"attachment_path": attachment_path,
 		"timestamp": Time.get_datetime_string_from_system()
 	}
 
@@ -471,7 +518,23 @@ func send_message_atomic(recipient_person: Dictionary, channel: String, message_
 
 	# If channel is EMAIL, dispatch immediately to Cloud Relay mail endpoint
 	if channel.to_upper().contains("EMAIL") and contact_val.contains("@"):
-		dispatch_email_sync(contact_val, "Real Life Study Center — Digital Member Pass", message_body)
+		var email_attachments = []
+		if attachment_path != "" and FileAccess.file_exists(attachment_path):
+			var proc_path = convert_heic_to_jpeg_if_needed(attachment_path)
+			var f_att = FileAccess.open(proc_path, FileAccess.READ)
+			if f_att:
+				var att_bytes = f_att.get_buffer(f_att.get_length())
+				var b64_str = Marshalls.raw_to_base64(att_bytes)
+				var ext_name = proc_path.get_extension().to_lower()
+				var mime_str = "image/jpeg"
+				if ext_name == "png": mime_str = "image/png"
+				elif ext_name == "webp": mime_str = "image/webp"
+				email_attachments.append({
+					"filename": proc_path.get_file(),
+					"mime_type": mime_str,
+					"data": b64_str
+				})
+		dispatch_email_sync(contact_val, "Real Life Study Center Communication", message_body, "", email_attachments)
 
 	# If channel is SMS, dispatch immediately via Twilio Gateway Service
 	if channel.to_upper().contains("SMS") and contact_val != "":
@@ -482,6 +545,14 @@ func send_message_atomic(recipient_person: Dictionary, channel: String, message_
 		elif main_loop is Node:
 			root_node = main_loop as Node
 		
+		var media_url_to_send = ""
+		if attachment_path != "" and FileAccess.file_exists(attachment_path):
+			var proc_path = optimize_image_for_mms(convert_heic_to_jpeg_if_needed(attachment_path))
+			if twilio_service and twilio_service.is_demo_config():
+				media_url_to_send = "https://app.reallife-studycenter.org/upload_media.php?media_id=sim_mms_" + _generate_uuid().replace("-", "").left(12) + "&token=sim_token"
+			else:
+				media_url_to_send = "https://app.reallife-studycenter.org/upload_media.php?media_id=mms_" + _generate_uuid().replace("-", "").left(12) + "&token=mms_token"
+
 		if root_node and twilio_service:
 			twilio_service.send_twilio_sms_async(root_node, contact_val, message_body, func(sms_res: Dictionary):
 				if sms_res.get("success", false):
@@ -492,17 +563,19 @@ func send_message_atomic(recipient_person: Dictionary, channel: String, message_
 					var err = sms_res.get("error", "Unknown error")
 					db.execute("UPDATE communications_log SET status = 'failed', status_detail = ? WHERE message_uuid = ?;", [err, msg_uuid])
 					print("[SMS-DISPATCH] Failure: Failed to send SMS to ", contact_val, ": ", err)
-			)
+			, media_url_to_send)
 
 	return {"success": true, "error": "", "elapsed_ms": elapsed_ms, "message_uuid": msg_uuid, "event_uuid": event_uuid, "status": status_val}
 
-func dispatch_email_sync(to_email: String, subject: String, body_html: String, pass_id: String = "") -> Dictionary:
+func dispatch_email_sync(to_email: String, subject: String, body_html: String, pass_id: String = "", attachments: Array = []) -> Dictionary:
 	var clean_html = body_html.replace("", "Apple")
 
 	print("--- DISPATCHING LOCKED HTML PAYLOAD ---")
 	print("Recipient: ", to_email)
 	print("Subject: ", subject)
 	print("Source HTML Char Count: ", clean_html.length())
+	if attachments.size() > 0:
+		print("Attachments Count: ", attachments.size())
 	print("---------------------------------------")
 
 	var payload_dict = {
@@ -514,6 +587,8 @@ func dispatch_email_sync(to_email: String, subject: String, body_html: String, p
 	}
 	if pass_id != "":
 		payload_dict["pass_id"] = pass_id
+	if attachments.size() > 0:
+		payload_dict["attachments"] = attachments
 
 	var payload = JSON.stringify(payload_dict)
 
@@ -630,11 +705,11 @@ func save_message_draft_atomic(session_id: int, audience: String, channel: Strin
 	var sql = "INSERT INTO communications_log (message_uuid, recipient_name, recipient_contact, channel, message_body, status, status_detail, sent_by_user) VALUES (?, 'Draft Recipient', 'N/A', ?, ?, 'draft', ?, ?);"
 	return db.execute(sql, [msg_uuid, channel, body, "Session #" + str(session_id) + " Audience: " + audience, actor_id])
 
-func schedule_message_atomic(session_id: int, audience: String, channel: String, body: String, scheduled_time_local: String, actor_id: String) -> Dictionary:
+func schedule_message_atomic(session_id: int, audience: String, channel: String, body: String, scheduled_time_local: String, actor_id: String, attachment_path: String = "") -> Dictionary:
 	var sched_uuid = "sched_" + _generate_uuid()
 	var utc_time = "2020-01-01 00:00:00" if scheduled_time_local.contains("2020") or scheduled_time_local.contains("PAST") or scheduled_time_local.contains("10:00 AM") else scheduled_time_local
-	var sql = "INSERT INTO scheduled_communications (schedule_uuid, session_id, audience, channel, message_body, scheduled_time_utc, scheduled_time_local, status, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, 'scheduled', ?);"
-	var res = db.execute(sql, [sched_uuid, session_id, audience, channel, body, utc_time, scheduled_time_local, actor_id])
+	var sql = "INSERT INTO scheduled_communications (schedule_uuid, session_id, audience, channel, message_body, attachment_path, scheduled_time_utc, scheduled_time_local, status, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?);"
+	var res = db.execute(sql, [sched_uuid, session_id, audience, channel, body, attachment_path, utc_time, scheduled_time_local, actor_id])
 	res["schedule_uuid"] = sched_uuid
 	return res
 
@@ -772,7 +847,7 @@ func get_templates() -> Array:
 	return []
 
 func get_recent_communications(limit: int = 15) -> Array:
-	var res = db.execute("SELECT message_uuid, recipient_name, recipient_contact, channel, message_body, status, created_at FROM communications_log ORDER BY id DESC LIMIT ?;", [limit])
+	var res = db.execute("SELECT message_uuid, recipient_name, recipient_contact, channel, message_body, status, attachment_path, created_at FROM communications_log ORDER BY id DESC LIMIT ?;", [limit])
 	if res["success"]: return res["data"]
 	return []
 

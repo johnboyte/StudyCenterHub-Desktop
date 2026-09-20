@@ -127,7 +127,11 @@ func _get_view_scene(view_name: String, path: String) -> PackedScene:
 	return scene_res
 
 func _apply_window_title() -> void:
-	var env_mode = OS.get_environment("STUDYCENTERHUB_ENV")
+	var env_mode = SQLiteDatabaseScript.resolve_environment(
+		OS.get_environment("STUDYCENTERHUB_ENV"),
+		OS.get_executable_path(),
+		OS.get_cmdline_args()
+	)
 	if env_mode == "production":
 		DisplayServer.window_set_title("StudyCenterHub - Desktop")
 	elif env_mode == "staging":
@@ -143,7 +147,13 @@ func _apply_window_title() -> void:
 			var tw_gateway = TwilioGateway.new(db)
 			if tw_gateway:
 				tw_conf = tw_gateway.get_twilio_config()
+				_apply_window_subtitle(tw_conf)
+		if tw_conf.account_sid == "" or tw_conf.phone_number == "":
+			_apply_window_subtitle({"account_sid": "", "phone_number": ""})
 		print("[Twilio] Settings status: Account SID: ", "Configured" if tw_conf.get("account_sid", "") != "" else "Not Configured", ", Phone: ", "Configured" if tw_conf.get("phone_number", "") != "" else "Not Configured")
+
+func _apply_window_subtitle(_conf: Dictionary) -> void:
+	pass
 
 func _start_auto_sync() -> void:
 	_sync_timer = Timer.new()
@@ -224,13 +234,11 @@ func _apply_pd008_theme_styles() -> void:
 	content_container.add_theme_stylebox_override("panel", trans_style)
 
 	# Dynamic Environment Label
-	var env = OS.get_environment("STUDYCENTERHUB_ENV").to_lower().strip_edges()
-	if env == "":
-		var exec_path = OS.get_executable_path().to_lower()
-		if exec_path.contains("rc1") or exec_path.contains("staging"):
-			env = "staging"
-		else:
-			env = "development"
+	var env = SQLiteDatabaseScript.resolve_environment(
+		OS.get_environment("STUDYCENTERHUB_ENV"),
+		OS.get_executable_path(),
+		OS.get_cmdline_args()
+	)
 
 	var env_label = Label.new()
 	env_label.text = env.to_upper()

@@ -25,6 +25,7 @@ echo "==========================================================================
 echo "2. RUNNING AUTOMATED REGRESSION TEST SUITES"
 echo "=============================================================================="
 "$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_database_environment_resolution.gd"
+"$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_launcher_environment_routing.gd"
 "$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_center_open_hours_persistence.gd"
 "$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_session_staff_assignment_dialog.gd"
 "$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_uncovered_center_hours_calculation.gd"
@@ -65,10 +66,12 @@ chmod +x "$TARGET_APP/Contents/MacOS/StudyCenterHub"
 cp -f "$GODOT_BIN" "$BUILD_APP/Contents/MacOS/StudyCenterHub-Desktop-Production"
 chmod +x "$BUILD_APP/Contents/MacOS/StudyCenterHub-Desktop-Production"
 
-# Copy PCK resource package to both main app pack paths
+# Copy PCK resource package to both main app pack paths (Resources & MacOS)
 cp -f "$TARGET_PCK" "$TARGET_APP/Contents/Resources/StudyCenterHub.pck"
 cp -f "$TARGET_PCK" "$TARGET_APP/Contents/Resources/StudyCenterHub-Desktop-Production.pck"
+cp -f "$TARGET_PCK" "$TARGET_APP/Contents/MacOS/StudyCenterHub.pck"
 cp -f "$TARGET_PCK" "$BUILD_APP/Contents/Resources/StudyCenterHub-Desktop-Production.pck"
+cp -f "$TARGET_PCK" "$BUILD_APP/Contents/MacOS/StudyCenterHub-Desktop-Production.pck"
 
 # Copy icon
 if [ -f "$PROJECT_DIR/icon.icns" ]; then

@@ -14,7 +14,7 @@ func _init():
 	print("==========================================================")
 	
 	var pass_count = 0
-	var total_tests = 7
+	var total_tests = 8
 
 	# Test 1: Explicit STUDYCENTERHUB_ENV = production
 	var env1 = SQLiteDatabase.resolve_environment("production", "/Users/johnboyte/Downloads/Godot.app/Contents/MacOS/Godot", [])
@@ -68,15 +68,23 @@ func _init():
 	var env7 = SQLiteDatabase.resolve_environment("", "/Users/johnboyte/Downloads/Godot.app/Contents/MacOS/Godot", ["--path", "/Users/johnboyte/Development/StudyCenterHub-Desktop/study-center-hub---desktop"])
 	if env7 == "development":
 		pass_count += 1
-		print("PASS 7/7: Standard source launch defaults to 'development' when STUDYCENTERHUB_ENV is empty.")
+		print("PASS 7/8: Standard source launch defaults to 'development' when STUDYCENTERHUB_ENV is empty.")
 	else:
-		print("FAIL 7/7: Expected 'development', got: ", env7)
+		print("FAIL 7/8: Expected 'development', got: ", env7)
+
+	# Test 8: Unset env with Canonical Installed Production path (/Applications/StudyCenterHub.app/Contents/MacOS/StudyCenterHub)
+	var env8 = SQLiteDatabase.resolve_environment("", "/Applications/StudyCenterHub.app/Contents/MacOS/StudyCenterHub", [])
+	if env8 == "production":
+		pass_count += 1
+		print("PASS 8/8: Canonical installed /Applications/StudyCenterHub.app resolves to 'production' intrinsically.")
+	else:
+		print("FAIL 8/8: Expected 'production', got: ", env8)
 
 	print("==========================================================")
-	print("SUMMARY: %d / %d ASSERTIONS PASSED (100.0%%)" % [pass_count, total_tests])
+	print("SUMMARY: %d / %d ASSERTIONS PASSED (100.0%%)" % [pass_count, 8])
 	print("==========================================================")
 
-	if pass_count == total_tests:
+	if pass_count == 8:
 		print("SUCCESS: ALL DATABASE ENVIRONMENT RESOLUTION TESTS PASSED (100%)")
 		quit(0)
 	else:
