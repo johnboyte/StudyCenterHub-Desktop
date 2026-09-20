@@ -41,6 +41,10 @@ cp -f "$PROJECT_DIR/gateway/mail.php" "$DEV_DEPLOY_DIR/mail.php"
 cp -f "$PROJECT_DIR/gateway/upload_pass.php" "$PROD_DEPLOY_DIR/upload_pass.php"
 cp -f "$PROJECT_DIR/gateway/upload_pass.php" "$DEV_DEPLOY_DIR/upload_pass.php"
 
+# 6. Copy upload_media.php media relay to both deployment targets
+cp -f "$PROJECT_DIR/gateway/upload_media.php" "$PROD_DEPLOY_DIR/upload_media.php"
+cp -f "$PROJECT_DIR/gateway/upload_media.php" "$DEV_DEPLOY_DIR/upload_media.php"
+
 echo "✅ Production Gateway Bundle Created at: $PROD_DEPLOY_DIR"
 echo "✅ Development Gateway Bundle Created at: $DEV_DEPLOY_DIR"
 echo "=============================================================================="
