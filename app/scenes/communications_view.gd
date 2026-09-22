@@ -714,14 +714,26 @@ func _setup_communicate_send_composer() -> void:
 	if message_body_edit:
 		var msg_section = VBoxContainer.new()
 		msg_section.add_theme_constant_override("separation", 6)
-		msg_section.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+		msg_section.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		msg_section.custom_minimum_size = Vector2(660, 0)
+
+		var msg_hdr_hbox = HBoxContainer.new()
+		msg_hdr_hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		msg_hdr_hbox.custom_minimum_size = Vector2(660, 0)
 
 		var msg_hdr_lbl = Label.new()
 		msg_hdr_lbl.text = "Message:"
 		msg_hdr_lbl.add_theme_font_size_override("font_size", 14)
 		msg_hdr_lbl.add_theme_color_override("font_color", Color(0.20, 0.25, 0.32, 1.0))
-		msg_section.add_child(msg_hdr_lbl)
+		msg_hdr_hbox.add_child(msg_hdr_lbl)
+
+
+		var msg_hdr_spacer = Control.new()
+		msg_hdr_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		msg_hdr_spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		msg_hdr_hbox.add_child(msg_hdr_spacer)
+
+		msg_section.add_child(msg_hdr_hbox)
 
 		message_body_edit.custom_minimum_size = Vector2(660, 140)
 		message_body_edit.placeholder_text = "Type your message body or select a pre-built template..."
@@ -2141,6 +2153,8 @@ func _refresh_communications_log() -> void:
 
 			var l_hdr = Label.new()
 			l_hdr.text = "📱 " + rec_name + " • " + ch + " | Scheduled: " + sch_time
+			l_hdr.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			l_hdr.size_flags_horizontal = SIZE_EXPAND_FILL
 			l_hdr.add_theme_font_size_override("font_size", 13)
 			l_hdr.add_theme_color_override("font_color", Color(0.12, 0.24, 0.40, 1.0))
 			info_vbox.add_child(l_hdr)
@@ -2148,6 +2162,7 @@ func _refresh_communications_log() -> void:
 			var l_body = Label.new()
 			l_body.text = "\"" + body_txt + "\""
 			l_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			l_body.size_flags_horizontal = SIZE_EXPAND_FILL
 			l_body.add_theme_font_size_override("font_size", 12)
 			l_body.add_theme_color_override("font_color", Color(0.30, 0.36, 0.45, 1.0))
 			info_vbox.add_child(l_body)
@@ -2210,7 +2225,9 @@ func _refresh_communications_log() -> void:
 
 			var row = Label.new()
 			row.text = row_str
-			row.add_theme_font_size_override("font_size", 16)
+			row.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			row.size_flags_horizontal = SIZE_EXPAND_FILL
+			row.add_theme_font_size_override("font_size", 14)
 			row.add_theme_color_override("font_color", Color(0.12, 0.16, 0.22, 1.0))
 			vbox.add_child(row)
 	else:
@@ -2510,10 +2527,18 @@ func _refresh_voicemail_inbox() -> void:
 		card_vbox.add_child(badge_hbox)
 		
 		# Row 5: Action buttons (with Play for voicemails)
-		var actions_hbox = HBoxContainer.new()
-		actions_hbox.mouse_filter = Control.MOUSE_FILTER_PASS
-		actions_hbox.add_theme_constant_override("separation", 4)
+		var actions_vbox = VBoxContainer.new()
+		actions_vbox.mouse_filter = Control.MOUSE_FILTER_PASS
+		actions_vbox.add_theme_constant_override("separation", 4)
 		
+		var actions_row1 = HBoxContainer.new()
+		actions_row1.mouse_filter = Control.MOUSE_FILTER_PASS
+		actions_row1.add_theme_constant_override("separation", 4)
+
+		var actions_row2 = HBoxContainer.new()
+		actions_row2.mouse_filter = Control.MOUSE_FILTER_PASS
+		actions_row2.add_theme_constant_override("separation", 4)
+
 		# Play button for voicemails with recording URL (Only shown if accessible)
 		if is_accessible and item_type == "voicemail" and recording_url != "":
 			var btn_play = Button.new()
@@ -2528,7 +2553,7 @@ func _refresh_voicemail_inbox() -> void:
 			btn_play.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
 			var _target_vm = vm
 			btn_play.pressed.connect(func(): _open_audio_player_dialog(_target_vm))
-			actions_hbox.add_child(btn_play)
+			actions_row1.add_child(btn_play)
 
 			# Transcribe button if no transcription is present
 			if transcription == "" or transcription == "(No transcription available)":
@@ -2545,7 +2570,7 @@ func _refresh_voicemail_inbox() -> void:
 				var _v_uuid = vm_uuid
 				var _r_url = recording_url
 				btn_trans.pressed.connect(func(): _transcribe_voicemail_with_gemini(_v_uuid, _r_url, btn_trans))
-				actions_hbox.add_child(btn_trans)
+				actions_row1.add_child(btn_trans)
 		
 		var btn_open = Button.new(); btn_open.text = "📂 Open"; btn_open.custom_minimum_size = Vector2(45, 24); btn_open.add_theme_font_size_override("font_size", 10)
 		var btn_call = Button.new(); btn_call.text = "📞 Callback"; btn_call.custom_minimum_size = Vector2(65, 24); btn_call.add_theme_font_size_override("font_size", 10)
@@ -2568,25 +2593,35 @@ func _refresh_voicemail_inbox() -> void:
 				_confirm_delete_voicemail(_del_uuid)
 		)
 
-		actions_hbox.add_child(btn_open); actions_hbox.add_child(btn_call); actions_hbox.add_child(btn_sms); actions_hbox.add_child(btn_fwd); actions_hbox.add_child(btn_del)
+		actions_row1.add_child(btn_open)
+		actions_row1.add_child(btn_call)
+		actions_row1.add_child(btn_sms)
+		
+		actions_row2.add_child(btn_fwd)
+		actions_row2.add_child(btn_del)
 		
 		# Add Link Contact button if caller is not matched to a person
 		if not has_matched_person and caller_num != "":
 			var btn_link = Button.new()
-			btn_link.text = "👤 Link"
-			btn_link.custom_minimum_size = Vector2(50, 24)
+			btn_link.text = "🔗 Link Person"
+			btn_link.custom_minimum_size = Vector2(75, 24)
 			btn_link.add_theme_font_size_override("font_size", 10)
 			var link_st = StyleBoxFlat.new()
-			link_st.bg_color = Color(0.18, 0.55, 0.35, 1.0)
+			link_st.bg_color = Color(0.20, 0.45, 0.70, 1.0)
 			link_st.corner_radius_top_left = 4; link_st.corner_radius_top_right = 4; link_st.corner_radius_bottom_left = 4; link_st.corner_radius_bottom_right = 4
 			link_st.content_margin_left = 6; link_st.content_margin_right = 6; link_st.content_margin_top = 2; link_st.content_margin_bottom = 2
 			btn_link.add_theme_stylebox_override("normal", link_st)
 			btn_link.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
-			var _target_num = caller_num
-			btn_link.pressed.connect(func(): _open_link_contact_dialog(_target_num))
-			actions_hbox.add_child(btn_link)
+			var _l_phone = caller_num
+			btn_link.pressed.connect(func(): _open_link_contact_dialog(_l_phone))
+			actions_row2.add_child(btn_link)
+
+		if actions_row1.get_child_count() > 0:
+			actions_vbox.add_child(actions_row1)
+		if actions_row2.get_child_count() > 0:
+			actions_vbox.add_child(actions_row2)
 			
-		card_vbox.add_child(actions_hbox)
+		card_vbox.add_child(actions_vbox)
 		
 		var _card_num = caller_num
 		var _card_disp = display_caller
@@ -5419,11 +5454,9 @@ func _confirm_delete_voicemail(vm_uuid: String, on_deleted_callback: Callable = 
 		_refresh_all_feeds()
 	)
 
-
-
-
 func _on_schedule_message_pressed() -> void:
 	var body = message_body_edit.text.strip_edges() if message_body_edit else ""
 	if body == "" and current_attachment_path == "":
 		return
 	OS.alert("Message broadcast scheduling will be available in upcoming update.", "Schedule Broadcast")
+
