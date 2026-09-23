@@ -746,6 +746,10 @@ func _setup_communicate_send_composer() -> void:
 		if SpellingAssistanceHelperScript:
 			SpellingAssistanceHelperScript.attach_inline_spell_check(message_body_edit)
 
+		var env_prefill = OS.get_environment("STUDYCENTERHUB_PREFILL_COMMS_MSG")
+		if env_prefill != "":
+			message_body_edit.text = env_prefill
+
 		if not char_count_label:
 			char_count_label = Label.new()
 			char_count_label.add_theme_font_size_override("font_size", 13)

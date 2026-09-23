@@ -60,7 +60,10 @@ const SUGGESTION_MAP = {
 	"enviroment": "environment",
 	"independant": "independent",
 	"succesful": "successful",
-	"superintendant": "superintendent"
+	"superintendant": "superintendent",
+	"anothre": "another",
+	"commuity": "community",
+	"familar": "familiar"
 }
 
 const COMMON_ENGLISH_WORDS = [
@@ -407,7 +410,21 @@ static func _ensure_dictionary_loaded() -> void:
 		return
 	_is_dict_loaded = true
 
-	# 1. Seed Built-in Common English Vocabulary
+	# 1. Load Comprehensive English Dictionary Resource
+	var dict_path = "res://src/ui/components/english_dictionary.txt"
+	if FileAccess.file_exists(dict_path):
+		var f = FileAccess.open(dict_path, FileAccess.READ)
+		if f:
+			while not f.eof_reached():
+				var line = f.get_line().strip_edges()
+				if line != "":
+					var lower = line.to_lower()
+					_common_words_set[lower] = true
+					if _candidate_word_list.size() < 10000 and not _candidate_word_list.has(lower):
+						_candidate_word_list.append(lower)
+			f.close()
+
+	# 2. Seed Built-in Common English Vocabulary & Short Words Fallback
 	for w in COMMON_ENGLISH_WORDS:
 		var lower = w.to_lower()
 		_common_words_set[lower] = true
@@ -426,7 +443,7 @@ static func _ensure_dictionary_loaded() -> void:
 		if not _candidate_word_list.has(lower):
 			_candidate_word_list.append(lower)
 
-	# 2. Seed Proper Names Vocabulary (Requires TitleCase for validation)
+	# 3. Seed Proper Names Vocabulary (Requires TitleCase for validation)
 	for pn in PROPER_NAMES:
 		var cap = pn.capitalize()
 		_proper_names_set[cap] = true
@@ -503,11 +520,22 @@ static func is_word_valid(word: String) -> bool:
 		if is_word_valid(base):
 			return true
 
-	# 7. Check Common Modern English Words
+	# 7. Proper Names & Contact Names Classification Rule:
+	# Dedicated proper names (e.g. "Tess", "John", "Morgan") are valid ONLY IF properly capitalized (TitleCase)!
+	# Lowercase "tess" or "john" in prose is NOT valid unless listed in COMMON_ENGLISH_WORDS (e.g. "grace", "may").
+	var is_title_case = (word.length() > 1 and word[0] == word[0].to_upper())
+	var title_version = word.capitalize()
+	if _proper_names_set.has(title_version) or _proper_names_set.has(word):
+		if is_title_case:
+			return true
+		elif not COMMON_ENGLISH_WORDS.has(lower):
+			return false
+
+	# 8. Check Common Modern English Words
 	if _common_words_set.has(lower):
 		return true
 
-	# 8. Common English Inflection & Stemming checks on common words
+	# 9. Common English Inflection & Stemming checks on common words
 	if lower.ends_with("s") and lower.length() > 3:
 		var stem1 = lower.left(lower.length() - 1)
 		if _common_words_set.has(stem1): return true
@@ -538,15 +566,6 @@ static func is_word_valid(word: String) -> bool:
 	if lower.ends_with("ly") and lower.length() > 3:
 		var stem_ly = lower.left(lower.length() - 2)
 		if _common_words_set.has(stem_ly): return true
-
-	# 9. Proper Names & Contact Names Classification Rule:
-	# Proper names (e.g. "Tess", "John", "Morgan") are valid ONLY IF properly capitalized (TitleCase)!
-	# Lowercase "tess" or "john" in prose is NOT valid unless in _common_words_set.
-	var is_title_case = (word.length() > 1 and word[0] == word[0].to_upper())
-	var title_version = word.capitalize()
-	if _proper_names_set.has(title_version) or _proper_names_set.has(word):
-		if is_title_case:
-			return true
 
 	return false
 
@@ -689,116 +708,59 @@ static func add_word_to_dictionary(word: String) -> void:
 	if not _candidate_word_list.has(word):
 		_candidate_word_list.append(word)
 
-# --- Godot 4 Shared Inline Spell Checker Implementation ---
+# --- Godot 4 Shared Native Spelling Syntax Highlighter Implementation ---
 
-class InlineSpellingOverlay extends Control:
-	var text_edit: TextEdit = null
+class SpellingSyntaxHighlighter extends SyntaxHighlighter:
+	func _get_line_syntax_highlighting(line_idx: int) -> Dictionary:
+		var text_edit = get_text_edit()
+		if not text_edit:
+			return {}
 
-	func _init(te: TextEdit):
-		text_edit = te
-		mouse_filter = Control.MOUSE_FILTER_IGNORE
-		z_index = 10
-		anchor_left = 0.0
-		anchor_top = 0.0
-		anchor_right = 1.0
-		anchor_bottom = 1.0
-		offset_left = 0.0
-		offset_top = 0.0
-		offset_right = 0.0
-		offset_bottom = 0.0
+		var line_str = text_edit.get_line(line_idx)
+		if line_str.strip_edges() == "":
+			return {}
 
-	func _notification(what: int) -> void:
-		if what == NOTIFICATION_ENTER_TREE or what == NOTIFICATION_RESIZED or what == NOTIFICATION_VISIBILITY_CHANGED:
-			if text_edit and is_instance_valid(text_edit):
-				queue_redraw()
+		var issues = SpellingAssistanceHelper.check_text(line_str)
+		if issues.size() == 0:
+			return {}
 
-	func _draw() -> void:
-		if not text_edit or not is_instance_valid(text_edit):
-			return
+		var format_map = {}
+		var default_color = Color(0.12, 0.16, 0.22, 1.0)
+		format_map[0] = { "color": default_color }
 
-		if size != text_edit.size or position != Vector2.ZERO:
-			position = Vector2.ZERO
-			size = text_edit.size
-
-		var total_lines = text_edit.get_line_count()
-
-		for line_idx in range(total_lines):
-			var line_str = text_edit.get_line(line_idx)
-			if line_str.strip_edges() == "":
+		for iss in issues:
+			var start_col = int(iss["start"])
+			var end_col = int(iss["end"])
+			if start_col < 0 or end_col <= start_col or end_col > line_str.length():
 				continue
 
-			var issues = SpellingAssistanceHelper.check_text(line_str)
-			if issues.size() == 0:
-				continue
+			# Highlight misspelled word natively tied to character column range
+			format_map[start_col] = {
+				"color": Color(0.85, 0.15, 0.15, 1.0),
+				"background_color": Color(1.0, 0.88, 0.88, 0.7)
+			}
+			format_map[end_col] = {
+				"color": default_color
+			}
 
-			for iss in issues:
-				var start_col = int(iss["start"])
-				var end_col = int(iss["end"])
-				if start_col < 0 or end_col <= start_col or end_col > line_str.length():
-					continue
-
-				var r_start = text_edit.get_rect_at_line_column(line_idx, start_col)
-				var r_end = text_edit.get_rect_at_line_column(line_idx, end_col - 1)
-
-				if r_start.position.x < 0 or r_start.position.y < 0 or r_end.position.x < 0:
-					continue
-
-				var x_start = float(r_start.position.x)
-				var x_end = float(r_end.position.x + r_end.size.x)
-				var y_baseline = float(r_start.position.y + r_start.size.y - 2.0)
-
-				if y_baseline < 0 or y_baseline > text_edit.size.y:
-					continue
-
-				if x_start >= 0 and x_end > x_start:
-					_draw_word_wave(x_start, x_end, y_baseline)
-
-	func _draw_word_wave(x_start: float, x_end: float, y_baseline: float) -> void:
-		var wave_pts = PackedVector2Array()
-		var x = x_start
-		var wave_up = true
-		while x <= x_end:
-			var y_off = -1.5 if wave_up else 1.5
-			wave_pts.append(Vector2(x, y_baseline + y_off))
-			x += 2.5
-			wave_up = not wave_up
-
-		if wave_pts.size() >= 2:
-			draw_polyline(wave_pts, Color(0.95, 0.20, 0.20, 0.95), 1.5, true)
+		return format_map
 
 static func attach_inline_spell_check(text_edit: TextEdit) -> void:
 	if not text_edit or not is_instance_valid(text_edit):
 		return
 
+	# Remove any legacy overlay children if present
 	for child in text_edit.get_children():
-		if child is InlineSpellingOverlay:
-			return
+		if child.get_class() == "InlineSpellingOverlay":
+			child.queue_free()
 
 	text_edit.caret_blink = true
 	text_edit.add_theme_color_override("caret_color", Color(0.12, 0.16, 0.22, 1.0))
 	text_edit.context_menu_enabled = true
 
-	var overlay = InlineSpellingOverlay.new(text_edit)
-	text_edit.add_child(overlay)
-	overlay.z_index = 10
-
-	var update_overlay = func():
-		if is_instance_valid(overlay) and is_instance_valid(text_edit):
-			overlay.position = Vector2.ZERO
-			overlay.size = text_edit.size
-			overlay.queue_redraw()
-
-	update_overlay.call()
-
-	text_edit.text_changed.connect(update_overlay)
-	if text_edit.has_signal("scroll_vertical_changed"):
-		text_edit.scroll_vertical_changed.connect(update_overlay)
-	if text_edit.has_signal("scroll_horizontal_changed"):
-		text_edit.scroll_horizontal_changed.connect(update_overlay)
-	text_edit.resized.connect(update_overlay)
-	text_edit.focus_entered.connect(update_overlay)
-	text_edit.tree_entered.connect(update_overlay)
-	text_edit.item_rect_changed.connect(update_overlay)
+	# Attach Native Syntax Highlighter
+	if not (text_edit.syntax_highlighter is SpellingSyntaxHighlighter):
+		text_edit.syntax_highlighter = SpellingSyntaxHighlighter.new()
 
 	text_edit.gui_input.connect(func(event: InputEvent):
 		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
@@ -912,23 +874,21 @@ static func attach_inline_spell_check(text_edit: TextEdit) -> void:
 							target_word_range.call()
 							text_edit.insert_text_at_caret(sug_val)
 							text_edit.text_changed.emit()
-							update_overlay.call()
 
 						elif act == "ignore":
 							ignore_word(target_word)
 							text_edit.text_changed.emit()
-							update_overlay.call()
+							text_edit.queue_redraw()
 
 						elif act == "add_dict":
 							add_word_to_dictionary(target_word)
 							text_edit.text_changed.emit()
-							update_overlay.call()
+							text_edit.queue_redraw()
 
 						elif act == "edit_cut":
 							target_word_range.call()
 							text_edit.cut()
 							text_edit.text_changed.emit()
-							update_overlay.call()
 
 						elif act == "edit_copy":
 							target_word_range.call()
@@ -938,13 +898,11 @@ static func attach_inline_spell_check(text_edit: TextEdit) -> void:
 							target_word_range.call()
 							text_edit.paste()
 							text_edit.text_changed.emit()
-							update_overlay.call()
 
 						elif act == "edit_delete":
 							target_word_range.call()
 							text_edit.delete_selection()
 							text_edit.text_changed.emit()
-							update_overlay.call()
 
 						elif act == "edit_select_all":
 							text_edit.select_all()
