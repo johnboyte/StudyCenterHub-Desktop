@@ -950,6 +950,33 @@ func _clear_attached_image() -> void:
 	if attachment_drop_zone: attachment_drop_zone.visible = true
 	_update_composer_validation()
 
+func _reset_communications_composer_after_successful_send() -> void:
+	selected_individual_ids.clear()
+	_refresh_individual_chips()
+	
+	if recipient_dropdown and recipient_dropdown.item_count > 0:
+		recipient_dropdown.selected = 0
+		
+	if message_body_edit:
+		message_body_edit.text = ""
+		_update_character_count()
+		
+	_clear_attached_image()
+	
+	if template_dropdown and template_dropdown.item_count > 0:
+		template_dropdown.selected = 0
+		
+	_update_audience_resolution()
+	_update_composer_validation()
+	
+	if btn_send_message:
+		btn_send_message.disabled = true
+	if btn_schedule_message:
+		btn_schedule_message.disabled = true
+		
+	_refresh_all_feeds()
+
+
 func _on_window_files_dropped(files: PackedStringArray) -> void:
 	if not is_visible_in_tree(): return
 	if files.size() > 0:
@@ -1724,11 +1751,7 @@ func _show_individual_send_confirmation_dialog(recipient: Dictionary, channel: S
 		var res = com_service.send_message_atomic(recipient, channel, body, _get_active_sender_name(), current_attachment_path)
 		if res.get("success", false):
 			print("Individual message sent successfully: ", res["message_uuid"])
-			if message_body_edit:
-				message_body_edit.text = ""
-				_update_character_count()
-			_clear_attached_image()
-			_refresh_all_feeds()
+			_reset_communications_composer_after_successful_send()
 		else:
 			OS.alert("Failed to send message: " + str(res.get("error", "Unknown error")), "Send Error")
 	)
@@ -1943,16 +1966,13 @@ func _execute_group_broadcast(channel: String, body: String, backdrop: Node = nu
 	_is_sending_group_broadcast = false
 	if btn_send_message: btn_send_message.disabled = false
 
-	if (sms_sent > 0 or email_sent > 0) and message_body_edit:
-		message_body_edit.text = ""
-		_update_character_count()
-		_clear_attached_image()
-
-	_refresh_all_feeds()
+	if (sms_sent > 0 or email_sent > 0):
+		_reset_communications_composer_after_successful_send()
+	else:
+		_refresh_all_feeds()
 
 	_show_group_send_completion_dialog(channel, sms_sent, sms_failed, sms_excluded, email_sent, email_failed, email_unavailable)
 
-	_show_group_send_completion_dialog(channel, sms_sent, sms_failed, sms_excluded, email_sent, email_failed, email_unavailable)
 
 func _show_group_send_completion_dialog(channel: String, sms_sent: int, sms_failed: int, sms_excluded: int, email_sent: int, email_failed: int, email_unavailable: int) -> void:
 	var summary_msg = "Send Complete\n\n"
