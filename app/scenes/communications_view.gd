@@ -3549,8 +3549,17 @@ func select_recipient_by_phone(phone: String, channel_name: String) -> void:
 
 func move_voicemail_to_status(uuid: String, status: String, item_type: String = "voicemail") -> void:
 	if item_type == "sms":
-		var q = "UPDATE inbound_sms_log SET follow_up_status = ? WHERE message_sid = ? OR ('sms_' || id) = ?;"
-		db.execute(q, [status, uuid, uuid])
+		var phone_res = db.execute("SELECT from_phone_e164 FROM inbound_sms_log WHERE message_sid = ? OR ('sms_' || id) = ? LIMIT 1;", [uuid, uuid])
+		var target_phone = ""
+		if phone_res["success"] and phone_res["data"].size() > 0:
+			target_phone = str(phone_res["data"][0].get("from_phone_e164", ""))
+		
+		if target_phone != "":
+			var q = "UPDATE inbound_sms_log SET follow_up_status = ? WHERE from_phone_e164 = ? OR message_sid = ? OR ('sms_' || id) = ?;"
+			db.execute(q, [status, target_phone, uuid, uuid])
+		else:
+			var q = "UPDATE inbound_sms_log SET follow_up_status = ? WHERE message_sid = ? OR ('sms_' || id) = ?;"
+			db.execute(q, [status, uuid, uuid])
 	else:
 		var q = "UPDATE voicemails SET status = ? WHERE voicemail_uuid = ?;"
 		db.execute(q, [status, uuid])

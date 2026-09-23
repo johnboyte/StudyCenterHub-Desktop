@@ -1155,15 +1155,35 @@ func update_voicemail_workflow(vm_uuid: String, assigned_person_id: Variant, sta
 			if p_res["success"] and p_res["data"].size() > 0:
 				assignee_name = str(p_res["data"][0]["name"])
 				
-		var q = """
-			UPDATE inbound_sms_log 
-			SET follow_up_status = ?, 
-			    assigned_to = ?, 
-			    notes = ?, 
-			    follow_up_updated_at = datetime('now')
-			WHERE message_sid = ? OR ('sms_' || id) = ?;
-		"""
-		var res = db.execute(q, [status, assignee_name, internal_notes, vm_uuid, vm_uuid])
+		var phone_res = db.execute("SELECT from_phone_e164 FROM inbound_sms_log WHERE message_sid = ? OR ('sms_' || id) = ? LIMIT 1;", [vm_uuid, vm_uuid])
+		var target_phone = ""
+		if phone_res["success"] and phone_res["data"].size() > 0:
+			target_phone = str(phone_res["data"][0].get("from_phone_e164", ""))
+
+		var q = ""
+		var params = []
+		if target_phone != "":
+			q = """
+				UPDATE inbound_sms_log 
+				SET follow_up_status = ?, 
+				    assigned_to = ?, 
+				    notes = ?, 
+				    follow_up_updated_at = datetime('now')
+				WHERE from_phone_e164 = ? OR message_sid = ? OR ('sms_' || id) = ?;
+			"""
+			params = [status, assignee_name, internal_notes, target_phone, vm_uuid, vm_uuid]
+		else:
+			q = """
+				UPDATE inbound_sms_log 
+				SET follow_up_status = ?, 
+				    assigned_to = ?, 
+				    notes = ?, 
+				    follow_up_updated_at = datetime('now')
+				WHERE message_sid = ? OR ('sms_' || id) = ?;
+			"""
+			params = [status, assignee_name, internal_notes, vm_uuid, vm_uuid]
+
+		var res = db.execute(q, params)
 		if res["success"]:
 			var payload = {
 				"message_sid": vm_uuid,
