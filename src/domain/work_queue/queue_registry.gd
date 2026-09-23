@@ -36,6 +36,10 @@ static func format_minutes_to_time(minutes: int) -> String:
 		hr = 12
 	return "%02d:%02d %s" % [hr, mn, suffix]
 
+static func get_unresolved_inbound_sms_records(db: RefCounted) -> Array:
+	const CommunicationsServiceScript = preload("res://src/domain/communications/communications_service.gd")
+	return CommunicationsServiceScript.get_actionable_sms_threads(db)
+
 static func get_uncovered_center_hours_records(db: RefCounted) -> Array:
 	if not db: return []
 
@@ -273,9 +277,9 @@ static func get_registry() -> Dictionary:
 			"target_view": "communications",
 			"required_permission": "communications.view",
 			"urgency": "urgent",
-			"count_sql": "SELECT COUNT(*) AS cnt FROM inbound_sms_log WHERE is_read = 0 OR follow_up_status = 'Unassigned';",
-			"record_sql": "SELECT id, message_sid, from_phone_e164, raw_body, follow_up_status, received_at FROM inbound_sms_log WHERE is_read = 0 OR follow_up_status = 'Unassigned' ORDER BY received_at ASC;",
-			"completion_sql": "UPDATE inbound_sms_log SET is_read = 1, follow_up_status = 'Completed', follow_up_completed_at = datetime('now') WHERE id = ?;",
+			"count_sql": "SELECT COUNT(DISTINCT from_phone_e164) AS cnt FROM inbound_sms_log WHERE LOWER(follow_up_status) IN ('new', 'unassigned');",
+			"record_sql": "SELECT id, message_sid, from_phone_e164, raw_body, follow_up_status, received_at FROM inbound_sms_log WHERE LOWER(follow_up_status) IN ('new', 'unassigned') ORDER BY received_at ASC;",
+			"completion_sql": "UPDATE inbound_sms_log SET follow_up_status = 'Completed', follow_up_completed_at = datetime('now') WHERE from_phone_e164 IN (SELECT from_phone_e164 FROM inbound_sms_log WHERE id = ?);",
 			"primary_button": "Reply to Texts",
 			"queue_mode_supported": true
 		},

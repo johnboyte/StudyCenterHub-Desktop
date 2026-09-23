@@ -24,6 +24,8 @@ func _init(db_instance = null) -> void:
 func get_queue_count(queue_id: String) -> int:
 	if queue_id == "uncovered_center_hours":
 		return fetch_queue_records("uncovered_center_hours").size()
+	if queue_id == "unresolved_inbound_sms":
+		return fetch_queue_records("unresolved_inbound_sms").size()
 	var def = QueueRegistryScript.get_definition(queue_id)
 	if def.is_empty() or not db:
 		return 0
@@ -36,6 +38,8 @@ func get_queue_count(queue_id: String) -> int:
 func fetch_queue_records(queue_id: String) -> Array:
 	if queue_id == "uncovered_center_hours":
 		return QueueRegistryScript.get_uncovered_center_hours_records(db)
+	if queue_id == "unresolved_inbound_sms":
+		return QueueRegistryScript.get_unresolved_inbound_sms_records(db)
 	var def = QueueRegistryScript.get_definition(queue_id)
 	if def.is_empty() or not db:
 		return []

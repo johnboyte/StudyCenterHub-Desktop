@@ -867,6 +867,44 @@ static func normalize_phone_digits(phone_str: String) -> String:
 		return digits.substr(digits.length() - 10)
 	return digits
 
+static func get_actionable_sms_threads(db: RefCounted) -> Array:
+	if not db:
+		return []
+
+	var q_sms = """
+		SELECT id, message_sid, from_phone_e164, to_phone_e164, raw_body, 
+		       follow_up_status, assigned_to, notes, matched_person_id, is_read, received_at
+		FROM inbound_sms_log
+		ORDER BY received_at DESC, id DESC;
+	"""
+	var sms_res = db.execute(q_sms)
+	if not sms_res.get("success", false) or sms_res.get("data", []).size() == 0:
+		return []
+
+	var sms_groups = {}
+	for row in sms_res["data"]:
+		var phone_str = str(row.get("from_phone_e164", ""))
+		var norm = normalize_phone_digits(phone_str)
+		if norm == "": norm = phone_str
+		if not sms_groups.has(norm):
+			sms_groups[norm] = []
+		sms_groups[norm].append(row)
+
+	var actionable_threads = []
+	for norm_key in sms_groups.keys():
+		var group = sms_groups[norm_key]
+		var has_new = false
+		for msg in group:
+			var st = str(msg.get("follow_up_status", "new")).to_lower()
+			if st == "new" or st == "unassigned":
+				has_new = true
+				break
+		if has_new:
+			var latest = group[0].duplicate()
+			actionable_threads.append(latest)
+
+	return actionable_threads
+
 func resolve_person_by_phone(phone_str: String) -> Dictionary:
 	if not db or phone_str == "":
 		return {"matched": false, "person_id": 0, "name": "", "phone": phone_str}

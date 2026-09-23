@@ -362,14 +362,14 @@ func _render_unresolved_inbound_sms_item(vbox: VBoxContainer, item: Dictionary) 
 			err_dlg.add_child(l); add_child(err_dlg); err_dlg.popup_centered()
 			return
 
-		db.execute("UPDATE inbound_sms_log SET is_read = 1, follow_up_status = 'Completed', follow_up_completed_at = datetime('now') WHERE id = ?;", [item_id])
+		db.execute("UPDATE inbound_sms_log SET follow_up_status = 'Completed', follow_up_completed_at = datetime('now') WHERE from_phone_e164 IN (SELECT from_phone_e164 FROM inbound_sms_log WHERE id = ?);", [item_id])
 		_on_complete_queue_item(item_id)
 	)
 	btn_hbox.add_child(btn_reply)
 
 	var btn_complete = Button.new(); btn_complete.text = "✅ Mark Follow-Up Completed"; btn_complete.custom_minimum_size = Vector2(210, 38)
 	btn_complete.pressed.connect(func():
-		db.execute("UPDATE inbound_sms_log SET is_read = 1, follow_up_status = 'Completed', follow_up_completed_at = datetime('now') WHERE id = ?;", [item_id])
+		db.execute("UPDATE inbound_sms_log SET follow_up_status = 'Completed', follow_up_completed_at = datetime('now') WHERE from_phone_e164 IN (SELECT from_phone_e164 FROM inbound_sms_log WHERE id = ?);", [item_id])
 		_on_complete_queue_item(item_id)
 	)
 	btn_hbox.add_child(btn_complete)
