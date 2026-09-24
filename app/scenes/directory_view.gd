@@ -855,16 +855,32 @@ func _create_image_from_base64(base64_str: String) -> Image:
 		return null
 	if "," in b64_data:
 		b64_data = b64_data.split(",")[1]
+	b64_data = b64_data.replace("\n", "").replace("\r", "").replace(" ", "")
 	var buffer = Marshalls.base64_to_raw(b64_data)
 	if buffer.size() == 0:
 		return null
-	var img = Image.new()
-	var err = img.load_jpg_from_buffer(buffer)
-	if err != OK:
-		err = img.load_png_from_buffer(buffer)
-	if err != OK:
-		return null
-	return img
+
+	var img_png = Image.new()
+	if img_png.load_png_from_buffer(buffer) == OK:
+		return img_png
+
+	var img_jpg = Image.new()
+	if img_jpg.load_jpg_from_buffer(buffer) == OK:
+		return img_jpg
+
+	var img_webp = Image.new()
+	if img_webp.load_webp_from_buffer(buffer) == OK:
+		return img_webp
+
+	return null
+
+func _convert_image_to_data_url(img: Image) -> String:
+	if not img or img.is_empty():
+		return ""
+	var png_bytes = img.save_png_to_buffer()
+	if png_bytes.size() == 0:
+		return ""
+	return "data:image/png;base64," + Marshalls.raw_to_base64(png_bytes)
 
 func _open_photo_lightbox(person_name: String, texture: Texture2D) -> void:
 	if not texture: return
@@ -1235,12 +1251,19 @@ func _load_image_from_file(path: String) -> Image:
 	file.close()
 	if bytes.size() == 0:
 		return null
-	var img = Image.new()
-	var err = img.load_jpg_from_buffer(bytes)
-	if err != OK:
-		err = img.load_png_from_buffer(bytes)
-	if err == OK:
-		return img
+
+	var img_png = Image.new()
+	if img_png.load_png_from_buffer(bytes) == OK:
+		return img_png
+
+	var img_jpg = Image.new()
+	if img_jpg.load_jpg_from_buffer(bytes) == OK:
+		return img_jpg
+
+	var img_webp = Image.new()
+	if img_webp.load_webp_from_buffer(bytes) == OK:
+		return img_webp
+
 	return null
 
 func _on_window_files_dropped(files: PackedStringArray) -> void:
@@ -1303,14 +1326,254 @@ func _clean_str(val) -> String:
 		return ""
 	return s
 
+func _show_photo_confirm_dialog(title_text: String, desc_text: String, confirm_btn_text: String, on_confirm_cb: Callable) -> void:
+	var dialog = Window.new()
+	dialog.title = title_text
+	dialog.size = Vector2i(480, 240)
+	dialog.exclusive = true
+	dialog.transient = true
+	dialog.popup_window = true
+
+	var panel = PanelContainer.new()
+	var st = StyleBoxFlat.new()
+	st.bg_color = Color(0.12, 0.16, 0.22, 1.0)
+	st.content_margin_left = 20; st.content_margin_top = 20; st.content_margin_right = 20; st.content_margin_bottom = 20
+	panel.add_theme_stylebox_override("panel", st)
+	panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dialog.add_child(panel)
+
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 14)
+
+	var hdr = Label.new()
+	hdr.text = title_text
+	hdr.add_theme_font_size_override("font_size", 16)
+	hdr.add_theme_color_override("font_color", Color(0.95, 0.75, 0.35, 1.0))
+	vbox.add_child(hdr)
+
+	var desc = Label.new()
+	desc.text = desc_text
+	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	desc.add_theme_font_size_override("font_size", 14)
+	desc.add_theme_color_override("font_color", Color(0.85, 0.90, 0.95, 1.0))
+	vbox.add_child(desc)
+
+	var btn_hbox = HBoxContainer.new()
+	btn_hbox.alignment = BoxContainer.ALIGNMENT_END
+	btn_hbox.add_theme_constant_override("separation", 12)
+
+	var cancel_btn = Button.new()
+	cancel_btn.text = "Cancel"
+	cancel_btn.custom_minimum_size = Vector2(100, 36)
+	cancel_btn.add_theme_color_override("font_color", Color(0.85, 0.90, 0.95, 1.0))
+	cancel_btn.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 1.0, 1.0))
+	cancel_btn.add_theme_color_override("font_pressed_color", Color(0.70, 0.75, 0.80, 1.0))
+	cancel_btn.pressed.connect(func(): dialog.queue_free())
+	btn_hbox.add_child(cancel_btn)
+
+	var confirm_btn = Button.new()
+	confirm_btn.text = confirm_btn_text
+	confirm_btn.custom_minimum_size = Vector2(140, 36)
+	confirm_btn.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
+	confirm_btn.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 1.0, 1.0))
+	confirm_btn.add_theme_color_override("font_pressed_color", Color(0.90, 0.90, 0.90, 1.0))
+	var btn_st = StyleBoxFlat.new()
+	btn_st.bg_color = _get_active_theme_color()
+	btn_st.corner_radius_top_left = 6; btn_st.corner_radius_top_right = 6; btn_st.corner_radius_bottom_left = 6; btn_st.corner_radius_bottom_right = 6
+	confirm_btn.add_theme_stylebox_override("normal", btn_st)
+	confirm_btn.pressed.connect(func():
+		dialog.queue_free()
+		on_confirm_cb.call()
+	)
+	btn_hbox.add_child(confirm_btn)
+
+	vbox.add_child(btn_hbox)
+	panel.add_child(vbox)
+
+	dialog.close_requested.connect(func(): dialog.queue_free())
+	add_child(dialog)
+	dialog.popup_centered()
+
+func _show_remove_photo_dialog(person_uuid: String, has_photo: bool, has_original: bool) -> void:
+	var dialog = Window.new()
+	dialog.title = "🗑️ Remove Profile Photo"
+	dialog.size = Vector2i(500, 260)
+	dialog.exclusive = true
+	dialog.transient = true
+	dialog.popup_window = true
+
+	var panel = PanelContainer.new()
+	var st = StyleBoxFlat.new()
+	st.bg_color = Color(0.12, 0.16, 0.22, 1.0)
+	st.content_margin_left = 20; st.content_margin_top = 20; st.content_margin_right = 20; st.content_margin_bottom = 20
+	panel.add_theme_stylebox_override("panel", st)
+	panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dialog.add_child(panel)
+
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 14)
+
+	var hdr = Label.new()
+	hdr.text = "Select Photo Removal Option"
+	hdr.add_theme_font_size_override("font_size", 16)
+	hdr.add_theme_color_override("font_color", Color(0.95, 0.75, 0.35, 1.0))
+	vbox.add_child(hdr)
+
+	var desc = Label.new()
+	desc.text = "Removing the current photo clears the active avatar display. You can optionally preserve the protected original master photo for future restoration."
+	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	desc.add_theme_font_size_override("font_size", 13)
+	desc.add_theme_color_override("font_color", Color(0.85, 0.90, 0.95, 1.0))
+	vbox.add_child(desc)
+
+	var btn_vbox = VBoxContainer.new()
+	btn_vbox.add_theme_constant_override("separation", 10)
+
+	var btn_rem_cur = Button.new()
+	btn_rem_cur.text = "🖼️ Remove Current Display Photo Only"
+	btn_rem_cur.custom_minimum_size = Vector2(0, 38)
+	btn_rem_cur.add_theme_color_override("font_color", Color(0.95, 0.95, 0.95, 1.0))
+	btn_rem_cur.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 1.0, 1.0))
+	btn_rem_cur.add_theme_color_override("font_pressed_color", Color(0.80, 0.80, 0.80, 1.0))
+	btn_rem_cur.pressed.connect(func():
+		dialog.queue_free()
+		if db:
+			db.execute("UPDATE people SET profile_photo = NULL WHERE person_uuid = ?;", [person_uuid])
+		_invalidate_photo_cache(person_uuid)
+		refresh_view()
+	)
+	btn_vbox.add_child(btn_rem_cur)
+
+	var btn_perm_del = Button.new()
+	btn_perm_del.text = "💥 Permanently Delete Both Current & Protected Original"
+	btn_perm_del.custom_minimum_size = Vector2(0, 38)
+	btn_perm_del.add_theme_color_override("font_color", Color(1.0, 0.45, 0.45, 1.0))
+	btn_perm_del.add_theme_color_override("font_hover_color", Color(1.0, 0.60, 0.60, 1.0))
+	btn_perm_del.add_theme_color_override("font_pressed_color", Color(0.85, 0.30, 0.30, 1.0))
+	btn_perm_del.pressed.connect(func():
+		dialog.queue_free()
+		_show_photo_confirm_dialog(
+			"Permanently Delete Photo & Original",
+			"Permanently delete this person's profile photo and its protected original master photo? This action cannot be undone.",
+			"Permanently Delete",
+			func():
+				if db:
+					db.execute("UPDATE people SET profile_photo = NULL, original_profile_photo = NULL WHERE person_uuid = ?;", [person_uuid])
+				_invalidate_photo_cache(person_uuid)
+				refresh_view()
+		)
+	)
+	btn_vbox.add_child(btn_perm_del)
+
+	var btn_cancel = Button.new()
+	btn_cancel.text = "Cancel"
+	btn_cancel.custom_minimum_size = Vector2(0, 36)
+	btn_cancel.add_theme_color_override("font_color", Color(0.70, 0.75, 0.82, 1.0))
+	btn_cancel.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 1.0, 1.0))
+	btn_cancel.add_theme_color_override("font_pressed_color", Color(0.60, 0.65, 0.70, 1.0))
+	btn_cancel.pressed.connect(func(): dialog.queue_free())
+	btn_vbox.add_child(btn_cancel)
+
+	vbox.add_child(btn_vbox)
+	panel.add_child(vbox)
+
+	dialog.close_requested.connect(func(): dialog.queue_free())
+	add_child(dialog)
+	dialog.popup_centered()
+
+func _handle_new_camera_photo(p_uuid: String, existing_photo: bool) -> void:
+	var process_cam = func():
+		_open_native_camera_dialog(func(captured_img: Image):
+			var new_orig_data_url = _convert_image_to_data_url(captured_img)
+			_open_image_editor(captured_img, func(cropped_data_url: String):
+				if db:
+					db.execute("UPDATE people SET profile_photo = ?, original_profile_photo = ? WHERE person_uuid = ?;", [cropped_data_url, new_orig_data_url, p_uuid])
+				_invalidate_photo_cache(p_uuid)
+				refresh_view()
+			, p_uuid)
+		)
+
+	if existing_photo:
+		_show_photo_confirm_dialog(
+			"Use New Profile Photo?",
+			"Use this new photo as the person's profile photo?\nThis will replace both the current display photo and protected original master.",
+			"Replace Photo",
+			process_cam
+		)
+	else:
+		process_cam.call()
+
+func _handle_new_file_photo(p_uuid: String, existing_photo: bool) -> void:
+	var process_file = func():
+		var fd = FileDialog.new()
+		fd.access = FileDialog.ACCESS_FILESYSTEM
+		fd.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+		fd.filters = PackedStringArray(["*.png, *.jpg, *.jpeg ; Image Files"])
+		fd.title = "Select Profile Photo / Face Shot Image"
+		fd.size = Vector2i(700, 500)
+		fd.file_selected.connect(func(path: String):
+			var img = _load_image_from_file(path)
+			if img:
+				var new_orig_data_url = _convert_image_to_data_url(img)
+				_open_image_editor(img, func(cropped_data_url: String):
+					if db:
+						db.execute("UPDATE people SET profile_photo = ?, original_profile_photo = ? WHERE person_uuid = ?;", [cropped_data_url, new_orig_data_url, p_uuid])
+					_invalidate_photo_cache(p_uuid)
+					refresh_view()
+				, p_uuid)
+		)
+		add_child(fd)
+		fd.popup_centered()
+
+	if existing_photo:
+		_show_photo_confirm_dialog(
+			"Use New Profile Photo?",
+			"Use this new photo as the person's profile photo?\nThis will replace both the current display photo and protected original master.",
+			"Replace Photo",
+			process_file
+		)
+	else:
+		process_file.call()
+
 func _populate_profile_section(p: Dictionary) -> void:
 	if not profile_section: return
 
 	var p_uuid = _clean_str(p.get("person_uuid", ""))
 
+	# Read fresh photo data directly from SQLite to avoid stale in-memory dictionary data
+	var raw_photo_b64 = ""
+	var raw_orig_b64 = ""
+	if db:
+		var fresh_q = db.execute("SELECT profile_photo, original_profile_photo FROM people WHERE person_uuid = ? LIMIT 1;", [p_uuid])
+		if fresh_q["success"] and fresh_q["data"].size() > 0:
+			var row = fresh_q["data"][0]
+			raw_photo_b64 = _clean_str(row.get("profile_photo", ""))
+			raw_orig_b64 = _clean_str(row.get("original_profile_photo", ""))
+
+	if raw_photo_b64 == "": raw_photo_b64 = _clean_str(p.get("profile_photo", ""))
+	if raw_orig_b64 == "": raw_orig_b64 = _clean_str(p.get("original_profile_photo", ""))
+
+	# Migration / Baseline preservation: if raw_orig_b64 is empty but raw_photo_b64 exists, populate baseline original
+	if raw_orig_b64 == "" and raw_photo_b64 != "":
+		raw_orig_b64 = raw_photo_b64
+		if db:
+			db.execute("UPDATE people SET original_profile_photo = ? WHERE person_uuid = ? AND (original_profile_photo IS NULL OR original_profile_photo = '');", [raw_photo_b64, p_uuid])
+
+	var photo_tex = _get_cached_photo_texture(p_uuid, raw_photo_b64)
+	var has_photo = (photo_tex != null)
+	var has_original = (raw_orig_b64 != "")
+
 	_active_photo_callback = func(cropped_data_url: String):
 		if db:
 			db.execute("UPDATE people SET profile_photo = ? WHERE person_uuid = ?;", [cropped_data_url, p_uuid])
+			var trace = db.execute("SELECT profile_photo, original_profile_photo FROM people WHERE person_uuid = ? LIMIT 1;", [p_uuid])
+			if trace["success"] and trace["data"].size() > 0:
+				var cur = _clean_str(trace["data"][0].get("profile_photo", ""))
+				var orig = _clean_str(trace["data"][0].get("original_profile_photo", ""))
+				print("[LIVE PHOTO TRACE] AFTER SAVE PHOTO:")
+				print("   CURRENT:  len=", cur.length(), " sha256=", _get_b64_hash(cur))
+				print("   ORIGINAL: len=", orig.length(), " sha256=", _get_b64_hash(orig))
+				print("   CURRENT == ORIGINAL: ", (cur == orig))
 		_invalidate_photo_cache(p_uuid)
 		refresh_view()
 
@@ -1320,10 +1583,6 @@ func _populate_profile_section(p: Dictionary) -> void:
 	var p_hbox = HBoxContainer.new()
 	p_hbox.add_theme_constant_override("separation", 16)
 
-	var raw_photo_b64 = _clean_str(p.get("profile_photo", ""))
-	var photo_tex = _get_cached_photo_texture(p_uuid, raw_photo_b64)
-	var has_photo = (photo_tex != null)
-
 	if has_photo:
 		var photo_rect = TextureRect.new()
 		photo_rect.texture = photo_tex
@@ -1331,12 +1590,13 @@ func _populate_profile_section(p: Dictionary) -> void:
 		photo_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		photo_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
 		photo_rect.mouse_filter = Control.MOUSE_FILTER_STOP
-		var _cur_b64_rect = raw_photo_b64
+		photo_rect.tooltip_text = "Click to crop/edit profile photo"
+		var _orig_b64_for_edit = raw_orig_b64 if has_original else raw_photo_b64
 		photo_rect.gui_input.connect(func(event: InputEvent):
 			if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-				var img_to_edit = _create_image_from_base64(_cur_b64_rect)
+				var img_to_edit = _create_image_from_base64(_orig_b64_for_edit)
 				if img_to_edit:
-					_open_image_editor(img_to_edit, _active_photo_callback)
+					_open_image_editor(img_to_edit, _active_photo_callback, p_uuid, false, false)
 		)
 		p_hbox.add_child(photo_rect)
 	else:
@@ -1354,9 +1614,7 @@ func _populate_profile_section(p: Dictionary) -> void:
 		no_photo_lbl.mouse_filter = Control.MOUSE_FILTER_STOP
 		no_photo_lbl.gui_input.connect(func(event: InputEvent):
 			if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-				_open_native_camera_dialog(func(captured_img: Image):
-					_open_image_editor(captured_img, _active_photo_callback)
-				)
+				_handle_new_camera_photo(p_uuid, has_photo or has_original)
 		)
 		p_hbox.add_child(no_photo_lbl)
 
@@ -1364,8 +1622,9 @@ func _populate_profile_section(p: Dictionary) -> void:
 	photo_btns_vbox.add_theme_constant_override("separation", 8)
 	photo_btns_vbox.size_flags_horizontal = SIZE_EXPAND_FILL
 
+	var status_text = "✓ Active Face Shot Photo On File (Protected Original Saved)" if (has_photo and has_original) else ("✓ Active Face Shot Photo On File" if has_photo else "⚠️ No Profile Photo Uploaded")
 	var photo_status_lbl = Label.new()
-	photo_status_lbl.text = "✓ Active Face Shot Photo On File" if has_photo else "⚠️ No Profile Photo Uploaded"
+	photo_status_lbl.text = status_text
 	photo_status_lbl.add_theme_font_size_override("font_size", 14)
 	photo_status_lbl.add_theme_color_override("font_color", Color(0.35, 0.85, 0.55, 1.0) if has_photo else Color(1.0, 0.75, 0.35, 1.0))
 	photo_btns_vbox.add_child(photo_status_lbl)
@@ -1373,41 +1632,105 @@ func _populate_profile_section(p: Dictionary) -> void:
 	var btns_hbox = HBoxContainer.new()
 	btns_hbox.add_theme_constant_override("separation", 10)
 
-	if has_photo:
+	if has_photo or has_original:
 		var btn_crop_existing = Button.new()
-		btn_crop_existing.text = "✂️ Crop & Zoom Photo"
-		btn_crop_existing.custom_minimum_size = Vector2(175, 40)
-		btn_crop_existing.add_theme_font_size_override("font_size", 15)
-		var _cur_b64_btn = raw_photo_b64
+		btn_crop_existing.text = "✂️ Edit / Crop Photo"
+		btn_crop_existing.custom_minimum_size = Vector2(150, 40)
+		btn_crop_existing.add_theme_font_size_override("font_size", 14)
+		btn_crop_existing.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 1.0, 1.0))
+		btn_crop_existing.add_theme_color_override("font_pressed_color", Color(0.80, 0.80, 0.80, 1.0))
 		btn_crop_existing.pressed.connect(func():
-			var img_to_edit = _create_image_from_base64(_cur_b64_btn)
+			var cur_b64 = raw_photo_b64 if raw_photo_b64 != "" else raw_orig_b64
+			var img_to_edit = _create_image_from_base64(cur_b64)
 			if img_to_edit:
-				_open_image_editor(img_to_edit, _active_photo_callback)
+				_open_image_editor(img_to_edit, _active_photo_callback, p_uuid, false, false)
 		)
 		btns_hbox.add_child(btn_crop_existing)
 
+		var btn_restore_orig = Button.new()
+		btn_restore_orig.text = "🔄 Restore Original"
+		btn_restore_orig.custom_minimum_size = Vector2(150, 40)
+		btn_restore_orig.add_theme_font_size_override("font_size", 14)
+		btn_restore_orig.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 1.0, 1.0))
+		btn_restore_orig.add_theme_color_override("font_pressed_color", Color(0.80, 0.80, 0.80, 1.0))
+		btn_restore_orig.pressed.connect(func():
+			var fresh_orig_b64 = ""
+			if db:
+				var res = db.execute("SELECT original_profile_photo, profile_photo FROM people WHERE person_uuid = ? LIMIT 1;", [p_uuid])
+				if res["success"] and res["data"].size() > 0:
+					fresh_orig_b64 = _clean_str(res["data"][0].get("original_profile_photo", ""))
+					if fresh_orig_b64 == "":
+						fresh_orig_b64 = _clean_str(res["data"][0].get("profile_photo", ""))
+			if fresh_orig_b64 == "": fresh_orig_b64 = raw_orig_b64
+			print("[LIVE PHOTO TRACE] Restore Original clicked for person ", p_uuid)
+			print("   Loaded original_profile_photo hash: ", _get_b64_hash(fresh_orig_b64))
+			var orig_img = _create_image_from_base64(fresh_orig_b64)
+			if orig_img:
+				_open_image_editor(orig_img, _active_photo_callback, p_uuid, true, false)
+		)
+		btns_hbox.add_child(btn_restore_orig)
+
 	var btn_camera_photo = Button.new()
 	btn_camera_photo.text = "📸 Retake Photo" if has_photo else "📷 Take Photo"
-	btn_camera_photo.custom_minimum_size = Vector2(175, 40)
-	btn_camera_photo.add_theme_font_size_override("font_size", 15)
+	btn_camera_photo.custom_minimum_size = Vector2(150, 40)
+	btn_camera_photo.add_theme_font_size_override("font_size", 14)
+	btn_camera_photo.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 1.0, 1.0))
+	btn_camera_photo.add_theme_color_override("font_pressed_color", Color(0.80, 0.80, 0.80, 1.0))
 	btn_camera_photo.pressed.connect(func():
-		_open_native_camera_dialog(func(captured_img: Image):
-			_open_image_editor(captured_img, _active_photo_callback)
-		)
+		_handle_new_camera_photo(p_uuid, has_photo or has_original)
 	)
 	btns_hbox.add_child(btn_camera_photo)
 
 	var btn_upload_photo = Button.new()
-	btn_upload_photo.text = "📁 Upload Image File"
-	btn_upload_photo.custom_minimum_size = Vector2(175, 40)
-	btn_upload_photo.add_theme_font_size_override("font_size", 15)
-	btn_upload_photo.pressed.connect(func(): _on_update_photo_pressed(p_uuid))
+	btn_upload_photo.text = "📁 Upload Photo"
+	btn_upload_photo.custom_minimum_size = Vector2(150, 40)
+	btn_upload_photo.add_theme_font_size_override("font_size", 14)
+	btn_upload_photo.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 1.0, 1.0))
+	btn_upload_photo.add_theme_color_override("font_pressed_color", Color(0.80, 0.80, 0.80, 1.0))
+	btn_upload_photo.pressed.connect(func():
+		_handle_new_file_photo(p_uuid, has_photo or has_original)
+	)
 	btns_hbox.add_child(btn_upload_photo)
+
+	if has_photo:
+		var btn_save_as_orig = Button.new()
+		btn_save_as_orig.text = "⭐ Save Current as Original"
+		btn_save_as_orig.custom_minimum_size = Vector2(180, 40)
+		btn_save_as_orig.add_theme_font_size_override("font_size", 14)
+		btn_save_as_orig.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 1.0, 1.0))
+		btn_save_as_orig.add_theme_color_override("font_pressed_color", Color(0.80, 0.80, 0.80, 1.0))
+		btn_save_as_orig.pressed.connect(func():
+			_show_photo_confirm_dialog(
+				"Save Current as Original",
+				"Replace the protected original photo with the current photo?\nYou will no longer be able to restore the previous original.",
+				"Replace Original",
+				func():
+					if db:
+						db.execute("UPDATE people SET original_profile_photo = profile_photo WHERE person_uuid = ?;", [p_uuid])
+					_invalidate_photo_cache(p_uuid)
+					refresh_view()
+			)
+		)
+		btns_hbox.add_child(btn_save_as_orig)
+
+	if has_photo or has_original:
+		var btn_remove = Button.new()
+		btn_remove.text = "🗑️ Remove Photo"
+		btn_remove.custom_minimum_size = Vector2(140, 40)
+		btn_remove.add_theme_font_size_override("font_size", 14)
+		btn_remove.add_theme_color_override("font_color", Color(0.95, 0.45, 0.45, 1.0))
+		btn_remove.add_theme_color_override("font_hover_color", Color(1.0, 0.60, 0.60, 1.0))
+		btn_remove.add_theme_color_override("font_pressed_color", Color(0.85, 0.30, 0.30, 1.0))
+		btn_remove.pressed.connect(func():
+			_show_remove_photo_dialog(p_uuid, has_photo, has_original)
+		)
+		btns_hbox.add_child(btn_remove)
 
 	photo_btns_vbox.add_child(btns_hbox)
 	p_hbox.add_child(photo_btns_vbox)
 	photo_box.add_child(p_hbox)
 	profile_section.add_child(_create_card("Profile Photo", photo_box))
+
 
 	# 2. Contact & Identity Form Card
 	var form_grid = GridContainer.new()
@@ -4927,7 +5250,7 @@ func _on_add_person_pressed() -> void:
 			return
 
 		var update_stmt = {
-			"sql": "UPDATE people SET suffix = ?, email = ?, school_email = ?, preferred_email = ?, birthday = ?, home_address_street = ?, home_address_line2 = ?, home_address_city = ?, home_address_state = ?, home_address_zip = ?, school_address_street = ?, school_address_line2 = ?, school_address_city = ?, school_address_state = ?, school_address_zip = ?, primary_role = ?, flag_status = ?, emergency_contact_name = ?, emergency_contact_phone = ?, medical_notes = ?, profile_photo = ? WHERE person_uuid = ?;",
+			"sql": "UPDATE people SET suffix = ?, email = ?, school_email = ?, preferred_email = ?, birthday = ?, home_address_street = ?, home_address_line2 = ?, home_address_city = ?, home_address_state = ?, home_address_zip = ?, school_address_street = ?, school_address_line2 = ?, school_address_city = ?, school_address_state = ?, school_address_zip = ?, primary_role = ?, flag_status = ?, emergency_contact_name = ?, emergency_contact_phone = ?, medical_notes = ?, profile_photo = ?, original_profile_photo = COALESCE(NULLIF(?, ''), original_profile_photo) WHERE person_uuid = ?;",
 			"args": [
 				suf_input.text.strip_edges(), 
 				email_val, 
@@ -4950,6 +5273,7 @@ func _on_add_person_pressed() -> void:
 				em_phone, 
 				med_input.text.strip_edges(), 
 				photo_data_url, 
+				photo_data_url,
 				p_uuid
 			]
 		}
@@ -5368,10 +5692,20 @@ func _open_calendar_picker(target_line_edit: LineEdit) -> void:
 	_render[0].call()
 	parent_win.add_child(canvas_layer)
 
-func _open_image_editor(source_img: Image, on_save_callback: Callable) -> void:
+func _get_b64_hash(b64_str: String) -> String:
+	var s = b64_str.strip_edges()
+	if s.is_empty():
+		return "<EMPTY>"
+	var ctx = HashingContext.new()
+	ctx.start(HashingContext.HASH_SHA256)
+	ctx.update(s.to_utf8_buffer())
+	var digest = ctx.finish()
+	return digest.hex_encode().substr(0, 16)
+
+func _open_image_editor(source_img: Image, on_save_callback: Callable, person_uuid: String = "", is_restoring_mode: bool = false, is_new_photo: bool = false) -> void:
 	var edit_dialog = Window.new()
-	edit_dialog.title = "🎨 Crop & Rotate Photo"
-	edit_dialog.size = Vector2i(500, 560)
+	edit_dialog.title = "🛡️ Editing from Protected Original" if is_restoring_mode else "🎨 Crop & Rotate Photo"
+	edit_dialog.size = Vector2i(550, 610)
 	edit_dialog.transient = true
 	edit_dialog.exclusive = false
 	edit_dialog.close_requested.connect(func(): edit_dialog.queue_free())
@@ -5396,6 +5730,23 @@ func _open_image_editor(source_img: Image, on_save_callback: Callable) -> void:
 	margin.add_theme_constant_override("margin_bottom", 16)
 	panel.add_child(margin)
 	margin.add_child(main_vbox)
+
+	if is_restoring_mode:
+		var restore_banner = PanelContainer.new()
+		var rb_st = StyleBoxFlat.new()
+		rb_st.bg_color = Color(0.12, 0.22, 0.36, 1.0)
+		rb_st.border_width_left = 4
+		rb_st.border_color = Color(0.95, 0.75, 0.35, 1.0)
+		rb_st.corner_radius_top_left = 6; rb_st.corner_radius_top_right = 6; rb_st.corner_radius_bottom_left = 6; rb_st.corner_radius_bottom_right = 6
+		rb_st.content_margin_left = 12; rb_st.content_margin_top = 8; rb_st.content_margin_right = 12; rb_st.content_margin_bottom = 8
+		restore_banner.add_theme_stylebox_override("panel", rb_st)
+
+		var rb_lbl = Label.new()
+		rb_lbl.text = "🛡️ Editing from Protected Original (Saving creates new Current display photo)"
+		rb_lbl.add_theme_font_size_override("font_size", 13)
+		rb_lbl.add_theme_color_override("font_color", Color(0.95, 0.85, 0.45, 1.0))
+		restore_banner.add_child(rb_lbl)
+		main_vbox.add_child(restore_banner)
 
 	var preview_panel = PanelContainer.new()
 	preview_panel.custom_minimum_size = Vector2(300, 300)
@@ -5443,7 +5794,9 @@ func _open_image_editor(source_img: Image, on_save_callback: Callable) -> void:
 
 	var input_overlay = Control.new()
 	input_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	input_overlay.custom_minimum_size = Vector2(296, 296)
 	input_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	input_overlay.mouse_default_cursor_shape = Control.CURSOR_MOVE
 	control_node.add_child(input_overlay)
 
 	var current_image = Image.new()
@@ -5464,94 +5817,65 @@ func _open_image_editor(source_img: Image, on_save_callback: Callable) -> void:
 		for r in range(state["rotation_clicks"]):
 			temp_img.rotate_90(0)
 			
-		var base_w = temp_img.get_width()
-		var base_h = temp_img.get_height()
+		var base_w = maxf(1, temp_img.get_width())
+		var base_h = maxf(1, temp_img.get_height())
+		var aspect_ratio = float(base_h) / float(base_w)
 		
-		var fit_scale = minf(296.0 / base_w, 296.0 / base_h)
+		var fit_scale = minf(296.0 / float(base_w), 296.0 / float(base_h))
 		var display_scale = fit_scale * state["zoom"]
 		
-		var display_w = maxf(10, base_w * display_scale)
-		var display_h = maxf(10, base_h * display_scale)
+		var display_w = maxf(10.0, float(base_w) * display_scale)
+		var display_h = maxf(10.0, display_w * aspect_ratio)
 		
 		img_rect.size = Vector2(display_w, display_h)
-		var centered_pos = Vector2(148 - display_w/2, 148 - display_h/2)
+		var centered_pos = Vector2(148.0 - display_w / 2.0, 148.0 - display_h / 2.0)
 		img_rect.position = centered_pos + Vector2(state["offset_x"], state["offset_y"])
 		
 		img_rect.texture = ImageTexture.create_from_image(temp_img)
 
-	var zoom_hbox = HBoxContainer.new()
-	zoom_hbox.alignment = HBoxContainer.ALIGNMENT_CENTER
-	main_vbox.add_child(zoom_hbox)
-	
-	var zoom_lbl = Label.new(); zoom_lbl.text = "🔍 Zoom:"; zoom_lbl.add_theme_color_override("font_color", Color(0.2, 0.25, 0.35, 1.0)); zoom_hbox.add_child(zoom_lbl)
-	var zoom_slider = HSlider.new()
-	zoom_slider.min_value = 0.5
-	zoom_slider.max_value = 3.0
-	zoom_slider.step = 0.1
-	zoom_slider.value = 1.0
-	zoom_slider.custom_minimum_size = Vector2(250, 24)
-	zoom_slider.value_changed.connect(func(val):
-		state["zoom"] = val
-		update_preview.call()
-	)
-	zoom_hbox.add_child(zoom_slider)
+	update_preview.call()
 
-	var dragging = false
-	var drag_start = Vector2.ZERO
-	var offset_start = Vector2.ZERO
+	var is_dragging = false
 
 	input_overlay.gui_input.connect(func(event: InputEvent):
 		if event is InputEventMouseButton:
 			if event.button_index == MOUSE_BUTTON_LEFT:
-				if event.pressed:
-					dragging = true
-					drag_start = event.position
-					offset_start = Vector2(state["offset_x"], state["offset_y"])
-				else:
-					dragging = false
-			elif event.button_index == MOUSE_BUTTON_WHEEL_UP:
-				if event.pressed:
-					zoom_slider.value += 0.05
-			elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-				if event.pressed:
-					zoom_slider.value -= 0.05
-		elif event is InputEventMouseMotion:
-			if dragging:
-				var delta = event.position - drag_start
-				state["offset_x"] = offset_start.x + delta.x
-				state["offset_y"] = offset_start.y + delta.y
+				is_dragging = event.pressed
+			elif event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
+				state["zoom"] = clampf(state["zoom"] * 1.08, 0.4, 5.0)
 				update_preview.call()
+			elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
+				state["zoom"] = clampf(state["zoom"] / 1.08, 0.4, 5.0)
+				update_preview.call()
+		elif event is InputEventMouseMotion:
+			if is_dragging or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+				state["offset_x"] += event.relative.x
+				state["offset_y"] += event.relative.y
+				update_preview.call()
+		elif event is InputEventMagnifyGesture:
+			state["zoom"] = clampf(state["zoom"] * event.factor, 0.4, 5.0)
+			update_preview.call()
+		elif event is InputEventPanGesture:
+			state["offset_x"] += event.delta.x * 2.0
+			state["offset_y"] += event.delta.y * 2.0
+			update_preview.call()
 	)
 
 	var drag_lbl = Label.new()
-	drag_lbl.text = "💡 Scroll to zoom | Drag image to pan & align"
+	drag_lbl.text = "💡 Drag image to pan & align | Scroll wheel or pinch trackpad to zoom"
 	drag_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	drag_lbl.add_theme_font_size_override("font_size", 11)
-	drag_lbl.add_theme_color_override("font_color", Color(0.3, 0.35, 0.45, 1.0))
+	drag_lbl.add_theme_font_size_override("font_size", 12)
+	drag_lbl.add_theme_color_override("font_color", Color(0.25, 0.35, 0.45, 1.0))
 	main_vbox.add_child(drag_lbl)
-
-	var pan_hbox = HBoxContainer.new()
-	pan_hbox.alignment = HBoxContainer.ALIGNMENT_CENTER
-	main_vbox.add_child(pan_hbox)
-
-	var btn_l = Button.new(); btn_l.text = "◀ Left"; pan_hbox.add_child(btn_l)
-	var btn_u = Button.new(); btn_u.text = "▲ Up"; pan_hbox.add_child(btn_u)
-	var btn_d = Button.new(); btn_d.text = "▼ Down"; pan_hbox.add_child(btn_d)
-	var btn_r = Button.new(); btn_r.text = "▶ Right"; pan_hbox.add_child(btn_r)
-	
-	btn_l.pressed.connect(func(): state["offset_x"] -= 10; update_preview.call())
-	btn_u.pressed.connect(func(): state["offset_y"] -= 10; update_preview.call())
-	btn_d.pressed.connect(func(): state["offset_y"] += 10; update_preview.call())
-	btn_r.pressed.connect(func(): state["offset_x"] += 10; update_preview.call())
 
 	var act_hbox = HBoxContainer.new()
 	act_hbox.alignment = HBoxContainer.ALIGNMENT_CENTER
-	act_hbox.add_theme_constant_override("separation", 16)
+	act_hbox.add_theme_constant_override("separation", 12)
 	main_vbox.add_child(act_hbox)
 
 	var btn_rot = Button.new()
 	btn_rot.text = "🔄 Rotate 90°"
-	btn_rot.custom_minimum_size = Vector2(120, 36)
+	btn_rot.custom_minimum_size = Vector2(110, 36)
 	act_hbox.add_child(btn_rot)
 	btn_rot.pressed.connect(func():
 		state["rotation_clicks"] = (state["rotation_clicks"] + 1) % 4
@@ -5564,12 +5888,38 @@ func _open_image_editor(source_img: Image, on_save_callback: Callable) -> void:
 	act_hbox.add_child(btn_reset)
 	btn_reset.pressed.connect(func():
 		state["zoom"] = 1.0
-		zoom_slider.value = 1.0
 		state["offset_x"] = 0.0
 		state["offset_y"] = 0.0
 		state["rotation_clicks"] = 0
 		update_preview.call()
 	)
+
+	# DO NOT show "Save Current as Original" when in Restoring Mode (per Section 6)
+	if person_uuid != "" and not is_restoring_mode:
+		var btn_save_as_orig_ed = Button.new()
+		btn_save_as_orig_ed.text = "⭐ Save Current as Original"
+		btn_save_as_orig_ed.custom_minimum_size = Vector2(170, 36)
+		act_hbox.add_child(btn_save_as_orig_ed)
+		btn_save_as_orig_ed.pressed.connect(func():
+			_show_photo_confirm_dialog(
+				"Save Current as Original",
+				"Replace the protected original photo with the current photo?\nYou will no longer be able to restore the previous original.",
+				"Replace Original",
+				func():
+					if db:
+						db.execute("UPDATE people SET original_profile_photo = profile_photo WHERE person_uuid = ?;", [person_uuid])
+						var check_res = db.execute("SELECT profile_photo, original_profile_photo FROM people WHERE person_uuid = ? LIMIT 1;", [person_uuid])
+						if check_res["success"] and check_res["data"].size() > 0:
+							var cur_b = _clean_str(check_res["data"][0].get("profile_photo", ""))
+							var orig_b = _clean_str(check_res["data"][0].get("original_profile_photo", ""))
+							print("[LIVE PHOTO TRACE] AFTER SAVE CURRENT AS ORIGINAL (EDITOR):")
+							print("   CURRENT:  len=", cur_b.length(), " sha256=", _get_b64_hash(cur_b))
+							print("   ORIGINAL: len=", orig_b.length(), " sha256=", _get_b64_hash(orig_b))
+							print("   CURRENT == ORIGINAL: ", (cur_b == orig_b))
+					_invalidate_photo_cache(person_uuid)
+					refresh_view()
+			)
+		)
 
 	var separator = HSeparator.new(); main_vbox.add_child(separator)
 	var action_hbox = HBoxContainer.new()
@@ -5581,7 +5931,7 @@ func _open_image_editor(source_img: Image, on_save_callback: Callable) -> void:
 	cancel_btn.add_theme_color_override("font_color", Color(0.12, 0.16, 0.24, 1.0))
 	cancel_btn.add_theme_color_override("font_hover_color", Color(0.12, 0.16, 0.24, 1.0))
 	cancel_btn.add_theme_color_override("font_pressed_color", Color(0.12, 0.16, 0.24, 1.0))
-	var save_btn = Button.new(); save_btn.text = "💾 Crop & Use Photo"; action_hbox.add_child(save_btn)
+	var save_btn = Button.new(); save_btn.text = "💾 Save Photo"; action_hbox.add_child(save_btn)
 
 	var cancel_st = StyleBoxFlat.new()
 	cancel_st.bg_color = Color(0.85, 0.88, 0.92, 1.0)
@@ -5606,39 +5956,39 @@ func _open_image_editor(source_img: Image, on_save_callback: Callable) -> void:
 		for r in range(state["rotation_clicks"]):
 			cropped_img.rotate_90(0)
 		
-		var base_w = cropped_img.get_width()
-		var base_h = cropped_img.get_height()
+		var base_w = maxf(1.0, float(cropped_img.get_width()))
+		var base_h = maxf(1.0, float(cropped_img.get_height()))
 		
 		var fit_scale = minf(296.0 / base_w, 296.0 / base_h)
 		var display_scale = fit_scale * state["zoom"]
 		
-		var display_w = maxf(10, base_w * display_scale)
-		var display_h = maxf(10, base_h * display_scale)
+		var display_w = base_w * display_scale
+		var display_h = base_h * display_scale
 		
-		var img_left = (148 - display_w/2) + state["offset_x"]
-		var img_top = (148 - display_h/2) + state["offset_y"]
+		var img_left = (148.0 - display_w / 2.0) + state["offset_x"]
+		var img_top = (148.0 - display_h / 2.0) + state["offset_y"]
 		
-		var crop_left_prev = 48.0
-		var crop_top_prev = 48.0
+		# 200px box on screen translates to crop_size source pixels
+		var crop_size = int(roundf(200.0 / display_scale))
+		crop_size = clampi(crop_size, 10, int(minf(base_w, base_h)))
 		
-		var img_crop_x = int((crop_left_prev - img_left) / display_scale)
-		var img_crop_y = int((crop_top_prev - img_top) / display_scale)
-		var img_crop_w = int(200.0 / display_scale)
-		var img_crop_h = int(200.0 / display_scale)
+		# Position of top-left corner of yellow box relative to image top-left
+		var crop_x = int(roundf((48.0 - img_left) / display_scale))
+		var crop_y = int(roundf((48.0 - img_top) / display_scale))
 		
-		img_crop_x = clampi(img_crop_x, 0, base_w - 1)
-		img_crop_y = clampi(img_crop_y, 0, base_h - 1)
-		img_crop_w = clampi(img_crop_w, 10, base_w - img_crop_x)
-		img_crop_h = clampi(img_crop_h, 10, base_h - img_crop_y)
+		# Clamp crop_x and crop_y so the 1:1 square stays fully inside image bounds
+		crop_x = clampi(crop_x, 0, int(base_w) - crop_size)
+		crop_y = clampi(crop_y, 0, int(base_h) - crop_size)
 		
-		var final_cropped = cropped_img.get_region(Rect2i(img_crop_x, img_crop_y, img_crop_w, img_crop_h))
+		# Extract perfect 1:1 square region
+		var final_cropped = cropped_img.get_region(Rect2i(crop_x, crop_y, crop_size, crop_size))
 		final_cropped.resize(256, 256, Image.INTERPOLATE_LANCZOS)
 		
 		var png_bytes = final_cropped.save_png_to_buffer()
-		var b64 = Marshalls.raw_to_base64(png_bytes)
-		var data_url = "data:image/png;base64," + b64
-		
-		on_save_callback.call(data_url)
+		if png_bytes.size() > 0:
+			var cropped_data_url = "data:image/png;base64," + Marshalls.raw_to_base64(png_bytes)
+			if on_save_callback.is_valid():
+				on_save_callback.call(cropped_data_url)
 		edit_dialog.queue_free()
 	)
 
