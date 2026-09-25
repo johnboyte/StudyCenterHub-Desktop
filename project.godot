@@ -31,3 +31,9 @@ window/stretch/aspect="expand"
 [rendering]
 
 rendering_device/driver.windows="d3d12"
+
+[native_extensions]
+
+paths=PackedStringArray("res://bin/mac_wkwebview.gdextension")
+
+

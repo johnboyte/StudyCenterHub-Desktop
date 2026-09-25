@@ -9,13 +9,23 @@ func _init():
 	var AppleSvcScript = load("res://src/domain/security/apple_wallet_service.gd")
 	var CommunicationsServiceScript = load("res://src/domain/communications/communications_service.gd")
 
-	var db = SQLiteDatabaseScript.new()
-	var person_id = 3 # John Boyte
-	var res = db.execute("SELECT * FROM people WHERE id = ? LIMIT 1;", [person_id])
-	assert(res["success"] and res["data"].size() > 0, "Person 3 must exist")
-	var p = res["data"][0].duplicate()
+	var db_path = "user://test_digital_pass_service_fixes.db"
+	var global_path = ProjectSettings.globalize_path(db_path)
+	if FileAccess.file_exists(global_path):
+		DirAccess.remove_absolute(global_path)
+
+	var db = SQLiteDatabaseScript.new(db_path)
+	db.execute("CREATE TABLE IF NOT EXISTS people (id INTEGER PRIMARY KEY AUTOINCREMENT, person_uuid TEXT, first_name TEXT, last_name TEXT, email TEXT, email_address TEXT, phone TEXT, status TEXT, qr_code_value TEXT);")
+	db.execute("CREATE TABLE IF NOT EXISTS participant_qr_credentials (id INTEGER PRIMARY KEY AUTOINCREMENT, credential_id TEXT NOT NULL UNIQUE, person_id INTEGER NOT NULL, token_hash TEXT NOT NULL UNIQUE, token_hint TEXT, status TEXT NOT NULL DEFAULT 'active', issued_at TEXT NOT NULL DEFAULT (datetime('now')));")
+	db.execute("CREATE TABLE IF NOT EXISTS communications_log (id INTEGER PRIMARY KEY AUTOINCREMENT, message_uuid TEXT, recipient_person_id INTEGER, recipient_name TEXT, recipient_contact TEXT, channel TEXT, message_body TEXT, status TEXT, status_detail TEXT, provider_sid TEXT, sent_by_user TEXT);")
+	
+	db.execute("INSERT INTO people (person_uuid, first_name, last_name, status, email, phone) VALUES ('usr_test_fix_uuid', 'Test', 'Member', 'active', 'test_pass_member@example.com', '864-555-0199');")
+	var q_id = db.execute("SELECT id FROM people ORDER BY id DESC LIMIT 1;")
+	var person_id = int(q_id["data"][0]["id"])
+	var p = db.execute("SELECT * FROM people WHERE id = ? LIMIT 1;", [person_id])["data"][0].duplicate()
 
 	var cred_svc = QRCredentialServiceScript.new(db)
+	cred_svc.issue_credential(person_id, "usr_test_fix_uuid")
 	var raw_token = cred_svc.get_active_raw_token(person_id)
 	assert(raw_token != "", "Active QR credential raw_token must exist")
 

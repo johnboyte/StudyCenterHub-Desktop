@@ -1,4 +1,4 @@
-extends MainLoop
+extends SceneTree
 
 ## Automated Test Suite for Phase 8: Final Membership Card Template & Digital Wallet Pass Subsystem
 
@@ -9,12 +9,27 @@ const AppleWalletService = preload("res://src/domain/security/apple_wallet_servi
 const GoogleWalletService = preload("res://src/domain/security/google_wallet_service.gd")
 const CommunicationsService = preload("res://src/domain/communications/communications_service.gd")
 
-func _process(_delta: float) -> bool:
+func _init() -> void:
 	print("\n==========================================================")
 	print("TESTING FINAL MEMBERSHIP CARD TEMPLATE & DIGITAL WALLETS")
 	print("==========================================================")
 
-	var db = SQLiteDatabaseScript.new()
+	_run_tests()
+
+func _run_tests() -> void:
+	await create_timer(0.05).timeout
+
+	var db_path = "user://test_phase8_membership_card_and_digital_wallet.db"
+	var global_path = ProjectSettings.globalize_path(db_path)
+	if FileAccess.file_exists(global_path):
+		DirAccess.remove_absolute(global_path)
+
+	var db = SQLiteDatabaseScript.new(db_path)
+	db.execute("CREATE TABLE IF NOT EXISTS people (id INTEGER PRIMARY KEY AUTOINCREMENT, person_uuid TEXT, first_name TEXT, last_name TEXT, email TEXT, email_address TEXT, phone TEXT, status TEXT, qr_code_value TEXT);")
+	db.execute("CREATE TABLE IF NOT EXISTS participant_qr_credentials (id INTEGER PRIMARY KEY AUTOINCREMENT, credential_id TEXT NOT NULL UNIQUE, person_id INTEGER NOT NULL, token_hash TEXT NOT NULL UNIQUE, token_hint TEXT, status TEXT NOT NULL DEFAULT 'active', issued_at TEXT NOT NULL DEFAULT (datetime('now')));")
+	db.execute("CREATE TABLE IF NOT EXISTS communications_log (id INTEGER PRIMARY KEY AUTOINCREMENT, message_uuid TEXT, recipient_person_id INTEGER, recipient_name TEXT, recipient_contact TEXT, channel TEXT, message_body TEXT, status TEXT, status_detail TEXT, provider_sid TEXT, sent_by_user TEXT);")
+	db.execute("CREATE TABLE IF NOT EXISTS event_outbox (id INTEGER PRIMARY KEY AUTOINCREMENT, event_uuid TEXT, event_type TEXT, aggregate_type TEXT, aggregate_id TEXT, payload_json TEXT, device_uuid TEXT, status TEXT);")
+	db.execute("INSERT INTO people (person_uuid, first_name, last_name, status, email, phone) VALUES ('550e8400-e29b-41d4-a716-446655440000', 'Benjamin', 'Baker', 'active', 'benjamin.baker@example.com', '864-555-0199');")
 
 	# 1. Assert Canonical Template File Exists & Dimensions are 1013 x 638
 	var template_path = "res://assets/cards/real_life_house_member_card_template_1013x638.png"
@@ -76,13 +91,15 @@ func _process(_delta: float) -> bool:
 	if p_res["success"] and p_res["data"].size() > 0:
 		target_id = int(p_res["data"][0].get("id"))
 
+	var cred_svc = QRCredentialService.new(db)
+	cred_svc.issue_credential(target_id, "550e8400-e29b-41d4-a716-446655440000")
+
 	var com_svc = CommunicationsService.new(db)
-	var email_res = await com_svc.sms_digital_member_pass(target_id, "Test Staff")
+	var email_res = await com_svc.email_digital_member_pass(target_id, "Test Staff")
 	assert(email_res.has("apple_pass") and email_res.has("google_pass"), "FAIL: Email pass dispatch missing wallet links")
 	print("[PASS 7] Email Digital Member Pass dispatched outbox event with Apple & Google Wallet links.")
 
 	# 8. Test Single Active Credential Revocation Integrity
-	var cred_svc = QRCredentialService.new(db)
 	var issue_res = cred_svc.issue_credential(target_id, "550e8400-e29b-41d4-a716-446655440000")
 	assert(issue_res.get("success", false), "FAIL: Credential issuance failed")
 	var raw_token = issue_res.get("raw_token", "")
@@ -104,4 +121,4 @@ func _process(_delta: float) -> bool:
 	print("ALL PHASE 8 MEMBERSHIP CARD & WALLET TESTS PASSED PERFECTLY!")
 	print("==========================================================\n")
 
-	return true
+	quit(0)

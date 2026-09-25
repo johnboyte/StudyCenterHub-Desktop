@@ -64,14 +64,18 @@ mkdir -p "$BUILD_APP/Contents/Resources"
 cp -f "$GODOT_BIN" "$TARGET_APP/Contents/MacOS/StudyCenterHub"
 chmod +x "$TARGET_APP/Contents/MacOS/StudyCenterHub"
 cp -f "$GODOT_BIN" "$BUILD_APP/Contents/MacOS/StudyCenterHub-Desktop-Production"
+cp -f "$GODOT_BIN" "$BUILD_APP/Contents/MacOS/StudyCenterHub"
 chmod +x "$BUILD_APP/Contents/MacOS/StudyCenterHub-Desktop-Production"
+chmod +x "$BUILD_APP/Contents/MacOS/StudyCenterHub"
 
 # Copy PCK resource package to both main app pack paths (Resources & MacOS)
 cp -f "$TARGET_PCK" "$TARGET_APP/Contents/Resources/StudyCenterHub.pck"
 cp -f "$TARGET_PCK" "$TARGET_APP/Contents/Resources/StudyCenterHub-Desktop-Production.pck"
 cp -f "$TARGET_PCK" "$TARGET_APP/Contents/MacOS/StudyCenterHub.pck"
 cp -f "$TARGET_PCK" "$BUILD_APP/Contents/Resources/StudyCenterHub-Desktop-Production.pck"
+cp -f "$TARGET_PCK" "$BUILD_APP/Contents/Resources/StudyCenterHub.pck"
 cp -f "$TARGET_PCK" "$BUILD_APP/Contents/MacOS/StudyCenterHub-Desktop-Production.pck"
+cp -f "$TARGET_PCK" "$BUILD_APP/Contents/MacOS/StudyCenterHub.pck"
 
 # Copy icon
 if [ -f "$PROJECT_DIR/icon.icns" ]; then

@@ -1,0 +1,7 @@
+[configuration]
+entry_symbol = "mac_wkwebview_library_init"
+compatibility_minimum = "4.1"
+
+[libraries]
+macos.debug = "res://bin/libmac_wkwebview.dylib"
+macos.release = "res://bin/libmac_wkwebview.dylib"

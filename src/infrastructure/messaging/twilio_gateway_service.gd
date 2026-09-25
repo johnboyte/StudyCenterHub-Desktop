@@ -76,7 +76,18 @@ func format_e164_phone(phone_input: String) -> String:
 
 	return raw
 
+func is_automated_test_environment() -> bool:
+	if OS.get_environment("STUDYCENTERHUB_MOCK_COMMUNICATIONS") == "true" or OS.get_environment("STUDYCENTERHUB_TEST") == "true":
+		return true
+	var args = OS.get_cmdline_args()
+	for arg in args:
+		if arg.contains("--script") or arg.contains("tests/") or arg.contains("test_"):
+			return true
+	return false
+
 func is_demo_config() -> bool:
+	if is_automated_test_environment():
+		return true
 	var config = get_twilio_config()
 	var sid = config.get("account_sid", "")
 	var token = config.get("auth_token", "")

@@ -29,6 +29,7 @@ var btn_nav_kiosk: Button
 @onready var btn_nav_schedules: Button = $SidebarPanel/SidebarMargin/SidebarVBox/NavScroll/NavVBox/BtnNavSchedules
 @onready var btn_nav_volunteers: Button = $SidebarPanel/SidebarMargin/SidebarVBox/NavScroll/NavVBox/BtnNavVolunteers
 @onready var btn_nav_pathways: Button = $SidebarPanel/SidebarMargin/SidebarVBox/NavScroll/NavVBox/BtnNavPathways
+@onready var btn_nav_playlists: Button = $SidebarPanel/SidebarMargin/SidebarVBox/NavScroll/NavVBox/BtnNavPlaylists
 @onready var btn_nav_administration: Button = $SidebarPanel/SidebarMargin/SidebarVBox/NavScroll/NavVBox/BtnNavAdministration
 @onready var btn_nav_reports: Button = $SidebarPanel/SidebarMargin/SidebarVBox/NavScroll/NavVBox/BtnNavReports
 @onready var btn_nav_settings: Button = $SidebarPanel/SidebarMargin/SidebarVBox/NavScroll/NavVBox/BtnNavSettings
@@ -55,10 +56,17 @@ const DEFAULT_SUBTITLES: Dictionary = {
 	"schedules": "Coordinate staffing, sessions, volunteers, and operating hours.",
 	"volunteers": "Manage volunteer availability, assignments, and service.",
 	"pathways": "Review participant progress, follow-up, and next steps.",
+	"playlists": "Build, organize, and maintain music and media playlists for Real Life House.",
 	"administration": "Manage users, permissions, integrations, and organization settings.",
 	"reports": "Review attendance, engagement, and ministry activity.",
 	"settings": "Customize your StudyCenter experience and preferences."
 }
+
+const PlaybackSessionServiceScript = preload("res://src/domain/playlists/playback_session_service.gd")
+const NowPlayingBarScript = preload("res://app/scenes/components/now_playing_bar.gd")
+
+var playback_svc: RefCounted
+var now_playing_bar: PanelContainer
 
 var _sync_timer: Timer
 var _is_syncing: bool = false
@@ -73,6 +81,7 @@ func _ready() -> void:
 	add_to_group("app_shell")
 
 	_init_database()
+	_init_playback_service()
 	_apply_pd008_theme_styles()
 	_populate_team_leaders()
 	_init_weather_client()
@@ -90,6 +99,81 @@ func _ready() -> void:
 	call_deferred("_prewarm_all_view_scenes")
 	call_deferred("_start_auto_sync")
 
+const MacWKWebViewPlayerScript = preload("res://src/infrastructure/native/mac_wkwebview_player.gd")
+
+var is_player_expanded: bool = false
+var persistent_playback_host: PanelContainer = null
+
+func _init_playback_service() -> void:
+	playback_svc = PlaybackSessionServiceScript.new()
+
+	persistent_playback_host = PanelContainer.new()
+	persistent_playback_host.name = "PersistentPlaybackHost"
+	persistent_playback_host.custom_minimum_size = Vector2(320, 180)
+	persistent_playback_host.anchors_preset = Control.PRESET_BOTTOM_RIGHT
+	persistent_playback_host.offset_left = -340.0
+	persistent_playback_host.offset_top = -250.0
+	persistent_playback_host.offset_right = -20.0
+	persistent_playback_host.offset_bottom = -70.0
+	persistent_playback_host.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	persistent_playback_host.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	
+	var host_st = StyleBoxFlat.new()
+	host_st.bg_color = Color(0.07, 0.09, 0.14, 1.0)
+	host_st.border_width_left = 2
+	host_st.border_width_top = 2
+	host_st.border_width_right = 2
+	host_st.border_width_bottom = 2
+	host_st.border_color = Color(0.20, 0.45, 0.75, 1.0)
+	host_st.corner_radius_top_left = 8
+	host_st.corner_radius_top_right = 8
+	host_st.corner_radius_bottom_left = 8
+	host_st.corner_radius_bottom_right = 8
+	persistent_playback_host.add_theme_stylebox_override("panel", host_st)
+	add_child(persistent_playback_host)
+
+	var native_player = MacWKWebViewPlayerScript.new()
+	native_player.name = "MacWKWebViewPlayer"
+	native_player.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	native_player.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	persistent_playback_host.add_child(native_player)
+
+	playback_svc.attach_native_player(native_player)
+	persistent_playback_host.move_to_front()
+
+	now_playing_bar = NowPlayingBarScript.new()
+	now_playing_bar.custom_minimum_size = Vector2(0, 64)
+	now_playing_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	now_playing_bar.anchors_preset = Control.PRESET_BOTTOM_WIDE
+	now_playing_bar.offset_left = 260.0
+	now_playing_bar.offset_top = -64.0
+	now_playing_bar.offset_right = 0.0
+	now_playing_bar.offset_bottom = 0.0
+	now_playing_bar.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	add_child(now_playing_bar)
+
+	now_playing_bar.setup_playback_service(playback_svc)
+	now_playing_bar.visibility_changed.connect(_adjust_content_area_offset)
+	_adjust_content_area_offset()
+
+func toggle_player_expansion() -> void:
+	if not persistent_playback_host: return
+	is_player_expanded = not is_player_expanded
+	if is_player_expanded:
+		persistent_playback_host.custom_minimum_size = Vector2(800, 450)
+		persistent_playback_host.offset_left = -820.0
+		persistent_playback_host.offset_top = -520.0
+		persistent_playback_host.offset_right = -20.0
+		persistent_playback_host.offset_bottom = -70.0
+	else:
+		persistent_playback_host.custom_minimum_size = Vector2(320, 180)
+		persistent_playback_host.offset_left = -340.0
+		persistent_playback_host.offset_top = -250.0
+		persistent_playback_host.offset_right = -20.0
+		persistent_playback_host.offset_bottom = -70.0
+
+
+
 var _prewarm_queue: Array = [
 	{"name": "people", "path": "res://app/scenes/directory_view.tscn"},
 	{"name": "communications", "path": "res://app/scenes/communications_view.tscn"},
@@ -99,6 +183,7 @@ var _prewarm_queue: Array = [
 	{"name": "reports", "path": "res://app/scenes/reports_view.tscn"},
 	{"name": "volunteers", "path": "res://app/scenes/volunteers_view.tscn"},
 	{"name": "pathways", "path": "res://app/scenes/pathways_view.tscn"},
+	{"name": "playlists", "path": "res://app/scenes/playlists_view.tscn"},
 	{"name": "settings", "path": "res://app/scenes/settings_view.tscn"}
 ]
 
@@ -196,6 +281,11 @@ func _adjust_content_area_offset() -> void:
 	if not is_inside_tree() or not top_header_bar or not content_area:
 		return
 	content_area.offset_top = top_header_bar.size.y
+	if now_playing_bar and now_playing_bar.visible:
+		content_area.offset_bottom = -now_playing_bar.size.y
+	else:
+		content_area.offset_bottom = 0.0
+
 
 func _init_database() -> void:
 	if not db:
@@ -556,6 +646,7 @@ func _connect_nav_signals() -> void:
 	if btn_nav_schedules: btn_nav_schedules.pressed.connect(func(): switch_view("schedules"))
 	if btn_nav_volunteers: btn_nav_volunteers.pressed.connect(func(): switch_view("volunteers"))
 	if btn_nav_pathways: btn_nav_pathways.pressed.connect(func(): switch_view("pathways"))
+	if btn_nav_playlists: btn_nav_playlists.pressed.connect(func(): switch_view("playlists"))
 	if btn_nav_administration: btn_nav_administration.pressed.connect(func(): switch_view("administration"))
 	if btn_nav_reports: btn_nav_reports.pressed.connect(func(): switch_view("reports"))
 	if btn_nav_settings: btn_nav_settings.pressed.connect(func(): switch_view("settings"))
@@ -669,6 +760,12 @@ func switch_view(view_name: String, params: Dictionary = {}) -> bool:
 			current_view_node = scene_res.instantiate()
 			if "db" in current_view_node:
 				current_view_node.db = db
+	elif view_name == "playlists":
+		var scene_res = _get_view_scene("playlists", "res://app/scenes/playlists_view.tscn")
+		if scene_res:
+			current_view_node = scene_res.instantiate()
+			if "db" in current_view_node:
+				current_view_node.db = db
 	elif view_name == "attendance":
 		var scene_res = _get_view_scene("attendance", "res://app/scenes/attendance_view.tscn")
 		if scene_res:
@@ -727,6 +824,7 @@ func _update_nav_button_styles() -> void:
 		"schedules": btn_nav_schedules,
 		"volunteers": btn_nav_volunteers,
 		"pathways": btn_nav_pathways,
+		"playlists": btn_nav_playlists,
 		"administration": btn_nav_administration,
 		"reports": btn_nav_reports,
 		"settings": btn_nav_settings

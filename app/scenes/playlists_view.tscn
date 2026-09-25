@@ -1,0 +1,182 @@
+[gd_scene load_steps=2 format=3 uid="uid://playlists_view_scene_001"]
+
+[ext_resource type="Script" path="res://app/scenes/playlists_view.gd" id="1_pl_script"]
+
+[node name="PlaylistsView" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+script = ExtResource("1_pl_script")
+
+[node name="MainMargin" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 16
+
+[node name="WorkspaceHBox" type="HBoxContainer" parent="MainMargin"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 16
+
+[node name="LibrarySidebarPanel" type="PanelContainer" parent="MainMargin/WorkspaceHBox"]
+custom_minimum_size = Vector2(260, 0)
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="SidebarMargin" type="MarginContainer" parent="MainMargin/WorkspaceHBox/LibrarySidebarPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 14
+theme_override_constants/margin_top = 14
+theme_override_constants/margin_right = 14
+theme_override_constants/margin_bottom = 14
+
+[node name="SidebarVBox" type="VBoxContainer" parent="MainMargin/WorkspaceHBox/LibrarySidebarPanel/SidebarMargin"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="SidebarHeaderHBox" type="HBoxContainer" parent="MainMargin/WorkspaceHBox/LibrarySidebarPanel/SidebarMargin/SidebarVBox"]
+layout_mode = 2
+
+[node name="SidebarTitle" type="Label" parent="MainMargin/WorkspaceHBox/LibrarySidebarPanel/SidebarMargin/SidebarVBox/SidebarHeaderHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.12, 0.16, 0.22, 1)
+theme_override_font_sizes/font_size = 18
+text = "🎵 Playlists Library"
+
+[node name="BtnNewPlaylist" type="Button" parent="MainMargin/WorkspaceHBox/LibrarySidebarPanel/SidebarMargin/SidebarVBox/SidebarHeaderHBox"]
+custom_minimum_size = Vector2(100, 36)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "+ Playlist"
+
+[node name="SearchLibraryInput" type="LineEdit" parent="MainMargin/WorkspaceHBox/LibrarySidebarPanel/SidebarMargin/SidebarVBox"]
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+placeholder_text = "🔍 Search library & items..."
+caret_blink = true
+
+[node name="PlaylistsScroll" type="ScrollContainer" parent="MainMargin/WorkspaceHBox/LibrarySidebarPanel/SidebarMargin/SidebarVBox"]
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="PlaylistsVBox" type="VBoxContainer" parent="MainMargin/WorkspaceHBox/LibrarySidebarPanel/SidebarMargin/SidebarVBox/PlaylistsScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="DetailWorkspacePanel" type="PanelContainer" parent="MainMargin/WorkspaceHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="DetailMargin" type="MarginContainer" parent="MainMargin/WorkspaceHBox/DetailWorkspacePanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 18
+theme_override_constants/margin_top = 18
+theme_override_constants/margin_right = 18
+theme_override_constants/margin_bottom = 18
+
+[node name="DetailVBox" type="VBoxContainer" parent="MainMargin/WorkspaceHBox/DetailWorkspacePanel/DetailMargin"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="HeaderVBox" type="VBoxContainer" parent="MainMargin/WorkspaceHBox/DetailWorkspacePanel/DetailMargin/DetailVBox"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="HeaderTopHBox" type="HBoxContainer" parent="MainMargin/WorkspaceHBox/DetailWorkspacePanel/DetailMargin/DetailVBox/HeaderVBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 12
+
+[node name="TitleVBox" type="VBoxContainer" parent="MainMargin/WorkspaceHBox/DetailWorkspacePanel/DetailMargin/DetailVBox/HeaderVBox/HeaderTopHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 2
+
+[node name="SelectedPlaylistTitle" type="Label" parent="MainMargin/WorkspaceHBox/DetailWorkspacePanel/DetailMargin/DetailVBox/HeaderVBox/HeaderTopHBox/TitleVBox"]
+custom_minimum_size = Vector2(1, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.12, 0.16, 0.22, 1)
+theme_override_font_sizes/font_size = 20
+text = "Select a Playlist"
+autowrap_mode = 3
+
+[node name="SelectedPlaylistMeta" type="Label" parent="MainMargin/WorkspaceHBox/DetailWorkspacePanel/DetailMargin/DetailVBox/HeaderVBox/HeaderTopHBox/TitleVBox"]
+custom_minimum_size = Vector2(1, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.45, 0.52, 0.62, 1)
+theme_override_font_sizes/font_size = 12
+text = "Select a playlist from the library panel to view and manage songs."
+autowrap_mode = 3
+
+[node name="PlaylistMgmtHBox" type="HBoxContainer" parent="MainMargin/WorkspaceHBox/DetailWorkspacePanel/DetailMargin/DetailVBox/HeaderVBox/HeaderTopHBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="BtnEditPlaylist" type="Button" parent="MainMargin/WorkspaceHBox/DetailWorkspacePanel/DetailMargin/DetailVBox/HeaderVBox/HeaderTopHBox/PlaylistMgmtHBox"]
+custom_minimum_size = Vector2(64, 34)
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "✏️ Edit"
+
+[node name="BtnDuplicatePlaylist" type="Button" parent="MainMargin/WorkspaceHBox/DetailWorkspacePanel/DetailMargin/DetailVBox/HeaderVBox/HeaderTopHBox/PlaylistMgmtHBox"]
+custom_minimum_size = Vector2(90, 34)
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "📋 Duplicate"
+
+[node name="BtnDeletePlaylist" type="Button" parent="MainMargin/WorkspaceHBox/DetailWorkspacePanel/DetailMargin/DetailVBox/HeaderVBox/HeaderTopHBox/PlaylistMgmtHBox"]
+custom_minimum_size = Vector2(74, 34)
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "🗑️ Delete"
+
+[node name="HeaderActionsHBox" type="HBoxContainer" parent="MainMargin/WorkspaceHBox/DetailWorkspacePanel/DetailMargin/DetailVBox/HeaderVBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="BtnAddMedia" type="Button" parent="MainMargin/WorkspaceHBox/DetailWorkspacePanel/DetailMargin/DetailVBox/HeaderVBox/HeaderActionsHBox"]
+custom_minimum_size = Vector2(140, 36)
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "+ Add Music / Media"
+
+[node name="BtnSearchYouTube" type="Button" parent="MainMargin/WorkspaceHBox/DetailWorkspacePanel/DetailMargin/DetailVBox/HeaderVBox/HeaderActionsHBox"]
+custom_minimum_size = Vector2(130, 36)
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "🔍 Search YouTube"
+
+[node name="ItemSearchInput" type="LineEdit" parent="MainMargin/WorkspaceHBox/DetailWorkspacePanel/DetailMargin/DetailVBox"]
+custom_minimum_size = Vector2(0, 34)
+layout_mode = 2
+placeholder_text = "🔍 Filter items in current playlist..."
+caret_blink = true
+
+[node name="ItemsScroll" type="ScrollContainer" parent="MainMargin/WorkspaceHBox/DetailWorkspacePanel/DetailMargin/DetailVBox"]
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="ItemsVBox" type="VBoxContainer" parent="MainMargin/WorkspaceHBox/DetailWorkspacePanel/DetailMargin/DetailVBox/ItemsScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 6

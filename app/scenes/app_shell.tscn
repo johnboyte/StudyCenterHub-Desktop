@@ -108,6 +108,13 @@ theme_override_font_sizes/font_size = 16
 text = "  📈   Pathways"
 alignment = 0
 
+[node name="BtnNavPlaylists" type="Button" parent="SidebarPanel/SidebarMargin/SidebarVBox/NavScroll/NavVBox"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "  🎵   Playlists"
+alignment = 0
+
 [node name="BtnNavAdministration" type="Button" parent="SidebarPanel/SidebarMargin/SidebarVBox/NavScroll/NavVBox"]
 custom_minimum_size = Vector2(0, 44)
 layout_mode = 2

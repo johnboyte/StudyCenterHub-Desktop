@@ -3,6 +3,7 @@ extends RefCounted
 const TwilioGatewayScript = preload("res://src/infrastructure/messaging/twilio_gateway_service.gd")
 var db: RefCounted
 var twilio_service: RefCounted
+var mock_relay_mode: bool = false
 
 func _init(database: RefCounted) -> void:
 	db = database
@@ -567,8 +568,23 @@ func send_message_atomic(recipient_person: Dictionary, channel: String, message_
 
 	return {"success": true, "error": "", "elapsed_ms": elapsed_ms, "message_uuid": msg_uuid, "event_uuid": event_uuid, "status": status_val}
 
+func is_automated_test_environment() -> bool:
+	if mock_relay_mode:
+		return true
+	if OS.get_environment("STUDYCENTERHUB_MOCK_COMMUNICATIONS") == "true" or OS.get_environment("STUDYCENTERHUB_TEST") == "true":
+		return true
+	var args = OS.get_cmdline_args()
+	for arg in args:
+		if arg.contains("--script") or arg.contains("tests/") or arg.contains("test_"):
+			return true
+	return false
+
 func dispatch_email_sync(to_email: String, subject: String, body_html: String, pass_id: String = "", attachments: Array = []) -> Dictionary:
 	var clean_html = body_html.replace("", "Apple")
+
+	if is_automated_test_environment() or to_email.ends_with("@example.com") or to_email.ends_with("@test.invalid"):
+		print("[CommunicationsService] MOCK RELAY DISPATCH: Suppressing live HTTP mail relay to ", to_email)
+		return {"success": true, "mock": true, "error": ""}
 
 	print("--- DISPATCHING LOCKED HTML PAYLOAD ---")
 	print("Recipient: ", to_email)

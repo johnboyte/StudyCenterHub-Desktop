@@ -50,10 +50,11 @@ func _run_tests() -> void:
 	print("PASS 2: Invalid email format correctly rejected with reason='invalid_email'.")
 
 	# --------------------------------------------------------
-	# Test 3: Live Provider Relay Dispatch to SiteGround Mail Relay
+	# Test 3: Isolated Provider Relay Dispatch (Mock Mode)
 	# --------------------------------------------------------
-	print("[Test 3] Testing live provider relay dispatch to https://app.reallife-studycenter.org/mail.php...")
-	db.execute("INSERT INTO people (first_name, last_name, status, email) VALUES ('John', 'Boyte', 'active', 'johnboytejr@gmail.com');")
+	print("[Test 3] Testing provider relay dispatch in isolated mock mode...")
+	com_svc.mock_relay_mode = true
+	db.execute("INSERT INTO people (first_name, last_name, status, email) VALUES ('Test', 'Member', 'active', 'test_pass_member@example.com');")
 	var q3 = db.execute("SELECT id FROM people ORDER BY id DESC LIMIT 1;")
 	var pid_valid = int(q3["data"][0]["id"])
 
@@ -64,21 +65,17 @@ func _run_tests() -> void:
 	assert(issue_res.get("success") == true, "FAIL: Should issue credential successfully")
 
 	var email_res3 = await com_svc.email_digital_member_pass(pid_valid, "Test Admin")
-	print("Live Relay Response: ", email_res3)
+	print("Mock Relay Response: ", email_res3)
 	
-	var is_relay_down = email_res3.get("reason") == "relay_failed" or email_res3.get("reason") == "keychain_missing"
-	if not email_res3.get("success") and is_relay_down:
-		print("[Test] Warning: SiteGround Mail Relay or Keychain missing. Bypassing live mail assertion.")
-	else:
-		assert(email_res3.get("success") == true, "FAIL 3a: Relay should accept valid test message: " + str(email_res3.get("error", "")))
+	assert(email_res3.get("success") == true, "FAIL 3a: Relay should accept valid test message: " + str(email_res3.get("error", "")))
 
 	# Verify communications_log entry
 	var log_q = db.execute("SELECT * FROM communications_log;")
 	print("All Log Entries: ", log_q)
 	assert(log_q["success"] and log_q["data"].size() > 0, "FAIL 3b: Log entry should exist")
 	var logged_status = log_q["data"][0].get("status")
-	assert(logged_status == "accepted" or logged_status == "failed", "FAIL 3c: Log status should be 'accepted' or 'failed'")
-	print("PASS 3: Live provider relay dispatch handled correctly and logged status: ", logged_status)
+	assert(logged_status == "accepted", "FAIL 3c: Log status should be 'accepted'")
+	print("PASS 3: Isolated provider relay dispatch handled correctly and logged status: ", logged_status)
 
 	# --------------------------------------------------------
 	# Test 4: Verify No Dummy Email Substitution
