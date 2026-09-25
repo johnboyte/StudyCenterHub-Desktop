@@ -77,13 +77,18 @@ func _generate_uuid(prefix: String) -> String:
 # PLAYLIST MANAGEMENT
 # ==============================================================================
 
-func create_playlist(name: String, description: String = "") -> Dictionary:
+func create_playlist(name: String, description: String = "", provider_type: String = "general") -> Dictionary:
 	if not db:
 		return {"success": false, "error": "Database reference missing."}
 	
 	var clean_name = name.strip_edges()
 	if clean_name.is_empty():
 		return {"success": false, "error": "Playlist name cannot be empty."}
+
+	var valid_providers = ["general", "youtube", "spotify", "apple_music"]
+	var p_type = provider_type.to_lower().strip_edges()
+	if not p_type in valid_providers:
+		p_type = "general"
 
 	# Get max sort_order
 	var max_res = db.execute("SELECT MAX(sort_order) as max_ord FROM playlists;")
@@ -93,8 +98,8 @@ func create_playlist(name: String, description: String = "") -> Dictionary:
 
 	var new_id = _generate_uuid("pl")
 	var res = db.execute(
-		"INSERT INTO playlists (id, name, description, sort_order, item_count, created_at, updated_at) VALUES (?, ?, ?, ?, 0, datetime('now'), datetime('now'));",
-		[new_id, clean_name, description.strip_edges(), next_ord]
+		"INSERT INTO playlists (id, name, description, provider_type, sort_order, item_count, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 0, datetime('now'), datetime('now'));",
+		[new_id, clean_name, description.strip_edges(), p_type, next_ord]
 	)
 	if not res["success"]:
 		return {"success": false, "error": res.get("error", "Insert failed.")}
@@ -105,6 +110,7 @@ func create_playlist(name: String, description: String = "") -> Dictionary:
 			"id": new_id,
 			"name": clean_name,
 			"description": description.strip_edges(),
+			"provider_type": p_type,
 			"sort_order": next_ord,
 			"item_count": 0
 		}
@@ -247,6 +253,147 @@ func _refresh_item_counts() -> void:
 			SELECT COUNT(*) FROM playlist_items WHERE playlist_items.playlist_id = playlists.id
 		);
 	""")
+
+# ==============================================================================
+# PLAYLIST PROVIDER LINKS MANAGEMENT
+# ==============================================================================
+
+func get_playlist_provider_link(playlist_id: String, provider: String = "youtube") -> Dictionary:
+	if not db or playlist_id.is_empty():
+		return {}
+	var res = db.execute("SELECT * FROM playlist_provider_links WHERE playlist_id = ? AND provider = ? LIMIT 1;", [playlist_id, provider])
+	if res["success"] and res["data"].size() > 0:
+		return res["data"][0]
+	return {}
+
+func save_playlist_provider_link(
+	playlist_id: String,
+	provider: String,
+	external_playlist_id: String,
+	external_playlist_url: String,
+	sync_status: String = "synced",
+	last_sync_error: String = ""
+) -> bool:
+	if not db or playlist_id.is_empty():
+		return false
+	var existing = get_playlist_provider_link(playlist_id, provider)
+	if existing.is_empty():
+		var new_id = _generate_uuid("ppl")
+		var res = db.execute(
+			"""INSERT INTO playlist_provider_links
+			(id, playlist_id, provider, external_playlist_id, external_playlist_url, sync_enabled, sync_status, last_synced_at, last_sync_error, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, 1, ?, datetime('now'), ?, datetime('now'), datetime('now'));""",
+			[new_id, playlist_id, provider, external_playlist_id, external_playlist_url, sync_status, last_sync_error]
+		)
+		return res["success"]
+	else:
+		var link_id = str(existing.get("id", ""))
+		var res = db.execute(
+			"""UPDATE playlist_provider_links
+			SET external_playlist_id = ?, external_playlist_url = ?, sync_status = ?, last_synced_at = datetime('now'), last_sync_error = ?, updated_at = datetime('now')
+			WHERE id = ?;""",
+			[external_playlist_id, external_playlist_url, sync_status, last_sync_error, link_id]
+		)
+		return res["success"]
+
+func update_playlist_sync_status(playlist_id: String, provider: String, sync_status: String, last_error: String = "") -> bool:
+	if not db or playlist_id.is_empty():
+		return false
+	var link = get_playlist_provider_link(playlist_id, provider)
+	if link.is_empty():
+		return false
+	var res = db.execute(
+		"UPDATE playlist_provider_links SET sync_status = ?, last_sync_error = ?, updated_at = datetime('now') WHERE id = ?;",
+		[sync_status, last_error, str(link.get("id", ""))]
+	)
+	return res["success"]
+
+func delete_playlist_provider_link(playlist_id: String, provider: String = "youtube") -> bool:
+	if not db or playlist_id.is_empty():
+		return false
+	var res = db.execute("DELETE FROM playlist_provider_links WHERE playlist_id = ? AND provider = ?;", [playlist_id, provider])
+	return res["success"]
+
+func get_item_provider_link(item_id: String, provider: String = "youtube") -> Dictionary:
+	if not db or item_id.is_empty():
+		return {}
+	var res = db.execute("SELECT * FROM playlist_item_provider_links WHERE playlist_item_id = ? AND provider = ? LIMIT 1;", [item_id, provider])
+	if res["success"] and res["data"].size() > 0:
+		return res["data"][0]
+	return {}
+
+func save_item_provider_link(
+	item_id: String,
+	provider: String,
+	external_item_id: String,
+	external_media_id: String,
+	sync_status: String = "synced",
+	last_sync_error: String = ""
+) -> bool:
+	if not db or item_id.is_empty():
+		return false
+	var existing = get_item_provider_link(item_id, provider)
+	if existing.is_empty():
+		var new_id = _generate_uuid("pipl")
+		var res = db.execute(
+			"""INSERT INTO playlist_item_provider_links
+			(id, playlist_item_id, provider, external_item_id, external_media_id, sync_status, last_synced_at, last_sync_error, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?, datetime('now'), datetime('now'));""",
+			[new_id, item_id, provider, external_item_id, external_media_id, sync_status, last_sync_error]
+		)
+		return res["success"]
+	else:
+		var link_id = str(existing.get("id", ""))
+		var res = db.execute(
+			"""UPDATE playlist_item_provider_links
+			SET external_item_id = ?, external_media_id = ?, sync_status = ?, last_synced_at = datetime('now'), last_sync_error = ?, updated_at = datetime('now')
+			WHERE id = ?;""",
+			[external_item_id, external_media_id, sync_status, last_sync_error, link_id]
+		)
+		return res["success"]
+
+func delete_item_provider_link(item_id: String, provider: String = "youtube") -> bool:
+	if not db or item_id.is_empty():
+		return false
+	var res = db.execute("DELETE FROM playlist_item_provider_links WHERE playlist_item_id = ? AND provider = ?;", [item_id, provider])
+	return res["success"]
+
+func convert_playlist_provider(playlist_id: String, target_provider: String) -> Dictionary:
+	if not db or playlist_id.is_empty():
+		return {"success": false, "error": "Invalid playlist ID"}
+
+	var target = target_provider.to_lower().strip_edges()
+	var valid_providers = ["general", "youtube", "spotify", "apple_music"]
+	if not target in valid_providers:
+		return {"success": false, "error": "Unsupported provider type: " + target_provider}
+
+	var items = get_playlist_items(playlist_id)
+	if target == "youtube":
+		var incompatible = []
+		for item in items:
+			var url = str(item.get("url", ""))
+			var vid = extract_youtube_video_id(url)
+			if vid.is_empty():
+				incompatible.append({
+					"id": str(item.get("id", "")),
+					"title": str(item.get("title", "")),
+					"url": url
+				})
+		if incompatible.size() > 0:
+			return {
+				"success": false,
+				"error": "Cannot convert to YouTube playlist. Incompatible items found.",
+				"incompatible_items": incompatible
+			}
+
+	var res = db.execute("UPDATE playlists SET provider_type = ?, updated_at = datetime('now') WHERE id = ?;", [target, playlist_id])
+	if not res["success"]:
+		return {"success": false, "error": "Failed to update playlist provider."}
+
+	return {
+		"success": true,
+		"playlist": get_playlist_by_id(playlist_id)
+	}
 
 # ==============================================================================
 # PLAYLIST ITEMS MANAGEMENT

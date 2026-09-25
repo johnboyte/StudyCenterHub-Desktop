@@ -25,14 +25,14 @@ theme_override_constants/margin_top = 16
 theme_override_constants/margin_right = 16
 theme_override_constants/margin_bottom = 16
 
-[node name="WorkspaceHBox" type="HBoxContainer" parent="MainMargin"]
+[node name="WorkspaceHBox" type="HSplitContainer" parent="MainMargin"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
-theme_override_constants/separation = 16
+split_offset = 320
 
 [node name="LibrarySidebarPanel" type="PanelContainer" parent="MainMargin/WorkspaceHBox"]
-custom_minimum_size = Vector2(260, 0)
+custom_minimum_size = Vector2(280, 0)
 layout_mode = 2
 size_flags_vertical = 3
 

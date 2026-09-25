@@ -64,8 +64,12 @@ const DEFAULT_SUBTITLES: Dictionary = {
 
 const PlaybackSessionServiceScript = preload("res://src/domain/playlists/playback_session_service.gd")
 const NowPlayingBarScript = preload("res://app/scenes/components/now_playing_bar.gd")
+const YouTubeOAuthServiceScript = preload("res://src/domain/playlists/youtube_oauth_service.gd")
+const YouTubePlaylistSyncServiceScript = preload("res://src/domain/playlists/youtube_playlist_sync_service.gd")
 
 var playback_svc: RefCounted
+var oauth_svc: Node
+var youtube_sync_svc: Node
 var now_playing_bar: PanelContainer
 
 var _sync_timer: Timer
@@ -82,6 +86,7 @@ func _ready() -> void:
 
 	_init_database()
 	_init_playback_service()
+	_init_youtube_services()
 	_apply_pd008_theme_styles()
 	_populate_team_leaders()
 	_init_weather_client()
@@ -155,6 +160,14 @@ func _init_playback_service() -> void:
 	now_playing_bar.setup_playback_service(playback_svc)
 	now_playing_bar.visibility_changed.connect(_adjust_content_area_offset)
 	_adjust_content_area_offset()
+
+func _init_youtube_services() -> void:
+	if db and not oauth_svc:
+		oauth_svc = YouTubeOAuthServiceScript.new(db)
+		add_child(oauth_svc)
+
+func get_oauth_service() -> Node:
+	return oauth_svc
 
 func toggle_player_expansion() -> void:
 	if not persistent_playback_host: return
