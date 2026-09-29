@@ -28,6 +28,7 @@ func run_all_tests() -> void:
 	_assert(scene_res != null, "DirectoryView scene file loaded successfully.")
 
 	var dir_view = scene_res.instantiate() as DirectoryViewScript
+	dir_view.db = db
 	dir_view.read_service = read_service
 
 	var tree = Engine.get_main_loop() as SceneTree
@@ -43,7 +44,7 @@ func run_all_tests() -> void:
 	_assert(no_sel_lbl != null and no_sel_lbl.visible and sel_vbox != null and not sel_vbox.visible, "Unselected state shows empty workspace messaging.")
 
 	# Assertion 2: Selecting person updates workspace header
-	dir_view.select_person_by_index(0)
+	dir_view.select_person_by_uuid("usr_001")
 	var name_lbl = dir_view.get_node_or_null("MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/WorkspaceHeader/HeaderMargin/HeaderVBox/TitleHBox/NameLabel") as Label
 	var id_lbl = dir_view.get_node_or_null("MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/WorkspaceHeader/HeaderMargin/HeaderVBox/MetaHBox/HumanIdLabel") as Label
 	_assert(name_lbl != null and name_lbl.text == "Hannah Abbott" and id_lbl != null and id_lbl.text == "Human ID: P-20260720-8CC6", "Workspace header displays selected person full name and Human ID.")

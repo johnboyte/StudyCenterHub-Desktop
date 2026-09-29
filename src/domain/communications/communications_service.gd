@@ -456,9 +456,10 @@ func send_message_atomic(recipient_person: Dictionary, channel: String, message_
 	var msg_uuid = "msg_" + _generate_uuid()
 	var event_uuid = "evt_" + _generate_uuid()
 
-	var person_id = int(recipient_person.get("person_id", 0))
-	if person_id == 0:
-		person_id = int(recipient_person.get("id", 0))
+	var pid_val = recipient_person.get("person_id")
+	if pid_val == null or int(pid_val) == 0:
+		pid_val = recipient_person.get("id")
+	var person_id = int(pid_val) if pid_val != null else 0
 
 	var person_uuid = str(recipient_person.get("person_uuid", ""))
 	var first_name = str(recipient_person.get("first_name", ""))
@@ -545,26 +546,43 @@ func send_message_atomic(recipient_person: Dictionary, channel: String, message_
 			root_node = (main_loop as SceneTree).root
 		elif main_loop is Node:
 			root_node = main_loop as Node
-		
-		var media_url_to_send = ""
+
 		if attachment_path != "" and FileAccess.file_exists(attachment_path):
 			var proc_path = optimize_image_for_mms(convert_heic_to_jpeg_if_needed(attachment_path))
-			if twilio_service and twilio_service.is_demo_config():
-				media_url_to_send = "https://app.reallife-studycenter.org/upload_media.php?media_id=sim_mms_" + _generate_uuid().replace("-", "").left(12) + "&token=sim_token"
-			else:
-				media_url_to_send = "https://app.reallife-studycenter.org/upload_media.php?media_id=mms_" + _generate_uuid().replace("-", "").left(12) + "&token=mms_token"
+			if root_node and twilio_service:
+				twilio_service.upload_mms_media_async(root_node, proc_path, func(upload_res: Dictionary):
+					if not upload_res.get("success", false):
+						var upload_err = upload_res.get("error", "Failed to upload image to gateway.")
+						db.execute("UPDATE communications_log SET status = 'failed', delivery_status = 'failed', status_detail = ? WHERE message_uuid = ?;", [upload_err, msg_uuid])
+						print("[SMS-DISPATCH] Aborted MMS dispatch: Media upload failed for ", contact_val, " - ", upload_err)
+						return
 
-		if root_node and twilio_service:
-			twilio_service.send_twilio_sms_async(root_node, contact_val, message_body, func(sms_res: Dictionary):
-				if sms_res.get("success", false):
-					var sid = sms_res.get("twilio_msg_sid", "")
-					db.execute("UPDATE communications_log SET status = 'sent', provider_sid = ? WHERE message_uuid = ?;", [sid, msg_uuid])
-					print("[SMS-DISPATCH] Success: Message sent to ", contact_val, " (SID: ", sid, ")")
-				else:
-					var err = sms_res.get("error", "Unknown error")
-					db.execute("UPDATE communications_log SET status = 'failed', status_detail = ? WHERE message_uuid = ?;", [err, msg_uuid])
-					print("[SMS-DISPATCH] Failure: Failed to send SMS to ", contact_val, ": ", err)
-			, media_url_to_send)
+					var verified_media_url = upload_res.get("public_url", "")
+					twilio_service.send_twilio_sms_async(root_node, contact_val, message_body, func(sms_res: Dictionary):
+						if sms_res.get("success", false):
+							var sid = sms_res.get("twilio_msg_sid", "")
+							var status_msg = "Accepted by Twilio gateway (Provider SID: " + sid + ")"
+							db.execute("UPDATE communications_log SET status = 'sent', delivery_status = 'submitted', status_detail = ?, provider_sid = ? WHERE message_uuid = ?;", [status_msg, sid, msg_uuid])
+							print("[SMS-DISPATCH] Submitted to Twilio: Message accepted for ", contact_val, " (SID: ", sid, ")")
+						else:
+							var err = sms_res.get("error", "Unknown error")
+							db.execute("UPDATE communications_log SET status = 'failed', delivery_status = 'failed', status_detail = ? WHERE message_uuid = ?;", [err, msg_uuid])
+							print("[SMS-DISPATCH] Failure: Twilio dispatch failed for ", contact_val, ": ", err)
+					, verified_media_url)
+				)
+		else:
+			if root_node and twilio_service:
+				twilio_service.send_twilio_sms_async(root_node, contact_val, message_body, func(sms_res: Dictionary):
+					if sms_res.get("success", false):
+						var sid = sms_res.get("twilio_msg_sid", "")
+						var status_msg = "Accepted by Twilio gateway (Provider SID: " + sid + ")"
+						db.execute("UPDATE communications_log SET status = 'sent', delivery_status = 'submitted', status_detail = ?, provider_sid = ? WHERE message_uuid = ?;", [status_msg, sid, msg_uuid])
+						print("[SMS-DISPATCH] Submitted to Twilio: Message accepted for ", contact_val, " (SID: ", sid, ")")
+					else:
+						var err = sms_res.get("error", "Unknown error")
+						db.execute("UPDATE communications_log SET status = 'failed', delivery_status = 'failed', status_detail = ? WHERE message_uuid = ?;", [err, msg_uuid])
+						print("[SMS-DISPATCH] Failure: Twilio dispatch failed for ", contact_val, ": ", err)
+				)
 
 	return {"success": true, "error": "", "elapsed_ms": elapsed_ms, "message_uuid": msg_uuid, "event_uuid": event_uuid, "status": status_val}
 
@@ -1297,10 +1315,95 @@ func delete_voicemail(vm_uuid: String) -> bool:
 
 	return res["success"]
 
+func delete_sms_message_atomic(item_identifier: String) -> bool:
+	if not db or item_identifier.strip_edges() == "": return false
+	var target = item_identifier.strip_edges()
+	
+	var sid = ""
+	var in_q = db.execute("SELECT id, message_sid, from_phone_e164 FROM inbound_sms_log WHERE message_sid = ? OR ('sms_' || id) = ? OR id = ? LIMIT 1;", [target, target, target])
+	if in_q["success"] and in_q["data"].size() > 0:
+		sid = str(in_q["data"][0].get("message_sid", ""))
+
+	var out_sid = ""
+	var out_q = db.execute("SELECT id, message_uuid, recipient_contact FROM communications_log WHERE message_uuid = ? OR ('msg_' || id) = ? OR id = ? LIMIT 1;", [target, target, target])
+	if out_q["success"] and out_q["data"].size() > 0:
+		out_sid = str(out_q["data"][0].get("message_uuid", ""))
+
+	db.execute("DELETE FROM inbound_sms_log WHERE message_sid = ? OR ('sms_' || id) = ? OR id = ?;", [target, target, target])
+	db.execute("DELETE FROM communications_log WHERE message_uuid = ? OR ('msg_' || id) = ? OR id = ?;", [target, target, target])
+	
+	if sid != "":
+		db.execute("DELETE FROM inbound_event_queue WHERE provider_event_id = ? OR payload_json LIKE ?;", [sid, "%" + sid + "%"])
+		db.execute("DELETE FROM sms_relay_sessions WHERE source_message_sid = ?;", [sid])
+	if out_sid != "":
+		db.execute("DELETE FROM inbound_event_queue WHERE provider_event_id = ? OR payload_json LIKE ?;", [out_sid, "%" + out_sid + "%"])
+
+	return true
+
+func delete_sms_conversation_thread_atomic(phone_str: String) -> bool:
+	if not db or phone_str.strip_edges() == "": return false
+	var target_digits = normalize_phone_digits(phone_str)
+	if target_digits == "": return false
+	
+	var sids = []
+	var in_q = db.execute("SELECT id, message_sid, from_phone_e164 FROM inbound_sms_log;")
+	if in_q["success"] and in_q["data"].size() > 0:
+		for row in in_q["data"]:
+			var p_digits = normalize_phone_digits(str(row.get("from_phone_e164", "")))
+			if p_digits == target_digits:
+				var sid = str(row.get("message_sid", ""))
+				if sid != "": sids.append(sid)
+				var row_id = str(row.get("id", ""))
+				if row_id != "": sids.append("sms_" + row_id)
+
+	var out_q = db.execute("SELECT id, message_uuid, recipient_contact FROM communications_log WHERE UPPER(channel) LIKE '%SMS%';")
+	if out_q["success"] and out_q["data"].size() > 0:
+		for row in out_q["data"]:
+			var p_digits = normalize_phone_digits(str(row.get("recipient_contact", "")))
+			if p_digits == target_digits:
+				var m_uuid = str(row.get("message_uuid", ""))
+				if m_uuid != "": sids.append(m_uuid)
+
+	var all_in = db.execute("SELECT id, from_phone_e164 FROM inbound_sms_log;")
+	if all_in["success"] and all_in["data"].size() > 0:
+		for row in all_in["data"]:
+			var p_digits = normalize_phone_digits(str(row.get("from_phone_e164", "")))
+			if p_digits == target_digits:
+				db.execute("DELETE FROM inbound_sms_log WHERE id = ?;", [row.get("id")])
+
+	var all_out = db.execute("SELECT id, recipient_contact FROM communications_log WHERE UPPER(channel) LIKE '%SMS%';")
+	if all_out["success"] and all_out["data"].size() > 0:
+		for row in all_out["data"]:
+			var p_digits = normalize_phone_digits(str(row.get("recipient_contact", "")))
+			if p_digits == target_digits:
+				db.execute("DELETE FROM communications_log WHERE id = ?;", [row.get("id")])
+
+	for sid in sids:
+		db.execute("DELETE FROM inbound_event_queue WHERE provider_event_id = ? OR payload_json LIKE ?;", [sid, "%" + sid + "%"])
+	db.execute("DELETE FROM inbound_event_queue WHERE payload_json LIKE ? OR payload_json LIKE ?;", ["%" + target_digits + "%", "%" + phone_str + "%"])
+
+	var all_relay = db.execute("SELECT id, constituent_phone_e164, relay_phone_e164, source_message_sid FROM sms_relay_sessions;")
+	if all_relay["success"] and all_relay["data"].size() > 0:
+		for row in all_relay["data"]:
+			var c_digits = normalize_phone_digits(str(row.get("constituent_phone_e164", "")))
+			var r_digits = normalize_phone_digits(str(row.get("relay_phone_e164", "")))
+			var src_sid = str(row.get("source_message_sid", ""))
+			if c_digits == target_digits or r_digits == target_digits or src_sid in sids:
+				db.execute("DELETE FROM sms_relay_sessions WHERE id = ?;", [row.get("id")])
+
+	return true
+
 func delete_sms_item(item_uuid: String) -> bool:
 	if not db or item_uuid == "": return false
-	var res = db.execute("DELETE FROM inbound_sms_log WHERE message_sid = ? OR ('sms_' || id) = ?;", [item_uuid, item_uuid])
-	return res["success"]
+	var target_phone = item_uuid
+	var phone_res = db.execute("SELECT from_phone_e164 FROM inbound_sms_log WHERE message_sid = ? OR ('sms_' || id) = ? LIMIT 1;", [item_uuid, item_uuid])
+	if phone_res["success"] and phone_res["data"].size() > 0:
+		target_phone = str(phone_res["data"][0].get("from_phone_e164", ""))
+	
+	if target_phone != "":
+		return delete_sms_conversation_thread_atomic(target_phone)
+	else:
+		return delete_sms_message_atomic(item_uuid)
 
 func get_sms_conversation_thread(phone_str: String) -> Array:
 	if not db or phone_str == "": return []

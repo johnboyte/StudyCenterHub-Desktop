@@ -2610,9 +2610,10 @@ func _refresh_voicemail_inbox() -> void:
 		btn_del.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
 		var _del_uuid = vm_uuid
 		var _del_type = item_type
+		var _del_phone = caller_num
 		btn_del.pressed.connect(func():
 			if _del_type == "sms":
-				_confirm_delete_sms_item(_del_uuid)
+				_confirm_delete_sms_item(_del_uuid, _del_phone, true)
 			else:
 				_confirm_delete_voicemail(_del_uuid)
 		)
@@ -2725,7 +2726,7 @@ func _scroll_to_bottom(scroll: ScrollContainer) -> void:
 		if v_bar:
 			scroll.scroll_vertical = int(v_bar.max_value)
 
-func _confirm_delete_sms_item(uuid: String) -> void:
+func _confirm_delete_sms_item(uuid: String, caller_phone: String = "", is_entire_thread: bool = true) -> void:
 	var backdrop = ColorRect.new()
 	backdrop.color = Color(0.08, 0.12, 0.18, 0.6)
 	backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -2736,7 +2737,7 @@ func _confirm_delete_sms_item(uuid: String) -> void:
 	backdrop.add_child(center)
 
 	var card = PanelContainer.new()
-	card.custom_minimum_size = Vector2(420, 180)
+	card.custom_minimum_size = Vector2(440, 190)
 	var card_st = StyleBoxFlat.new()
 	card_st.bg_color = Color(1.0, 1.0, 1.0, 1.0)
 	card_st.corner_radius_top_left = 10; card_st.corner_radius_top_right = 10; card_st.corner_radius_bottom_left = 10; card_st.corner_radius_bottom_right = 10
@@ -2749,13 +2750,17 @@ func _confirm_delete_sms_item(uuid: String) -> void:
 	card.add_child(vbox)
 
 	var title = Label.new()
-	title.text = "🗑️ Delete SMS Item"
+	title.text = "🗑️ Delete SMS Conversation" if is_entire_thread else "🗑️ Delete Text Message"
 	title.add_theme_font_size_override("font_size", 16)
 	title.add_theme_color_override("font_color", Color(0.85, 0.25, 0.25, 1.0))
 	vbox.add_child(title)
 
+	var display_target = caller_phone if caller_phone != "" else uuid
 	var msg = Label.new()
-	msg.text = "Are you sure you want to delete this SMS item/conversation from the Response Center?"
+	if is_entire_thread:
+		msg.text = "Delete this conversation and all of its messages for " + display_target + "? This will permanently remove all inbound and outbound SMS records for this caller."
+	else:
+		msg.text = "Are you sure you want to delete this specific text message?"
 	msg.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	msg.add_theme_font_size_override("font_size", 13)
 	msg.add_theme_color_override("font_color", Color(0.20, 0.25, 0.32, 1.0))
@@ -2779,7 +2784,11 @@ func _confirm_delete_sms_item(uuid: String) -> void:
 	btn_del.add_theme_stylebox_override("normal", del_st)
 	btn_del.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
 	btn_del.pressed.connect(func():
-		com_service.delete_sms_item(uuid)
+		if is_entire_thread:
+			var p_target = caller_phone if caller_phone != "" else uuid
+			com_service.delete_sms_conversation_thread_atomic(p_target)
+		else:
+			com_service.delete_sms_message_atomic(uuid)
 		backdrop.queue_free()
 		_refresh_all_feeds()
 	)

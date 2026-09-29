@@ -9,6 +9,7 @@ extends RefCounted
 const AttendanceServiceScript = preload("res://src/domain/attendance/attendance_service.gd")
 const PersonRegistrationValidatorScript = preload("res://src/domain/directory/person_registration_validator.gd")
 const QRCredentialServiceScript = preload("res://src/domain/security/qr_credential_service.gd")
+const SMSRelayServiceScript = preload("res://src/domain/communications/sms_relay_service.gd")
 
 var db: RefCounted
 var parent_node: Node
@@ -99,6 +100,10 @@ func _process_next_event(events: Array, index: int, processed_count: int, callba
 	elif event_type == "twilio.sms":
 		print("[Processor] Processing SMS event ", event_id)
 		_process_sms(event_id, payload)
+		_process_next_event(events, index + 1, processed_count + 1, callback)
+	elif event_type == "twilio.sms.outbound_relay":
+		print("[Processor] Processing outbound relay event ", event_id)
+		_process_outbound_relay(event_id, payload)
 		_process_next_event(events, index + 1, processed_count + 1, callback)
 	elif event_type == "twilio.voicemail":
 		print("[Processor] Processing Voicemail event ", event_id)
@@ -614,11 +619,22 @@ func _process_sms(event_id: int, payload: Dictionary) -> void:
 	var body = str(payload.get("Body", "")).strip_edges()
 	var message_sid = str(payload.get("MessageSid", "")).strip_edges()
 	
+	var relay_svc = SMSRelayServiceScript.new(db)
+	
+	# Intercept commands / replies from authorized relay phone before constituent processing
+	if relay_svc.is_relay_phone(from_phone):
+		print("[Processor] Inbound SMS is from authorized relay phone. Processing as relay control/reply.")
+		relay_svc.handle_relay_reply(parent_node, from_phone, body, message_sid)
+		db.execute("UPDATE inbound_event_queue SET processed = 1 WHERE id = ?;", [event_id])
+		return
+
 	var matched_person_id = null
+	var matched_person_name = ""
 	if from_phone != "":
 		var p_info = _find_person_by_phone(from_phone)
 		if not p_info.is_empty():
 			matched_person_id = p_info["id"]
+			matched_person_name = p_info.get("name", "")
 
 	var keyword = body.to_upper().strip_edges()
 	var action = ""
@@ -665,6 +681,44 @@ func _process_sms(event_id: int, payload: Dictionary) -> void:
 		"received_at": Time.get_datetime_string_from_system()
 	}
 	db.execute("INSERT OR IGNORE INTO event_outbox (event_uuid, event_type, aggregate_type, aggregate_id, payload_json, device_uuid, status) VALUES (?, 'SmsReceived', 'Sms', ?, ?, ?, 'pending');", [outbox_uuid, message_sid, JSON.stringify(outbox_payload), get_device_uuid()])
+
+	# Server gateway (index.php) is the sole 24/7 sender of inbound relay notifications upon Twilio webhook ingest.
+	# Desktop event processing logs the message into inbound_sms_log and manages Response Center / Dashboard
+	# without sending duplicate desktop relay notifications.
+	db.execute("UPDATE inbound_event_queue SET processed = 1 WHERE id = ?;", [event_id])
+
+func _process_outbound_relay(event_id: int, payload: Dictionary) -> void:
+	var to_phone = str(payload.get("To", "")).strip_edges()
+	var body = str(payload.get("Body", "")).strip_edges()
+	var message_sid = str(payload.get("MessageSid", "")).strip_edges()
+	var sent_by = str(payload.get("sent_by_user", "Mobile Relay")).strip_edges()
+	var status_detail = str(payload.get("status_detail", "sent_via_mobile_relay")).strip_edges()
+
+	if to_phone != "":
+		# Idempotency check: prevent duplicate insertion
+		var check_dup = db.execute("SELECT id FROM communications_log WHERE provider_sid = ? LIMIT 1;", [message_sid])
+		if not check_dup["success"] or check_dup["data"].size() == 0:
+			var matched_person_id = null
+			var matched_person_name = "Constituent"
+			var p_info = _find_person_by_phone(to_phone)
+			if not p_info.is_empty():
+				matched_person_id = p_info["id"]
+				matched_person_name = p_info.get("name", "Constituent")
+
+			var msg_uuid = "msg_" + _generate_uuid()
+			var insert_sql = """
+				INSERT INTO communications_log (
+					message_uuid, recipient_person_id, recipient_name, recipient_contact,
+					channel, message_body, status, status_detail, sent_by_user, provider_sid
+				) VALUES (?, ?, ?, ?, 'SMS', ?, 'sent', ?, ?, ?);
+			"""
+			db.execute(insert_sql, [
+				msg_uuid, matched_person_id, matched_person_name, to_phone,
+				body, status_detail, sent_by, message_sid
+			])
+
+			# Resolve Response Center / Dashboard thread so it's marked completed
+			db.execute("UPDATE inbound_sms_log SET follow_up_status = 'completed' WHERE from_phone_e164 = ? AND follow_up_status != 'completed';", [to_phone])
 
 	db.execute("UPDATE inbound_event_queue SET processed = 1 WHERE id = ?;", [event_id])
 

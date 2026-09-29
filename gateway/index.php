@@ -7597,28 +7597,401 @@ if ($uri === '/api/v1/voicemails/audio' || $uri === '/api/v1/webhooks/twilio/voi
     }
 }
 
-// Route: SMS Ingest Webhook (with immediate compliance keyword autoreply support)
+// Route: Relay Configuration Sync Endpoint (Desktop -> Gateway)
+if ($uri === '/api/v1/sync/relay-config' && $method === 'POST') {
+    $req_key = $_SERVER['HTTP_X_SYNC_API_KEY'] ?? $_GET['sync_api_key'] ?? '';
+    if ($req_key !== $sync_api_key) {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'error' => 'Unauthorized']);
+        exit;
+    }
+
+    $input = json_decode(file_get_contents('php://input'), true);
+    $enabled = !empty($input['enabled']);
+    $raw_phone = trim((string)($input['phone'] ?? ''));
+
+    $norm_phone = '';
+    if (!empty($raw_phone)) {
+        $digits = preg_replace('/[^0-9]/', '', $raw_phone);
+        if (strlen($digits) === 10) {
+            $norm_phone = '+1' . $digits;
+        } else if (strlen($digits) === 11 && strpos($digits, '1') === 0) {
+            $norm_phone = '+' . $digits;
+        } else if (!empty($digits)) {
+            $norm_phone = '+' . $digits;
+        }
+    }
+
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS app_settings (
+            setting_key TEXT PRIMARY KEY,
+            setting_value TEXT NOT NULL,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    ");
+
+    $stmt1 = $pdo->prepare("INSERT INTO app_settings (setting_key, setting_value) VALUES ('SMS_RELAY_ENABLED', ?) ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value, updated_at = datetime('now')");
+    $stmt1->execute([$enabled ? 'true' : 'false']);
+
+    $stmt2 = $pdo->prepare("INSERT INTO app_settings (setting_key, setting_value) VALUES ('SMS_RELAY_PHONE', ?) ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value, updated_at = datetime('now')");
+    $stmt2->execute([$norm_phone]);
+
+    http_response_code(200);
+    echo json_encode(['success' => true, 'enabled' => $enabled, 'phone' => $norm_phone]);
+    exit;
+}
+
+function get_twilio_auth_token($pdo, $config) {
+    $tw_token = !empty($config['TWILIO_AUTH_TOKEN']) ? trim($config['TWILIO_AUTH_TOKEN']) : '';
+    if (!empty($tw_token)) return $tw_token;
+
+    if ($pdo) {
+        try {
+            $stmt = $pdo->query("SELECT setting_value FROM app_settings WHERE setting_key = 'TWILIO_AUTH_TOKEN' LIMIT 1");
+            if ($stmt && ($row = $stmt->fetch(PDO::FETCH_ASSOC))) {
+                $val = trim($row['setting_value'] ?? '');
+                if (!empty($val)) return $val;
+            }
+        } catch (Throwable $e) {}
+    }
+    return '';
+}
+
+// Twilio Request Signature Validation Helper
+function validate_twilio_request_signature($url, $post_data, $auth_token, $provided_signature) {
+    if (empty($auth_token)) return false;
+    if (empty($provided_signature)) return false;
+
+    $params = is_array($post_data) ? $post_data : [];
+    ksort($params);
+
+    $data = $url;
+    foreach ($params as $key => $val) {
+        $data .= $key . $val;
+    }
+
+    $expected = base64_encode(hash_hmac('sha1', $data, $auth_token, true));
+    return hash_equals($expected, $provided_signature);
+}
+
+// Route: SMS Ingest Webhook & Server-Side Mobile SMS Relay Engine
 if ($uri === '/api/v1/webhooks/twilio/sms') {
     try {
         $payload = $_POST;
-        $provider_event_id = $payload['MessageSid'] ?? null;
-        $body_text = strtoupper(trim($payload['Body'] ?? ''));
-        
+        $provider_event_id = $payload['MessageSid'] ?? $payload['SmsSid'] ?? null;
+        $raw_body = trim($payload['Body'] ?? '');
+        $body_text_upper = strtoupper($raw_body);
+        $from_raw = trim($payload['From'] ?? '');
+        $to_raw = trim($payload['To'] ?? '');
+
+        // TWILIO WEBHOOK SIGNATURE VALIDATION (Strict Fail-Closed)
+        $tw_token = get_twilio_auth_token($pdo, $config);
+
+        if (empty($_SERVER['HTTP_STUDYCENTERHUB_TEST_BYPASS_SIGNATURE'])) {
+            $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'https';
+            $host = $_SERVER['HTTP_HOST'] ?? 'app.reallife-studycenter.org';
+            $request_url = $scheme . '://' . $host . '/api/v1/webhooks/twilio/sms';
+            $sig = $_SERVER['HTTP_X_TWILIO_SIGNATURE'] ?? '';
+
+            if (empty($tw_token) || !validate_twilio_request_signature($request_url, $_POST, $tw_token, $sig)) {
+                http_response_code(403);
+                header('Content-Type: application/json');
+                echo json_encode(['success' => false, 'error' => 'Invalid or missing X-Twilio-Signature']);
+                exit;
+            }
+        }
+
+        // Helper E.164 normalization
+        $norm_fn = function($phone_str) {
+            $raw = trim((string)$phone_str);
+            if (empty($raw)) return '';
+            $digits = preg_replace('/[^0-9]/', '', $raw);
+            if (strlen($digits) === 10) return '+1' . $digits;
+            if (strlen($digits) === 11 && strpos($digits, '1') === 0) return '+' . $digits;
+            return !empty($digits) ? '+' . $digits : '';
+        };
+
+        $from_norm = $norm_fn($from_raw);
+        $to_norm = $norm_fn($to_raw);
+
+        // Ensure Server Relay Tables
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS sms_relay_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                relay_token TEXT NOT NULL,
+                relay_phone_e164 TEXT NOT NULL,
+                constituent_phone_e164 TEXT NOT NULL,
+                person_id INTEGER,
+                source_message_sid TEXT,
+                status TEXT NOT NULL DEFAULT 'active',
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                last_activity_at TEXT NOT NULL DEFAULT (datetime('now')),
+                expires_at TEXT NOT NULL
+            )
+        ");
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS sms_relay_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER,
+                relay_token TEXT,
+                event_type TEXT NOT NULL,
+                from_phone_e164 TEXT,
+                to_phone_e164 TEXT,
+                details_json TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+        ");
+
+        // Query Relay Settings
+        $relay_enabled = false;
+        $relay_phone = '';
+        try {
+            $en_stmt = $pdo->query("SELECT setting_value FROM app_settings WHERE setting_key = 'SMS_RELAY_ENABLED' LIMIT 1");
+            if ($en_stmt && ($row = $en_stmt->fetch(PDO::FETCH_ASSOC))) {
+                $relay_enabled = strtolower(trim($row['setting_value'])) === 'true';
+            }
+            $ph_stmt = $pdo->query("SELECT setting_value FROM app_settings WHERE setting_key = 'SMS_RELAY_PHONE' LIMIT 1");
+            if ($ph_stmt && ($row = $ph_stmt->fetch(PDO::FETCH_ASSOC))) {
+                $relay_phone = $norm_fn(trim($row['setting_value']));
+            }
+        } catch (Throwable $e) {}
+
+        // =========================================================================
+        // CASE A: INBOUND FROM AUTHORIZED STAFF RELAY PHONE (STAFF REPLY INTERCEPTION)
+        // =========================================================================
+        if ($relay_enabled && !empty($relay_phone) && !empty($from_norm) && $from_norm === $relay_phone) {
+            // DO NOT insert into inbound_event_queue as a constituent thread! Intercept immediately!
+            $pdo->exec("UPDATE sms_relay_sessions SET status = 'expired' WHERE status = 'active' AND expires_at <= datetime('now')");
+
+            // V1 MANDATORY TOKEN RULE: Must parse 4-char reference token at start of message
+            $words = preg_split('/\s+/', $raw_body);
+            $extracted_token = '';
+            $clean_msg = '';
+
+            if (count($words) > 0) {
+                $w0 = strtoupper(trim(str_replace(['Ref:', ':'], '', $words[0])));
+                if (strlen($w0) === 4) {
+                    $tok_stmt = $pdo->prepare("SELECT id FROM sms_relay_sessions WHERE relay_token = ? AND relay_phone_e164 = ? AND status = 'active' AND expires_at > datetime('now') LIMIT 1");
+                    $tok_stmt->execute([$w0, $relay_phone]);
+                    if ($tok_stmt->fetch()) {
+                        $extracted_token = $w0;
+                        $pos = strpos($raw_body, $words[0]);
+                        if ($pos !== false) {
+                            $clean_msg = trim(substr($raw_body, $pos + strlen($words[0])));
+                            if (strpos($clean_msg, ':') === 0) {
+                                $clean_msg = trim(substr($clean_msg, 1));
+                            }
+                        }
+                    }
+                }
+            }
+
+            // If token missing, invalid, or expired: DO NOT GUESS! Send NOTHING to constituent!
+            if (empty($extracted_token)) {
+                $attempted_tok = (count($words) > 0 && strlen(preg_replace('/[^A-Za-z0-9]/', '', $words[0])) === 4) ? strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $words[0])) : '';
+                
+                $reply_reason = "missing_token";
+                $auto_reply = "Study Center Relay: I couldn't match that reply. Start your message with the active reference code, for example:\n\nK9R2 your message";
+
+                if (!empty($attempted_tok)) {
+                    $exp_stmt = $pdo->prepare("SELECT id FROM sms_relay_sessions WHERE relay_token = ? AND relay_phone_e164 = ? AND status = 'expired' LIMIT 1");
+                    $exp_stmt->execute([$attempted_tok, $relay_phone]);
+                    if ($exp_stmt->fetch()) {
+                        $reply_reason = "expired_token";
+                        $auto_reply = "Study Center Relay: {$attempted_tok} has expired. No message was sent.";
+                    } else {
+                        $reply_reason = "invalid_token";
+                        $auto_reply = "Study Center Relay: {$attempted_tok} wasn't recognized. No message was sent.";
+                    }
+                }
+
+                $evt_stmt = $pdo->prepare("INSERT INTO sms_relay_events (session_id, relay_token, event_type, from_phone_e164, to_phone_e164, details_json, created_at) VALUES (0, ?, 'reply_rejected', ?, '', ?, datetime('now'))");
+                $evt_stmt->execute([$attempted_tok ?: 'UNMATCHED', $relay_phone, json_encode(['reason' => $reply_reason, 'body' => $raw_body])]);
+
+                send_twiml("<Message>" . htmlspecialchars($auto_reply) . "</Message>");
+                exit;
+            }
+
+            // Target Active Session
+            $sess_stmt = $pdo->prepare("SELECT * FROM sms_relay_sessions WHERE relay_token = ? AND relay_phone_e164 = ? AND status = 'active' AND expires_at > datetime('now') LIMIT 1");
+            $sess_stmt->execute([$extracted_token, $relay_phone]);
+            $session = $sess_stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$session || empty($clean_msg)) {
+                $auto_reply = empty($clean_msg) ? "Study Center Relay: Message body was empty. No message was sent." : "Study Center Relay: {$extracted_token} wasn't recognized. No message was sent.";
+                send_twiml("<Message>" . htmlspecialchars($auto_reply) . "</Message>");
+                exit;
+            }
+
+            $constituent_phone = $session['constituent_phone_e164'];
+            $sess_id = intval($session['id']);
+
+            // Send clean message to constituent via Twilio REST API FROM Study Center Twilio Number!
+            $tw_sid = $config['TWILIO_ACCOUNT_SID'] ?? '';
+            $tw_token = $config['TWILIO_AUTH_TOKEN'] ?? '';
+            $outbound_from = $config['TWILIO_PHONE_NUMBER'] ?? '+18647124446';
+
+            try {
+                $sid_stmt = $pdo->query("SELECT setting_value FROM app_settings WHERE setting_key = 'TWILIO_ACCOUNT_SID' LIMIT 1");
+                if ($sid_stmt && ($row = $sid_stmt->fetch(PDO::FETCH_ASSOC))) {
+                    if (!empty(trim($row['setting_value']))) $tw_sid = trim($row['setting_value']);
+                }
+                $tok_stmt = $pdo->query("SELECT setting_value FROM app_settings WHERE setting_key = 'TWILIO_AUTH_TOKEN' LIMIT 1");
+                if ($tok_stmt && ($row = $tok_stmt->fetch(PDO::FETCH_ASSOC))) {
+                    if (!empty(trim($row['setting_value']))) $tw_token = trim($row['setting_value']);
+                }
+            } catch (Throwable $e) {}
+
+            $post_data = http_build_query([
+                'To' => $constituent_phone,
+                'From' => $outbound_from,
+                'Body' => $clean_msg
+            ]);
+
+            $ch = curl_init("https://api.twilio.com/2010-04-01/Accounts/$tw_sid/Messages.json");
+            curl_setopt($ch, CURLOPT_USERPWD, "$tw_sid:$tw_token");
+            curl_setopt($ch, CURLOPT_POST, true);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $post_data);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+            $resp = curl_exec($ch);
+            $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+
+            $json = json_decode($resp, true);
+            $is_sent = ($http_code >= 200 && $http_code < 300 && !empty($json['sid']));
+
+            if ($is_sent) {
+                // Refresh session activity & expiration
+                $up_sess = $pdo->prepare("UPDATE sms_relay_sessions SET last_activity_at = datetime('now'), expires_at = datetime('now', '+4 hours') WHERE id = ?");
+                $up_sess->execute([$sess_id]);
+
+                $evt_stmt = $pdo->prepare("INSERT INTO sms_relay_events (session_id, relay_token, event_type, from_phone_e164, to_phone_e164, details_json, created_at) VALUES (?, ?, 'reply_sent_to_constituent', ?, ?, ?, datetime('now'))");
+                $evt_stmt->execute([$sess_id, $extracted_token, $relay_phone, $constituent_phone, json_encode(['clean_msg' => $clean_msg, 'sid' => $json['sid']])]);
+
+                // Queue event for desktop sync & Communications history
+                $outbound_event = [
+                    'event_type' => 'twilio.sms.outbound_relay',
+                    'MessageSid' => $json['sid'],
+                    'From' => $outbound_from,
+                    'To' => $constituent_phone,
+                    'Body' => $clean_msg,
+                    'sent_by_user' => 'Mobile Relay',
+                    'status_detail' => 'sent_via_mobile_relay'
+                ];
+                $q_stmt = $pdo->prepare("INSERT INTO inbound_event_queue (event_type, provider_event_id, payload_json, received_at, processed) VALUES ('twilio.sms.outbound_relay', ?, ?, datetime('now'), 0)");
+                $q_stmt->execute([$json['sid'], json_encode($outbound_event)]);
+
+                send_twiml("");
+                exit;
+            } else {
+                $err_detail = $json['message'] ?? ("HTTP " . $http_code);
+                $evt_stmt = $pdo->prepare("INSERT INTO sms_relay_events (session_id, relay_token, event_type, from_phone_e164, to_phone_e164, details_json, created_at) VALUES (?, ?, 'delivery_failed', ?, ?, ?, datetime('now'))");
+                $evt_stmt->execute([$sess_id, $extracted_token, $relay_phone, $constituent_phone, json_encode(['error' => $err_detail])]);
+
+                send_twiml("<Message>Study Center Relay: Failed to deliver message to constituent: " . htmlspecialchars($err_detail) . "</Message>");
+                exit;
+            }
+        }
+
+        // =========================================================================
+        // CASE B: NORMAL CONSTITUENT INBOUND (ALWAYS PROCESS INBOUND QUEUE FIRST!)
+        // =========================================================================
         $stmt = $pdo->prepare("INSERT OR IGNORE INTO inbound_event_queue (event_type, provider_event_id, payload_json, received_at, processed) VALUES ('twilio.sms', ?, ?, datetime('now'), 0)");
         $stmt->execute([$provider_event_id, json_encode($payload)]);
 
+        // Check compliance keywords
         $opt_out = ['STOP', 'QUIT', 'CANCEL', 'UNSUBSCRIBE'];
         $opt_in = ['START', 'UNSTOP', 'YES'];
         $help = ['HELP', 'INFO'];
 
-        if (in_array($body_text, $opt_out)) {
+        if (in_array($body_text_upper, $opt_out)) {
             send_twiml("<Message>You have successfully been unsubscribed. You will no longer receive messages from this number.</Message>");
-        } else if (in_array($body_text, $opt_in)) {
+            exit;
+        } else if (in_array($body_text_upper, $opt_in)) {
             send_twiml("<Message>You have successfully resubscribed. Message & data rates may apply.</Message>");
-        } else if (in_array($body_text, $help)) {
+            exit;
+        } else if (in_array($body_text_upper, $help)) {
             send_twiml("<Message>This is the automated text line for Real Life Study Center. For assistance or support, please contact us.</Message>");
+            exit;
         }
-        
+
+        // Forwarding logic to Staff Relay Phone (if enabled)
+        if ($relay_enabled && !empty($relay_phone) && $from_norm !== $relay_phone) {
+            try {
+                $constituent_name = 'Unknown Contact';
+                $p_stmt = $pdo->prepare("SELECT first_name, last_name FROM directory_index WHERE masked_phone LIKE ? OR human_id = ? LIMIT 1");
+                $p_stmt->execute(['%' . substr($from_norm, -7), $from_norm]);
+                if ($row = $p_stmt->fetch(PDO::FETCH_ASSOC)) {
+                    $fn = trim($row['first_name'] ?? '');
+                    $ln = trim($row['last_name'] ?? '');
+                    if (!empty($fn) || !empty($ln)) $constituent_name = trim("$fn $ln");
+                }
+
+                $pdo->exec("UPDATE sms_relay_sessions SET status = 'expired' WHERE status = 'active' AND expires_at <= datetime('now')");
+
+                $sess_stmt = $pdo->prepare("SELECT * FROM sms_relay_sessions WHERE constituent_phone_e164 = ? AND relay_phone_e164 = ? AND status = 'active' AND expires_at > datetime('now') ORDER BY last_activity_at DESC LIMIT 1");
+                $sess_stmt->execute([$from_norm, $relay_phone]);
+                $session = $sess_stmt->fetch(PDO::FETCH_ASSOC);
+
+                $token = '';
+                if ($session) {
+                    $token = $session['relay_token'];
+                    $up_sess = $pdo->prepare("UPDATE sms_relay_sessions SET last_activity_at = datetime('now'), expires_at = datetime('now', '+4 hours') WHERE id = ?");
+                    $up_sess->execute([$session['id']]);
+                } else {
+                    $chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+                    for ($a = 0; $a < 100; $a++) {
+                        $t = '';
+                        for ($i = 0; $i < 4; $i++) $t .= $chars[rand(0, strlen($chars) - 1)];
+                        $chk = $pdo->prepare("SELECT id FROM sms_relay_sessions WHERE relay_token = ? AND status = 'active' LIMIT 1");
+                        $chk->execute([$t]);
+                        if (!$chk->fetch()) { $token = $t; break; }
+                    }
+                    if (empty($token)) $token = 'R' . substr(strval(time()), -3);
+
+                    $ins_sess = $pdo->prepare("INSERT INTO sms_relay_sessions (relay_token, relay_phone_e164, constituent_phone_e164, source_message_sid, status, created_at, last_activity_at, expires_at) VALUES (?, ?, ?, ?, 'active', datetime('now'), datetime('now'), datetime('now', '+4 hours'))");
+                    $ins_sess->execute([$token, $relay_phone, $from_norm, $provider_event_id]);
+                }
+
+                $fwd_body = $raw_body;
+                $num_media = intval($payload['NumMedia'] ?? 0);
+                if ($num_media > 0) {
+                    if (empty($fwd_body)) $fwd_body = "[Image received — open StudyCenterHub to view]";
+                    else $fwd_body .= "\n[Image received — open StudyCenterHub to view]";
+                }
+
+                $formatted_display_phone = $from_norm;
+                $digits = preg_replace('/[^0-9]/', '', $from_norm);
+                if (strlen($digits) === 11 && strpos($digits, '1') === 0) $digits = substr($digits, 1);
+                if (strlen($digits) === 10) {
+                    $formatted_display_phone = sprintf("(%s) %s-%s", substr($digits, 0, 3), substr($digits, 3, 3), substr($digits, 6, 4));
+                }
+
+                $fwd_msg = "STUDY CENTER — {$constituent_name}\n{$formatted_display_phone}\n{$fwd_body}\n\nRef: {$token}\nReply with:\n{$token} your reply";
+
+                $tw_sid = $config['TWILIO_ACCOUNT_SID'] ?? '';
+                $tw_token = $config['TWILIO_AUTH_TOKEN'] ?? '';
+                $outbound_from = $config['TWILIO_PHONE_NUMBER'] ?? '+18647124446';
+
+                $post_data = http_build_query([
+                    'To' => $relay_phone,
+                    'From' => $outbound_from,
+                    'Body' => $fwd_msg
+                ]);
+
+                $ch = curl_init("https://api.twilio.com/2010-04-01/Accounts/$tw_sid/Messages.json");
+                curl_setopt($ch, CURLOPT_USERPWD, "$tw_sid:$tw_token");
+                curl_setopt($ch, CURLOPT_POST, true);
+                curl_setopt($ch, CURLOPT_POSTFIELDS, $post_data);
+                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                curl_exec($ch);
+                curl_close($ch);
+            } catch (Throwable $fwd_err) {
+                error_log("[SMS-RELAY] Server forwarding error: " . $fwd_err->getMessage());
+            }
+        }
+
         header("Content-Type: text/xml");
         echo "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Response></Response>";
         exit;

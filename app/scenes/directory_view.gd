@@ -1001,7 +1001,7 @@ func _create_roster_row_button(p: Dictionary, index: int) -> Button:
 		hbox.add_child(avatar)
 
 	var vbox_text = VBoxContainer.new()
-	vbox_text.custom_minimum_size = Vector2(180, 0)
+	vbox_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	vbox_text.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	vbox_text.add_theme_constant_override("separation", 2)
 
@@ -1037,10 +1037,6 @@ func _create_roster_row_button(p: Dictionary, index: int) -> Button:
 	vbox_text.add_child(campus_info_lbl)
 
 	hbox.add_child(vbox_text)
-
-	var trailing_spacer = Control.new()
-	trailing_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	hbox.add_child(trailing_spacer)
 
 	margin.add_child(hbox)
 	btn.add_child(margin)
@@ -3349,7 +3345,10 @@ func _create_empty_label(text: String) -> Label:
 func _clear_container(c: Container) -> void:
 	if not c: return
 	for child in c.get_children():
-		child.queue_free()
+		if child.is_inside_tree():
+			child.queue_free()
+		else:
+			child.free()
 
 func _clear_workspace() -> void:
 	_ensure_onready_nodes()
@@ -3434,7 +3433,7 @@ func _create_credentials_card(p: Dictionary, p_uuid: String) -> PanelContainer:
 	var qr_hint = ""
 	var issued_at = ""
 	var cred_svc = QRCredentialServiceScript.new(db)
-	var person_id = int(p.get("id"))
+	var person_id = int(p.get("id", 0))
 	var active_token = ""
 
 	if db:

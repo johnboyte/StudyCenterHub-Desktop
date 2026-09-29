@@ -18,6 +18,7 @@ const CardPrintQueueDialogScript = preload("res://app/scenes/card_print_queue_di
 const PublicQrSignDialogScript = preload("res://app/scenes/public_qr_sign_dialog.gd")
 const CampusCommunityAdminServiceScript = preload("res://src/domain/campus_community/campus_community_admin_service.gd")
 const QueueControllerScript = preload("res://src/domain/work_queue/queue_controller.gd")
+const SMSRelayServiceScript = preload("res://src/domain/communications/sms_relay_service.gd")
 
 var db: RefCounted
 var active_tab: String = "modules"
@@ -937,6 +938,165 @@ func _render_twilio_tab() -> void:
 	)
 	btn_hbox.add_child(btn_test)
 	vbox.add_child(btn_hbox)
+
+	# --------------------------------------------------------------------------
+	# MOBILE SMS RELAY SECTION
+	# --------------------------------------------------------------------------
+	var relay_svc = SMSRelayServiceScript.new(db)
+	var relay_sett = relay_svc.get_relay_settings()
+
+	var hs_relay = HSeparator.new()
+	hs_relay.add_theme_constant_override("separation", 20)
+	vbox.add_child(hs_relay)
+
+	var relay_head = Label.new()
+	relay_head.text = "MOBILE SMS RELAY"
+	relay_head.add_theme_font_size_override("font_size", 20)
+	relay_head.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
+	vbox.add_child(relay_head)
+
+	var relay_expl = Label.new()
+	relay_expl.text = "Incoming Study Center SMS messages can be copied to this authorized phone. Replies can be sent back through the Study Center number and are logged in Communications."
+	relay_expl.add_theme_font_size_override("font_size", 15)
+	relay_expl.add_theme_color_override("font_color", Color(0.22, 0.28, 0.38, 1.0))
+	relay_expl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vbox.add_child(relay_expl)
+
+	var relay_card = PanelContainer.new()
+	var rcard_st = StyleBoxFlat.new()
+	rcard_st.bg_color = Color(0.96, 0.97, 0.99, 1.0)
+	rcard_st.border_width_left = 1; rcard_st.border_width_top = 1; rcard_st.border_width_right = 1; rcard_st.border_width_bottom = 1
+	rcard_st.border_color = Color(0.82, 0.86, 0.92, 1.0)
+	rcard_st.corner_radius_top_left = 8; rcard_st.corner_radius_top_right = 8; rcard_st.corner_radius_bottom_left = 8; rcard_st.corner_radius_bottom_right = 8
+	relay_card.add_theme_stylebox_override("panel", rcard_st)
+
+	var rcard_margin = MarginContainer.new()
+	rcard_margin.add_theme_constant_override("margin_left", 16)
+	rcard_margin.add_theme_constant_override("margin_top", 16)
+	rcard_margin.add_theme_constant_override("margin_right", 16)
+	rcard_margin.add_theme_constant_override("margin_bottom", 16)
+
+	var rcard_vbox = VBoxContainer.new()
+	rcard_vbox.add_theme_constant_override("separation", 14)
+
+	# Checkbox: Forward incoming Study Center texts to my cell
+	var chk_relay = CheckBox.new()
+	chk_relay.text = "Forward incoming Study Center texts to my cell"
+	chk_relay.button_pressed = relay_sett["enabled"]
+	chk_relay.add_theme_font_size_override("font_size", 16)
+	chk_relay.add_theme_color_override("font_color", Color(0.12, 0.18, 0.26, 1.0))
+	chk_relay.add_theme_color_override("font_pressed_color", Color(0.12, 0.18, 0.26, 1.0))
+	chk_relay.add_theme_color_override("font_hover_color", Color(0.88, 0.35, 0.21, 1.0))
+	rcard_vbox.add_child(chk_relay)
+
+	# Relay phone field
+	var rgrid = GridContainer.new(); rgrid.columns = 2; rgrid.add_theme_constant_override("h_separation", 18); rgrid.add_theme_constant_override("v_separation", 12)
+
+	var lbl_rphone = Label.new()
+	lbl_rphone.text = "Relay phone:"
+	lbl_rphone.add_theme_font_size_override("font_size", 16)
+	lbl_rphone.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
+	rgrid.add_child(lbl_rphone)
+
+	var e_rphone = LineEdit.new()
+	e_rphone.text = relay_sett["phone"]
+	e_rphone.placeholder_text = "(864) 555-0199"
+	e_rphone.custom_minimum_size = Vector2(400, 44)
+	e_rphone.caret_blink = true
+	e_rphone.add_theme_color_override("caret_color", Color(0.12, 0.16, 0.22, 1.0))
+	_style_input_control(e_rphone, 16)
+	rgrid.add_child(e_rphone)
+
+	# Status Label
+	var lbl_rstatus_title = Label.new()
+	lbl_rstatus_title.text = "Status:"
+	lbl_rstatus_title.add_theme_font_size_override("font_size", 16)
+	lbl_rstatus_title.add_theme_color_override("font_color", Color(0.08, 0.12, 0.18, 1.0))
+	rgrid.add_child(lbl_rstatus_title)
+
+	var lbl_rstatus = Label.new()
+	var update_rstatus_text = func():
+		if chk_relay.button_pressed:
+			lbl_rstatus.text = "Enabled"
+			lbl_rstatus.add_theme_color_override("font_color", Color(0.12, 0.50, 0.22, 1.0))
+		else:
+			lbl_rstatus.text = "Disabled"
+			lbl_rstatus.add_theme_color_override("font_color", Color(0.45, 0.50, 0.58, 1.0))
+
+	lbl_rstatus.add_theme_font_size_override("font_size", 16)
+	update_rstatus_text.call()
+	rgrid.add_child(lbl_rstatus)
+
+	rcard_vbox.add_child(rgrid)
+
+	# Action buttons for Mobile SMS Relay
+	var rbtn_hbox = HBoxContainer.new()
+	rbtn_hbox.add_theme_constant_override("separation", 12)
+
+	var btn_save_relay = Button.new()
+	btn_save_relay.text = "💾 Save Relay Settings"
+	btn_save_relay.custom_minimum_size = Vector2(200, 42)
+	btn_save_relay.add_theme_font_size_override("font_size", 16)
+	var bsr_st = StyleBoxFlat.new(); bsr_st.bg_color = _get_active_theme_color(); bsr_st.corner_radius_top_left = 6; bsr_st.corner_radius_top_right = 6; bsr_st.corner_radius_bottom_left = 6; bsr_st.corner_radius_bottom_right = 6
+	btn_save_relay.add_theme_stylebox_override("normal", bsr_st); btn_save_relay.add_theme_stylebox_override("hover", bsr_st); btn_save_relay.add_theme_stylebox_override("pressed", bsr_st)
+	btn_save_relay.add_theme_color_override("font_color", Color(1, 1, 1, 1))
+
+	var relay_status_feedback = Label.new()
+	relay_status_feedback.add_theme_font_size_override("font_size", 15)
+	relay_status_feedback.visible = false
+
+	chk_relay.toggled.connect(func(toggled_on: bool):
+		update_rstatus_text.call()
+		if toggled_on:
+			relay_status_feedback.text = "ℹ️ Confirmation required: Save relay settings to enable mobile forwarding."
+			relay_status_feedback.add_theme_color_override("font_color", Color(0.18, 0.32, 0.58, 1.0))
+			relay_status_feedback.visible = true
+	)
+
+	btn_save_relay.pressed.connect(func():
+		var ph = e_rphone.text.strip_edges()
+		var is_on = chk_relay.button_pressed
+		if is_on and ph == "":
+			relay_status_feedback.text = "❌ Please enter a valid relay phone number before enabling Mobile SMS Relay."
+			relay_status_feedback.add_theme_color_override("font_color", Color(0.85, 0.15, 0.15, 1.0))
+			relay_status_feedback.visible = true
+			return
+
+		var saved = relay_svc.save_relay_settings(is_on, ph)
+		if saved:
+			var norm = relay_svc.normalize_e164(ph)
+			e_rphone.text = norm
+			relay_status_feedback.text = "✅ Mobile SMS Relay settings saved locally! Status: " + ("Enabled (" + norm + ")" if is_on else "Disabled")
+			relay_status_feedback.add_theme_color_override("font_color", Color(0.12, 0.50, 0.22, 1.0))
+			relay_status_feedback.visible = true
+			update_rstatus_text.call()
+
+			# Securely publish settings to Server Gateway
+			var GatewaySyncScript = preload("res://src/domain/sync/gateway_sync_service.gd")
+			var g_sync = GatewaySyncScript.new(db, self)
+			var g_url = g_sync.get_gateway_url() + "/api/v1/sync/relay-config"
+			var headers = [
+				"Content-Type: application/json",
+				"x-sync-api-key: " + g_sync.get_sync_api_key()
+			]
+			var http_req = HTTPRequest.new()
+			add_child(http_req)
+			http_req.request_completed.connect(func(result: int, response_code: int, _r_headers: PackedStringArray, body_bytes: PackedByteArray):
+				http_req.queue_free()
+				if response_code in [200, 201]:
+					relay_status_feedback.text = "✅ Mobile SMS Relay settings saved & synchronized with Gateway Server! Status: " + ("Enabled (" + norm + ")" if is_on else "Disabled")
+					relay_status_feedback.add_theme_color_override("font_color", Color(0.12, 0.50, 0.22, 1.0))
+			, CONNECT_ONE_SHOT)
+			http_req.request(g_url, headers, HTTPClient.METHOD_POST, JSON.stringify({"enabled": is_on, "phone": norm}))
+	)
+
+	rbtn_hbox.add_child(btn_save_relay)
+	rcard_vbox.add_child(rbtn_hbox)
+	rcard_vbox.add_child(relay_status_feedback)
+
+	rcard_margin.add_child(rcard_vbox)
+	relay_card.add_child(rcard_margin)
+	vbox.add_child(relay_card)
 
 	margin_wrap.add_child(vbox)
 	scroll.add_child(margin_wrap)

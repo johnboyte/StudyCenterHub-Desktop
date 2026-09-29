@@ -117,6 +117,7 @@ layout_mode = 2
 theme_override_font_sizes/font_size = 14
 text = "Loading Directory constituents..."
 horizontal_alignment = 1
+autowrap_mode = 2
 
 [node name="EmptyState" type="Label" parent="MarginContainer/VBoxContainer/MainSplit/RosterPanel"]
 visible = false
@@ -124,6 +125,7 @@ layout_mode = 2
 theme_override_font_sizes/font_size = 14
 text = "No constituents in Directory yet."
 horizontal_alignment = 1
+autowrap_mode = 2
 
 [node name="NoResultsState" type="Label" parent="MarginContainer/VBoxContainer/MainSplit/RosterPanel"]
 visible = false
@@ -131,6 +133,7 @@ layout_mode = 2
 theme_override_font_sizes/font_size = 14
 text = "No constituents found matching search."
 horizontal_alignment = 1
+autowrap_mode = 2
 
 [node name="ErrorState" type="Label" parent="MarginContainer/VBoxContainer/MainSplit/RosterPanel"]
 visible = false
@@ -138,6 +141,7 @@ layout_mode = 2
 theme_override_font_sizes/font_size = 14
 text = "Unable to load Directory. Please try again."
 horizontal_alignment = 1
+autowrap_mode = 2
 
 [node name="WorkspacePanel" type="PanelContainer" parent="MarginContainer/VBoxContainer/MainSplit"]
 layout_mode = 2
@@ -233,6 +237,7 @@ layout_mode = 2
 size_flags_horizontal = 3
 theme_override_font_sizes/font_size = 17
 text = "Overview"
+clip_text = true
 
 [node name="TabProfile" type="Button" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/SectionTabBar"]
 custom_minimum_size = Vector2(0, 42)
@@ -240,6 +245,7 @@ layout_mode = 2
 size_flags_horizontal = 3
 theme_override_font_sizes/font_size = 17
 text = "Profile"
+clip_text = true
 
 [node name="TabCommunications" type="Button" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/SectionTabBar"]
 custom_minimum_size = Vector2(0, 42)
@@ -247,6 +253,7 @@ layout_mode = 2
 size_flags_horizontal = 3
 theme_override_font_sizes/font_size = 17
 text = "Communications"
+clip_text = true
 
 [node name="TabParticipation" type="Button" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/SectionTabBar"]
 custom_minimum_size = Vector2(0, 42)
@@ -254,6 +261,7 @@ layout_mode = 2
 size_flags_horizontal = 3
 theme_override_font_sizes/font_size = 17
 text = "Participation"
+clip_text = true
 
 [node name="TabNotes" type="Button" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/SectionTabBar"]
 custom_minimum_size = Vector2(0, 42)
@@ -261,6 +269,7 @@ layout_mode = 2
 size_flags_horizontal = 3
 theme_override_font_sizes/font_size = 17
 text = "Notes & Tasks"
+clip_text = true
 
 [node name="TabHistory" type="Button" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox/SectionTabBar"]
 custom_minimum_size = Vector2(0, 42)
@@ -268,6 +277,7 @@ layout_mode = 2
 size_flags_horizontal = 3
 theme_override_font_sizes/font_size = 17
 text = "History"
+clip_text = true
 
 [node name="WorkspaceScroll" type="ScrollContainer" parent="MarginContainer/VBoxContainer/MainSplit/WorkspacePanel/WorkspaceMargin/SelectedWorkspaceVBox"]
 layout_mode = 2

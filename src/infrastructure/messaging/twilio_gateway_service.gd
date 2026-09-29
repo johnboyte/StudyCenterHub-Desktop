@@ -235,6 +235,99 @@ func send_twilio_sms_async(caller_node: Node, to_phone: String, message_body: St
 			"error": "Failed to initiate HTTP request (Error code: " + str(err) + ")"
 		})
 
+func upload_mms_media_async(caller_node: Node, local_file_path: String, callback: Callable) -> void:
+	if not FileAccess.file_exists(local_file_path):
+		callback.call({
+			"success": false,
+			"error": "Attachment file does not exist locally: " + local_file_path
+		})
+		return
+
+	var file = FileAccess.open(local_file_path, FileAccess.READ)
+	if not file:
+		callback.call({
+			"success": false,
+			"error": "Failed to open local attachment file for reading."
+		})
+		return
+
+	var raw_bytes = file.get_buffer(file.get_length())
+	file.close()
+
+	if raw_bytes.size() == 0:
+		callback.call({
+			"success": false,
+			"error": "Attachment file is 0 bytes."
+		})
+		return
+
+	if is_demo_config():
+		var demo_id = "sim_mms_" + _generate_uuid().replace("-", "").left(12)
+		var demo_token = "sim_token_" + _generate_uuid().replace("-", "").left(12)
+		var demo_url = "https://app.reallife-studycenter.org/upload_media.php?media_id=" + demo_id + "&token=" + demo_token
+		callback.call({
+			"success": true,
+			"demo_mode": true,
+			"public_url": demo_url,
+			"media_id": demo_id,
+			"token": demo_token,
+			"bytes": raw_bytes.size()
+		})
+		return
+
+	var http_request = HTTPRequest.new()
+	caller_node.add_child(http_request)
+
+	var ext = local_file_path.get_extension().to_lower()
+	var mime_type = "image/png"
+	if ext in ["jpg", "jpeg"]:
+		mime_type = "image/jpeg"
+	elif ext == "webp":
+		mime_type = "image/webp"
+
+	var upload_url = "https://app.reallife-studycenter.org/upload_media.php"
+	var headers = [
+		"Content-Type: " + mime_type
+	]
+
+	http_request.request_completed.connect(func(result: int, response_code: int, _r_headers: PackedStringArray, body_bytes: PackedByteArray):
+		var response_text = body_bytes.get_string_from_utf8()
+		var json = JSON.parse_string(response_text) as Dictionary
+
+		http_request.queue_free()
+
+		if response_code == 200 and json and json.get("success", false) == true and json.has("public_url"):
+			callback.call({
+				"success": true,
+				"demo_mode": false,
+				"public_url": json["public_url"],
+				"media_id": json.get("media_id", ""),
+				"token": json.get("token", ""),
+				"bytes": json.get("bytes", 0)
+			})
+		else:
+			var err_msg = "Gateway HTTP " + str(response_code)
+			if json and json.has("error"):
+				err_msg += ": " + str(json["error"])
+			elif response_text != "":
+				err_msg += ": " + response_text.left(120)
+
+			callback.call({
+				"success": false,
+				"demo_mode": false,
+				"error": "MMS Media Upload Failed: " + err_msg
+			})
+	)
+
+	var err = http_request.request_raw(upload_url, headers, HTTPClient.METHOD_POST, raw_bytes)
+	if err != OK:
+		http_request.queue_free()
+		callback.call({
+			"success": false,
+			"demo_mode": false,
+			"error": "Failed to initiate HTTP POST request to gateway upload_media.php (Error code: " + str(err) + ")"
+		})
+
 func simulate_twilio_sms(to_phone: String, message_body: String) -> Dictionary:
 	var config = get_twilio_config()
 	var formatted_to = format_e164_phone(to_phone)

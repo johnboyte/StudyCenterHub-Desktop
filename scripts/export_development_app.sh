@@ -42,42 +42,52 @@ mkdir -p "$MACOS_DIR"
 if [ -f "$TARGET_PCK" ]; then
     echo "✅ PCK File Created: $TARGET_PCK"
     cp -f "$TARGET_PCK" "$RESOURCE_PCK"
+    cp -f "$TARGET_PCK" "$MACOS_DIR/StudyCenterHub-Desktop-Development.pck"
     
-    # Write Info.plist
+    if [ -f "$PROJECT_DIR/icon.icns" ]; then
+        cp -f "$PROJECT_DIR/icon.icns" "$TARGET_APP/Contents/Resources/icon.icns"
+    fi
+    
+    # Install native runner binary directly into bundle MacOS directory
+    cp -f "$GODOT_BIN" "$EXECUTABLE_BIN"
+    chmod +x "$EXECUTABLE_BIN"
+    
+    # Write Info.plist for self-contained Standalone Development App
     cat << 'EOF' > "$INFO_PLIST"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleExecutable</key>
-    <string>StudyCenterHub-Desktop-Development</string>
-    <key>CFBundleIdentifier</key>
-    <string>org.reallife.studycenterhub.development</string>
-    <key>CFBundleName</key>
-    <string>StudyCenterHub Development</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>CFBundleShortVersionString</key>
-    <string>1.0</string>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>English</string>
+	<key>CFBundleExecutable</key>
+	<string>StudyCenterHub-Desktop-Development</string>
+	<key>CFBundleIconFile</key>
+	<string>icon.icns</string>
+	<key>CFBundleIdentifier</key>
+	<string>org.godotengine.studycenterhub.development</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>StudyCenterHub Development</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0.0</string>
+	<key>CFBundleVersion</key>
+	<string>1.0.0</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>10.13.0</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
 </dict>
 </plist>
 EOF
 
-    # Write Executable Launcher Script
-    cat << 'EOF' > "$EXECUTABLE_BIN"
-#!/bin/bash
-GODOT_BIN="/Users/johnboyte/Downloads/Godot.app/Contents/MacOS/Godot"
-PCK_FILE="/Users/johnboyte/Development/StudyCenterHub-Desktop/builds/StudyCenterHub-Desktop-Development.app/Contents/Resources/StudyCenterHub-Desktop-Development.pck"
-export STUDYCENTERHUB_ENV=development
-if [ -x "$GODOT_BIN" ] && [ -f "$PCK_FILE" ]; then
-    exec "$GODOT_BIN" --main-pack "$PCK_FILE" "$@"
-else
-    echo "Error: Required binary or frozen PCK package missing."
-    exit 1
-fi
-EOF
+    # Strip quarantine attributes & apply ad-hoc code signature
+    xattr -cr "$TARGET_APP"
+    codesign --force --deep --sign - "$TARGET_APP"
 
-    chmod +x "$EXECUTABLE_BIN"
     touch "$TARGET_APP"
     echo "✅ Development App Bundle Package Updated: $TARGET_APP"
 else
