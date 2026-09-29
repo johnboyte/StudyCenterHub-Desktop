@@ -1625,8 +1625,10 @@ func _populate_profile_section(p: Dictionary) -> void:
 	photo_status_lbl.add_theme_color_override("font_color", Color(0.35, 0.85, 0.55, 1.0) if has_photo else Color(1.0, 0.75, 0.35, 1.0))
 	photo_btns_vbox.add_child(photo_status_lbl)
 
-	var btns_hbox = HBoxContainer.new()
-	btns_hbox.add_theme_constant_override("separation", 10)
+	var btns_hbox = HFlowContainer.new()
+	btns_hbox.add_theme_constant_override("h_separation", 10)
+	btns_hbox.add_theme_constant_override("v_separation", 10)
+	btns_hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 	if has_photo or has_original:
 		var btn_crop_existing = Button.new()
