@@ -8114,8 +8114,12 @@ if ($uri === '/api/v1/webhooks/twilio/sms') {
         if ($relay_enabled && !empty($relay_phone) && $from_norm !== $relay_phone) {
             try {
                 $constituent_name = 'Unknown Contact';
-                $p_stmt = $pdo->prepare("SELECT first_name, last_name FROM directory_index WHERE masked_phone LIKE ? OR human_id = ? LIMIT 1");
-                $p_stmt->execute(['%' . substr($from_norm, -7), $from_norm]);
+                $from_e164 = normalize_phone_e164_php($from_norm);
+                $from_digits = preg_replace('/\D/', '', $from_norm);
+                $from_last10 = (strlen($from_digits) >= 10) ? substr($from_digits, -10) : '';
+
+                $p_stmt = $pdo->prepare("SELECT first_name, last_name FROM directory_index WHERE phone_e164 = ? OR (length(?) = 10 AND phone_e164 LIKE ?) OR human_id = ? LIMIT 1");
+                $p_stmt->execute([$from_e164, $from_last10, '%' . $from_last10, $from_norm]);
                 if ($row = $p_stmt->fetch(PDO::FETCH_ASSOC)) {
                     $fn = trim($row['first_name'] ?? '');
                     $ln = trim($row['last_name'] ?? '');
