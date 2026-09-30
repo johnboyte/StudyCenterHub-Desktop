@@ -4426,7 +4426,7 @@ if (($uri === '/api/v1/public/checkin/lookup' || $uri === '/public/api/checkin/l
     $e164 = normalize_phone_e164_php($raw_phone);
     $digits = preg_replace('/\D/', '', $raw_phone);
 
-    $stmt = $pdo->prepare("SELECT first_name, masked_phone, human_id FROM directory_index WHERE phone_e164 = ? OR phone_e164 LIKE ?");
+    $stmt = $pdo->prepare("SELECT first_name, masked_phone, human_id, COALESCE(profile_photo, '') as profile_photo FROM directory_index WHERE phone_e164 = ? OR phone_e164 LIKE ?");
     $stmt->execute([$e164, '%' . substr($digits, -10)]);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -4441,12 +4441,17 @@ if (($uri === '/api/v1/public/checkin/lookup' || $uri === '/public/api/checkin/l
             $already_checked_in = true;
         }
 
+        $photo_raw = trim($rows[0]['profile_photo'] ?? '');
+        $has_photo = !empty($photo_raw);
+
         echo json_encode([
             'found' => true,
             'match_count' => 1,
             'first_name' => $rows[0]['first_name'],
             'masked_phone' => $rows[0]['masked_phone'],
             'human_id' => $rows[0]['human_id'],
+            'profile_photo' => $photo_raw,
+            'has_photo' => $has_photo,
             'already_checked_in' => $already_checked_in
         ]);
     } elseif (count($rows) > 1) {
@@ -4463,6 +4468,59 @@ if (($uri === '/api/v1/public/checkin/lookup' || $uri === '/public/api/checkin/l
             'message' => 'We could not find an active membership matching that phone number.'
         ]);
     }
+    exit;
+}
+
+// Route: Public Profile Photo Update API
+if (($uri === '/api/v1/public/profile/update-photo' || $uri === '/public/api/profile/update-photo') && $method === 'POST') {
+    header('Content-Type: application/json; charset=utf-8');
+    $raw = file_get_contents('php://input');
+    $input = json_decode($raw, true) ?? [];
+
+    $human_id = trim($input['human_id'] ?? $input['humanId'] ?? '');
+    $phone = trim($input['phone'] ?? '');
+    $photo = trim($input['profile_photo'] ?? $input['profilePhoto'] ?? '');
+
+    if (empty($human_id) && empty($phone)) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => 'human_id or phone is required']);
+        exit;
+    }
+
+    if (empty($photo)) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => 'profile_photo is required']);
+        exit;
+    }
+
+    $e164 = normalize_phone_e164_php($phone);
+    $digits = preg_replace('/\D/', '', $phone);
+
+    // Update directory_index in place
+    if (!empty($human_id)) {
+        $stmt = $pdo->prepare("UPDATE directory_index SET profile_photo = ?, updated_at = datetime('now') WHERE human_id = ?");
+        $stmt->execute([$photo, $human_id]);
+    } else {
+        $stmt = $pdo->prepare("UPDATE directory_index SET profile_photo = ?, updated_at = datetime('now') WHERE phone_e164 = ? OR phone_e164 LIKE ?");
+        $stmt->execute([$photo, $e164, '%' . substr($digits, -10)]);
+    }
+
+    // Queue event for Desktop sync
+    $evt_uuid = 'evt_photo_' . sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x', mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0x0fff) | 0x4000, mt_rand(0, 0x3fff) | 0x8000, mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff));
+    $stmt = $pdo->prepare("INSERT INTO inbound_event_queue (event_type, provider_event_id, payload_json, received_at, processed) VALUES ('portal.update_photo', ?, ?, datetime('now'), 0)");
+    $payload = json_encode([
+        'human_id' => $human_id,
+        'phone' => $phone,
+        'profile_photo' => $photo
+    ]);
+    $stmt->execute([$evt_uuid, $payload]);
+
+    echo json_encode([
+        'success' => true,
+        'message' => 'Profile photo updated successfully',
+        'human_id' => $human_id,
+        'has_photo' => true
+    ]);
     exit;
 }
 
@@ -5002,13 +5060,44 @@ if ($uri === '/public' || $uri === '/public/' || $uri === '/public-returning') {
                 <p class="page-desc">Please confirm your identity before checking in:</p>
 
                 <div class="alert-box alert-info" style="text-align: center; padding: 20px 16px;">
+                    <div style="margin: 0 auto 12px auto; width: 96px; height: 96px; border-radius: 50%; overflow: hidden; border: 3px solid #2563eb; background: #e2e8f0; display: flex; align-items: center; justify-content: center;">
+                        <img id="confMemberPhoto" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='60' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2'%3E%3C/path%3E%3Ccircle cx='12' cy='7' r='4'%3E%3C/circle%3E%3C/svg%3E" alt="Profile Photo" style="width: 100%; height: 100%; object-fit: cover;">
+                    </div>
                     <div style="font-size: 22px; font-weight: 700; color: #0f172a; margin-bottom: 4px;" id="confMemberName">John Boyte</div>
                     <div style="font-size: 15px; font-weight: 600; color: #64748b;" id="confMemberPhone">•••-•••-4080</div>
+                    <div style="margin-top: 14px;">
+                        <button class="btn btn-secondary" id="btnRetakePhotoChoice" style="font-size: 13px; height: 38px; padding: 0 16px; width: auto; display: inline-flex; align-items: center; justify-content: center; margin: 0 auto;" onclick="openRetakePhotoModal()">📷 Retake Profile Photo</button>
+                    </div>
                 </div>
 
                 <div class="btn-stack">
                     <button class="btn btn-primary" id="btnConfirmCheckIn" onclick="confirmAndSubmitCheckIn()">Yes — Check Me In 🚀</button>
                     <button class="btn btn-secondary" onclick="resetCheckInLookup()">No — Try Again</button>
+                </div>
+            </div>
+
+            <!-- RETAKE PHOTO MODAL / PREVIEW VIEW -->
+            <div id="checkinPhotoModal" class="hidden" style="margin-top: 16px; border: 1px solid #cbd5e1; border-radius: 12px; padding: 20px; background: #ffffff; text-align: center;">
+                <h3 id="retakeModalTitle" style="font-size: 18px; font-weight: 700; color: #0f172a; margin-bottom: 6px;">Retake Profile Photo</h3>
+                <p style="font-size: 13px; color: #64748b; margin-bottom: 14px;">Take a new photo to update your member profile picture:</p>
+
+                <div class="photo-preview-container" style="margin: 0 auto 16px auto;">
+                    <img id="retakePreviewImg" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2'%3E%3C/path%3E%3Ccircle cx='12' cy='7' r='4'%3E%3C/circle%3E%3C/svg%3E" alt="Preview">
+                </div>
+
+                <input type="file" id="retakeCameraInput" accept="image/*" capture="user" class="hidden" onchange="onRetakePhotoSelected(event)">
+                <input type="file" id="retakeFileInput" accept="image/*" class="hidden" onchange="onRetakePhotoSelected(event)">
+
+                <div id="retakeActionsInitial" class="btn-stack">
+                    <button class="btn btn-primary" onclick="document.getElementById('retakeCameraInput').click()">📷 Take Photo</button>
+                    <button class="btn btn-secondary" onclick="document.getElementById('retakeFileInput').click()">📁 Choose Photo from Device</button>
+                    <button class="btn btn-secondary" onclick="closeRetakePhotoModal()">Cancel</button>
+                </div>
+
+                <div id="retakeActionsPreview" class="btn-stack hidden">
+                    <button class="btn btn-primary" id="btnUseThisPhoto" onclick="saveRetakePhoto()">Use This Photo</button>
+                    <button class="btn btn-secondary" onclick="document.getElementById('retakeCameraInput').click()">Retake</button>
+                    <button class="btn btn-secondary" onclick="closeRetakePhotoModal()">Cancel</button>
                 </div>
             </div>
 
@@ -5757,6 +5846,7 @@ if ($uri === '/public' || $uri === '/public/' || $uri === '/public-returning') {
                     }
                     document.getElementById('confMemberName').textContent = res.first_name;
                     document.getElementById('confMemberPhone').textContent = res.masked_phone;
+                    updateCheckInConfirmViewPhoto();
                     document.getElementById('checkinLookupView').classList.add('hidden');
                     document.getElementById('checkinConfirmView').classList.remove('hidden');
                 } else if (res.error === 'multiple_matches') {
@@ -5773,6 +5863,110 @@ if ($uri === '/public' || $uri === '/public/' || $uri === '/public-returning') {
                 btn.textContent = 'Find Me 🔍';
                 msgEl.textContent = '⚠️ Unable to connect. Please try again or see a staff member.';
                 msgEl.classList.remove('hidden');
+            });
+        }
+
+        let pendingRetakeDataUrl = '';
+        const defaultAvatarSvg = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='60' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2'%3E%3C/path%3E%3Ccircle cx='12' cy='7' r='4'%3E%3C/circle%3E%3C/svg%3E";
+
+        function updateCheckInConfirmViewPhoto() {
+            const btn = document.getElementById('btnRetakePhotoChoice');
+            const img = document.getElementById('confMemberPhoto');
+            if (matchedMemberData && (matchedMemberData.profile_photo || matchedMemberData.has_photo)) {
+                if (matchedMemberData.profile_photo) {
+                    img.src = matchedMemberData.profile_photo;
+                } else if (matchedMemberData.human_id) {
+                    img.src = '/api/v1/mobile/people/photo?human_id=' + encodeURIComponent(matchedMemberData.human_id);
+                }
+                if (btn) btn.textContent = '📷 Retake Profile Photo';
+            } else {
+                img.src = defaultAvatarSvg;
+                if (btn) btn.textContent = '📷 Add Profile Photo';
+            }
+        }
+
+        function openRetakePhotoModal() {
+            pendingRetakeDataUrl = '';
+            const curPhoto = (matchedMemberData && matchedMemberData.profile_photo) ? matchedMemberData.profile_photo : defaultAvatarSvg;
+            document.getElementById('retakePreviewImg').src = curPhoto;
+            document.getElementById('retakeActionsInitial').classList.remove('hidden');
+            document.getElementById('retakeActionsPreview').classList.add('hidden');
+            document.getElementById('checkinPhotoModal').classList.remove('hidden');
+        }
+
+        function closeRetakePhotoModal() {
+            pendingRetakeDataUrl = '';
+            document.getElementById('checkinPhotoModal').classList.add('hidden');
+        }
+
+        function onRetakePhotoSelected(evt) {
+            const file = evt.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const img = new Image();
+                img.onload = function() {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = 600;
+                    canvas.height = 600;
+                    const ctx = canvas.getContext('2d');
+
+                    let minDim = Math.min(img.width, img.height);
+                    let sx = (img.width - minDim) / 2;
+                    let sy = (img.height - minDim) / 2;
+
+                    ctx.drawImage(img, sx, sy, minDim, minDim, 0, 0, 600, 600);
+                    const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+
+                    pendingRetakeDataUrl = dataUrl;
+                    document.getElementById('retakePreviewImg').src = dataUrl;
+                    document.getElementById('retakeActionsInitial').classList.add('hidden');
+                    document.getElementById('retakeActionsPreview').classList.remove('hidden');
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function saveRetakePhoto() {
+            if (!pendingRetakeDataUrl || !matchedMemberData) {
+                closeRetakePhotoModal();
+                return;
+            }
+
+            const btn = document.getElementById('btnUseThisPhoto');
+            btn.disabled = true;
+            btn.textContent = 'Saving Photo... ⏳';
+
+            const payload = {
+                human_id: matchedMemberData.human_id,
+                phone: matchedMemberData.phone || '',
+                profile_photo: pendingRetakeDataUrl
+            };
+
+            fetch('/api/v1/public/profile/update-photo', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            })
+            .then(r => r.json())
+            .then(res => {
+                btn.disabled = false;
+                btn.textContent = 'Use This Photo';
+                if (res.success) {
+                    matchedMemberData.profile_photo = pendingRetakeDataUrl;
+                    matchedMemberData.has_photo = true;
+                    updateCheckInConfirmViewPhoto();
+                    closeRetakePhotoModal();
+                } else {
+                    alert('Unable to save photo right now. Please try again.');
+                }
+            })
+            .catch(err => {
+                btn.disabled = false;
+                btn.textContent = 'Use This Photo';
+                alert('Unable to save photo right now. Please try again.');
             });
         }
 

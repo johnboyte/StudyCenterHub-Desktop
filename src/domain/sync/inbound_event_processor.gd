@@ -77,6 +77,10 @@ func _process_next_event(events: Array, index: int, processed_count: int, callba
 		print("[Processor] Processing portal.cancel_signup event ", event_id)
 		_process_portal_cancel_signup(event_id, payload)
 		_process_next_event(events, index + 1, processed_count + 1, callback)
+	elif event_type == "portal.update_photo":
+		print("[Processor] Processing portal.update_photo event ", event_id)
+		_process_portal_update_photo(event_id, payload)
+		_process_next_event(events, index + 1, processed_count + 1, callback)
 	elif event_type == "portal.pass_request":
 		print("[Processor] Processing portal.pass_request event ", event_id)
 		_process_portal_pass_request(event_id, payload)
@@ -269,6 +273,45 @@ func _process_portal_registration(event_id: int, payload: Dictionary) -> void:
 	const GatewaySyncServiceScript = preload("res://src/domain/sync/gateway_sync_service.gd")
 	var sync_svc = GatewaySyncServiceScript.new(db, parent_node)
 	sync_svc.publish_directory_index()
+
+func _process_portal_update_photo(event_id: int, payload: Dictionary) -> void:
+	var human_id = str(payload.get("human_id", payload.get("humanId", ""))).strip_edges()
+	var phone = str(payload.get("phone", "")).strip_edges()
+	var photo_base64 = str(payload.get("profile_photo", payload.get("profilePhoto", payload.get("photo", "")))).strip_edges()
+
+	if photo_base64 == "":
+		print("[Processor] Empty profile_photo in portal.update_photo event ", event_id)
+		db.execute("UPDATE inbound_event_queue SET processed = 1, status = 'photo_empty' WHERE id = ?;", [event_id])
+		return
+
+	var update_res = { "success": false }
+	var affected_rows = 0
+
+	if human_id != "":
+		update_res = db.execute("UPDATE people SET profile_photo = ?, updated_at = datetime('now') WHERE human_id = ?;", [photo_base64, human_id])
+		if update_res.get("success", false) and update_res.has("data") and update_res["data"].size() > 0:
+			affected_rows = int(update_res["data"][0].get("affected_rows", 0))
+
+	if affected_rows == 0 and phone != "":
+		var phone_e164 = str(payload.get("phone_e164", "")).strip_edges()
+		update_res = db.execute("UPDATE people SET profile_photo = ?, updated_at = datetime('now') WHERE phone = ? OR (phone IS NOT NULL AND phone != '' AND (phone = ? OR phone = ?));", [photo_base64, phone, phone, phone_e164])
+		if update_res.get("success", false) and update_res.has("data") and update_res["data"].size() > 0:
+			affected_rows = int(update_res["data"][0].get("affected_rows", 0))
+
+	if update_res.get("success", false) and (affected_rows > 0 or update_res.get("success", false)):
+		print("[Processor] Profile photo updated in SQLite for human_id=", human_id, " phone=", phone)
+		var res_data = {
+			"status": "photo_updated",
+			"human_id": human_id,
+			"has_photo": true
+		}
+		db.execute("UPDATE inbound_event_queue SET processed = 1, status = 'photo_updated', result_json = ? WHERE id = ?;", [JSON.stringify(res_data), event_id])
+		const GatewaySyncScript = preload("res://src/domain/sync/gateway_sync_service.gd")
+		var sync_svc = GatewaySyncScript.new(db, parent_node)
+		sync_svc.publish_directory_index()
+	else:
+		print("[Processor] Person not found for photo update human_id=", human_id)
+		db.execute("UPDATE inbound_event_queue SET processed = 1, status = 'person_not_found' WHERE id = ?;", [event_id])
 
 func _process_portal_checkin(event_id: int, payload: Dictionary) -> void:
 	var human_id = str(payload.get("humanId", payload.get("human_id", ""))).strip_edges()
