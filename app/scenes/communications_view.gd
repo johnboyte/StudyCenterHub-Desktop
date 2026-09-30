@@ -46,7 +46,14 @@ var btn_schedule_message: Button = null
 
 var selected_audience_type: String = "Individual"
 var selected_individual_ids: Array = []
-var individual_chips_container: HBoxContainer = null
+var individual_selection_vbox: VBoxContainer = null
+var recipient_search_input: LineEdit = null
+var btn_select_all_shown: Button = null
+var btn_clear_selection: Button = null
+var checkbox_scroll_container: ScrollContainer = null
+var checkbox_list_vbox: VBoxContainer = null
+var individual_chips_container: HFlowContainer = null
+var chips_scroll_container: ScrollContainer = null
 var real_life_status_dropdown: OptionButton = null
 var pathway_list: Array = []
 var session_list: Array = []
@@ -644,11 +651,75 @@ func _setup_communicate_send_composer() -> void:
 
 	composer_vbox.add_child(row1)
 
-	# Row 1.5: Selected Individual Chips Container
-	individual_chips_container = HBoxContainer.new()
-	individual_chips_container.add_theme_constant_override("separation", 8)
-	individual_chips_container.custom_minimum_size = Vector2(0, 34)
-	composer_vbox.add_child(individual_chips_container)
+	# Row 1.2: Checkbox Recipient Selection Section (Audience = Individual)
+	individual_selection_vbox = VBoxContainer.new()
+	individual_selection_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	individual_selection_vbox.add_theme_constant_override("separation", 6)
+
+	var search_bar_hbox = HBoxContainer.new()
+	search_bar_hbox.add_theme_constant_override("separation", 8)
+
+	recipient_search_input = LineEdit.new()
+	recipient_search_input.placeholder_text = "🔍 Search constituents by name, ID, phone, or email..."
+	recipient_search_input.custom_minimum_size = Vector2(240, 34)
+	recipient_search_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	recipient_search_input.caret_blink = true
+	recipient_search_input.add_theme_color_override("caret_color", Color(0.12, 0.16, 0.22, 1.0))
+	_style_input_control(recipient_search_input, 13)
+	search_bar_hbox.add_child(recipient_search_input)
+
+	btn_select_all_shown = Button.new()
+	btn_select_all_shown.text = "Select All Shown"
+	btn_select_all_shown.custom_minimum_size = Vector2(120, 34)
+	_style_secondary_button(btn_select_all_shown)
+	search_bar_hbox.add_child(btn_select_all_shown)
+
+	btn_clear_selection = Button.new()
+	btn_clear_selection.text = "Clear Selection"
+	btn_clear_selection.custom_minimum_size = Vector2(110, 34)
+	_style_secondary_button(btn_clear_selection)
+	search_bar_hbox.add_child(btn_clear_selection)
+
+	individual_selection_vbox.add_child(search_bar_hbox)
+
+	checkbox_scroll_container = ScrollContainer.new()
+	checkbox_scroll_container.custom_minimum_size = Vector2(0, 140)
+	checkbox_scroll_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	checkbox_scroll_container.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	checkbox_scroll_container.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	
+	var scroll_st = StyleBoxFlat.new()
+	scroll_st.bg_color = Color(0.98, 0.99, 1.0, 1.0)
+	scroll_st.border_width_left = 1; scroll_st.border_width_top = 1; scroll_st.border_width_right = 1; scroll_st.border_width_bottom = 1
+	scroll_st.border_color = Color(0.85, 0.88, 0.92, 1.0)
+	scroll_st.corner_radius_top_left = 6; scroll_st.corner_radius_top_right = 6; scroll_st.corner_radius_bottom_left = 6; scroll_st.corner_radius_bottom_right = 6
+	scroll_st.content_margin_left = 8; scroll_st.content_margin_top = 6; scroll_st.content_margin_right = 8; scroll_st.content_margin_bottom = 6
+	checkbox_scroll_container.add_theme_stylebox_override("panel", scroll_st)
+
+	checkbox_list_vbox = VBoxContainer.new()
+	checkbox_list_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	checkbox_list_vbox.add_theme_constant_override("separation", 4)
+	checkbox_scroll_container.add_child(checkbox_list_vbox)
+
+	individual_selection_vbox.add_child(checkbox_scroll_container)
+
+	composer_vbox.add_child(individual_selection_vbox)
+
+	# Row 1.5: Selected Individual Chips Scroll & Flow Container
+	chips_scroll_container = ScrollContainer.new()
+	chips_scroll_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	chips_scroll_container.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	chips_scroll_container.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	chips_scroll_container.custom_minimum_size = Vector2(0, 0)
+	chips_scroll_container.visible = false
+
+	individual_chips_container = HFlowContainer.new()
+	individual_chips_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	individual_chips_container.add_theme_constant_override("h_separation", 8)
+	individual_chips_container.add_theme_constant_override("v_separation", 8)
+	chips_scroll_container.add_child(individual_chips_container)
+
+	composer_vbox.add_child(chips_scroll_container)
 
 	# Row 2: Delivery Channel, Recipient Summary & Review Button
 	var row2 = HBoxContainer.new()
@@ -1138,15 +1209,138 @@ func _populate_dropdowns() -> void:
 				var name = (fn + " " + ln).strip_edges() + " (" + str(p.get("human_id", "")) + ")"
 				recipient_dropdown.add_item(name, i + 1)
 
+	_refresh_checkbox_list()
 	_refresh_individual_chips()
 	_on_audience_type_selected(0)
+
+func _refresh_checkbox_list() -> void:
+	if not checkbox_list_vbox: return
+	for c in checkbox_list_vbox.get_children():
+		checkbox_list_vbox.remove_child(c)
+		c.queue_free()
+
+	var filter_text = recipient_search_input.text.strip_edges().to_lower() if recipient_search_input else ""
+
+	for p in person_list:
+		var pid = int(p.get("id", 0))
+		var fn = str(p.get("first_name", "")).strip_edges()
+		var ln = str(p.get("last_name", "")).strip_edges()
+		var full_name = (fn + " " + ln).strip_edges()
+		var hid = str(p.get("human_id", ""))
+		var phone = str(p.get("phone", ""))
+		var email = str(p.get("email", ""))
+
+		if filter_text != "":
+			var match_name = full_name.to_lower()
+			var match_hid = hid.to_lower()
+			var match_phone = phone.to_lower()
+			var match_email = email.to_lower()
+			if not (filter_text in match_name or filter_text in match_hid or filter_text in match_phone or filter_text in match_email):
+				continue
+
+		var row = HBoxContainer.new()
+		row.add_theme_constant_override("separation", 8)
+		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+		var cb = CheckBox.new()
+		cb.text = full_name
+		cb.set_meta("person_id", pid)
+		cb.add_theme_font_size_override("font_size", 13)
+		cb.add_theme_color_override("font_color", Color(0.12, 0.18, 0.26, 1.0))
+		cb.add_theme_color_override("font_hover_color", Color(0.88, 0.35, 0.21, 1.0))
+		cb.add_theme_color_override("font_pressed_color", Color(0.12, 0.18, 0.26, 1.0))
+		cb.button_pressed = (pid in selected_individual_ids)
+
+		var cur_pid = pid
+		cb.toggled.connect(func(toggled_on: bool):
+			if toggled_on:
+				if not cur_pid in selected_individual_ids:
+					selected_individual_ids.append(cur_pid)
+			else:
+				selected_individual_ids.erase(cur_pid)
+			_refresh_individual_chips()
+			_update_channel_dropdown_options()
+			_update_audience_resolution()
+		)
+		row.add_child(cb)
+
+		var sub_info = []
+		if hid != "": sub_info.append(hid)
+		if phone != "": sub_info.append(phone)
+		elif email != "": sub_info.append(email)
+
+		if sub_info.size() > 0:
+			var sub_lbl = Label.new()
+			sub_lbl.text = "• " + " | ".join(sub_info)
+			sub_lbl.add_theme_font_size_override("font_size", 12)
+			sub_lbl.add_theme_color_override("font_color", Color(0.50, 0.55, 0.62, 1.0))
+			row.add_child(sub_lbl)
+
+		checkbox_list_vbox.add_child(row)
+
+func _sync_checkbox_states() -> void:
+	if not checkbox_list_vbox: return
+	for row in checkbox_list_vbox.get_children():
+		for child in row.get_children():
+			if child is CheckBox:
+				var cb = child as CheckBox
+				if cb.has_meta("person_id"):
+					var pid = int(cb.get_meta("person_id"))
+					var is_selected = (pid in selected_individual_ids)
+					if cb.button_pressed != is_selected:
+						cb.set_block_signals(true)
+						cb.button_pressed = is_selected
+						cb.set_block_signals(false)
+
+func _on_select_all_shown_pressed() -> void:
+	var filter_text = recipient_search_input.text.strip_edges().to_lower() if recipient_search_input else ""
+	for p in person_list:
+		var pid = int(p.get("id", 0))
+		var fn = str(p.get("first_name", "")).strip_edges()
+		var ln = str(p.get("last_name", "")).strip_edges()
+		var full_name = (fn + " " + ln).strip_edges()
+		var hid = str(p.get("human_id", ""))
+		var phone = str(p.get("phone", ""))
+		var email = str(p.get("email", ""))
+
+		if filter_text != "":
+			var match_name = full_name.to_lower()
+			var match_hid = hid.to_lower()
+			var match_phone = phone.to_lower()
+			var match_email = email.to_lower()
+			if not (filter_text in match_name or filter_text in match_hid or filter_text in match_phone or filter_text in match_email):
+				continue
+
+		if not pid in selected_individual_ids:
+			selected_individual_ids.append(pid)
+
+	_refresh_individual_chips()
+	_sync_checkbox_states()
+	_update_channel_dropdown_options()
+	_update_audience_resolution()
+
+func _on_clear_selection_pressed() -> void:
+	selected_individual_ids.clear()
+	_refresh_individual_chips()
+	_sync_checkbox_states()
+	_update_channel_dropdown_options()
+	_update_audience_resolution()
 
 func _refresh_individual_chips() -> void:
 	if not individual_chips_container: return
 	for c in individual_chips_container.get_children():
+		individual_chips_container.remove_child(c)
 		c.queue_free()
 
-	if selected_individual_ids.size() == 0: return
+	if selected_individual_ids.size() == 0:
+		if chips_scroll_container:
+			chips_scroll_container.visible = false
+			chips_scroll_container.custom_minimum_size = Vector2(0, 0)
+		_sync_checkbox_states()
+		return
+
+	if chips_scroll_container:
+		chips_scroll_container.visible = (selected_audience_type == "Individual")
 
 	for pid in selected_individual_ids:
 		var p_dict = {}
@@ -1194,6 +1388,23 @@ func _refresh_individual_chips() -> void:
 		chip.add_child(hbox)
 		individual_chips_container.add_child(chip)
 
+	_update_chips_scroll_height()
+	_sync_checkbox_states()
+
+func _update_chips_scroll_height() -> void:
+	if not chips_scroll_container or not individual_chips_container: return
+	if selected_individual_ids.size() == 0:
+		chips_scroll_container.custom_minimum_size = Vector2(0, 0)
+		chips_scroll_container.visible = false
+		return
+
+	chips_scroll_container.visible = (selected_audience_type == "Individual")
+	await get_tree().process_frame
+	if not is_inside_tree() or not individual_chips_container: return
+	var content_h = individual_chips_container.get_combined_minimum_size().y
+	var target_h = clamp(content_h, 34, 140)
+	chips_scroll_container.custom_minimum_size = Vector2(0, target_h)
+
 func _connect_signals() -> void:
 	if btn_send_message and not btn_send_message.pressed.is_connected(_on_send_message_pressed):
 		btn_send_message.pressed.connect(_on_send_message_pressed)
@@ -1209,6 +1420,12 @@ func _connect_signals() -> void:
 		pathway_dropdown.item_selected.connect(_on_pathway_selected)
 	if session_dropdown and not session_dropdown.item_selected.is_connected(_on_session_selected):
 		session_dropdown.item_selected.connect(_on_session_selected)
+	if recipient_search_input and not recipient_search_input.text_changed.is_connected(_refresh_checkbox_list):
+		recipient_search_input.text_changed.connect(func(_t): _refresh_checkbox_list())
+	if btn_select_all_shown and not btn_select_all_shown.pressed.is_connected(_on_select_all_shown_pressed):
+		btn_select_all_shown.pressed.connect(_on_select_all_shown_pressed)
+	if btn_clear_selection and not btn_clear_selection.pressed.is_connected(_on_clear_selection_pressed):
+		btn_clear_selection.pressed.connect(_on_clear_selection_pressed)
 	if recipient_dropdown and not recipient_dropdown.item_selected.is_connected(_on_individual_selected):
 		recipient_dropdown.item_selected.connect(_on_individual_selected)
 	if btn_review_recipients and not btn_review_recipients.pressed.is_connected(_open_review_recipients_dialog):
@@ -1219,7 +1436,8 @@ func _on_audience_type_selected(index: int) -> void:
 	selected_audience_type = audience_type_dropdown.get_item_text(index)
 
 	if recipient_dropdown: recipient_dropdown.visible = (selected_audience_type == "Individual")
-	if individual_chips_container: individual_chips_container.visible = (selected_audience_type == "Individual")
+	if individual_selection_vbox: individual_selection_vbox.visible = (selected_audience_type == "Individual")
+	if chips_scroll_container: chips_scroll_container.visible = (selected_audience_type == "Individual" and selected_individual_ids.size() > 0)
 	if real_life_status_dropdown: real_life_status_dropdown.visible = (selected_audience_type == "Real Life")
 	if pathway_dropdown: pathway_dropdown.visible = (selected_audience_type == "Pathway")
 	if session_dropdown: session_dropdown.visible = (selected_audience_type == "Session")
@@ -1270,6 +1488,7 @@ func _on_individual_selected(index: int) -> void:
 	if recipient_dropdown:
 		recipient_dropdown.select(0)
 	_refresh_individual_chips()
+	_sync_checkbox_states()
 	_update_channel_dropdown_options()
 	_update_audience_resolution()
 
