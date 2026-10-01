@@ -39,36 +39,43 @@ func _run_verification() -> void:
 
 	# Insert synthetic test person: McKenna Boykin (+17073656637)
 	db.execute("INSERT INTO directory_index (human_id, phone_e164, first_name, last_name, masked_phone) VALUES ('SCH-9001', '+17073656637', 'McKenna', 'Boykin', '•••-•••-6637');")
+	# Insert actual failed constituent record: Khalil Peake (+18646074831)
+	db.execute("INSERT INTO directory_index (human_id, phone_e164, first_name, last_name, masked_phone) VALUES ('P-20260927-2190', '+18646074831', 'khalil', 'peake', '•••-•••-4831');")
 
 	# Test 1: Known normalized phone (+17073656637) -> displays "McKenna Boykin"
 	var name_1 = _lookup_constituent_name(db, "+17073656637")
 	assert(name_1 == "McKenna Boykin", "TEST 1 FAIL: Expected 'McKenna Boykin', got '" + name_1 + "'")
 	print("✓ PASS 1: Known normalized phone +17073656637 resolves to 'McKenna Boykin'.")
 
-	# Test 2: Different formatting of same phone ("(707) 365-6637", "7073656637", "17073656637") -> still matches correctly
-	var name_2a = _lookup_constituent_name(db, "(707) 365-6637")
-	assert(name_2a == "McKenna Boykin", "TEST 2a FAIL: Formatted (707) 365-6637 failed to match")
-	var name_2b = _lookup_constituent_name(db, "7073656637")
-	assert(name_2b == "McKenna Boykin", "TEST 2b FAIL: Raw digits 7073656637 failed to match")
-	var name_2c = _lookup_constituent_name(db, "17073656637")
-	assert(name_2c == "McKenna Boykin", "TEST 2c FAIL: 11-digit 17073656637 failed to match")
-	print("✓ PASS 2: Different phone number formats all match correctly to 'McKenna Boykin'.")
+	# Test 2: Actual failed constituent inbound phone (+18646074831) -> displays "khalil peake"
+	var name_actual = _lookup_constituent_name(db, "+18646074831")
+	assert(name_actual == "khalil peake", "TEST 2 FAIL: Actual failed number +18646074831 expected 'khalil peake', got '" + name_actual + "'")
+	print("✓ PASS 2: Actual failed constituent number +18646074831 resolves to 'khalil peake'.")
 
-	# Test 3: Unknown phone (+18645550222) -> displays "Unknown Contact"
-	var name_3 = _lookup_constituent_name(db, "+18645550222")
-	assert(name_3 == "Unknown Contact", "TEST 3 FAIL: Expected 'Unknown Contact', got '" + name_3 + "'")
-	print("✓ PASS 3: Unknown phone +18645550222 falls back to 'Unknown Contact'.")
+	# Test 3: Different formatting of same phone ("(864) 607-4831", "8646074831", "18646074831") -> still matches correctly
+	var name_3a = _lookup_constituent_name(db, "(864) 607-4831")
+	assert(name_3a == "khalil peake", "TEST 3a FAIL: Formatted (864) 607-4831 failed to match")
+	var name_3b = _lookup_constituent_name(db, "8646074831")
+	assert(name_3b == "khalil peake", "TEST 3b FAIL: Raw digits 8646074831 failed to match")
+	var name_3c = _lookup_constituent_name(db, "18646074831")
+	assert(name_3c == "khalil peake", "TEST 3c FAIL: 11-digit 18646074831 failed to match")
+	print("✓ PASS 3: Different phone number formats all match correctly to 'khalil peake'.")
 
-	# Test 4: Verify Header & Relay Message Formatting
-	var msg_known = _format_relay_message(name_1, "+17073656637", "Can I attend tonight?", "BM49")
-	assert(msg_known.begins_with("STUDY CENTER — McKenna Boykin\n(707) 365-6637"), "TEST 4a FAIL: Header formatting incorrect for known contact")
-	assert(msg_known.contains("Ref: BM49"), "TEST 4b FAIL: Token missing from formatted message")
-	assert(msg_known.contains("BM49 your reply"), "TEST 4c FAIL: Token reply instructions missing")
+	# Test 4: Unknown phone (+18645550222) -> displays "Unknown Contact"
+	var name_4 = _lookup_constituent_name(db, "+18645550222")
+	assert(name_4 == "Unknown Contact", "TEST 4 FAIL: Expected 'Unknown Contact', got '" + name_4 + "'")
+	print("✓ PASS 4: Unknown phone +18645550222 falls back to 'Unknown Contact'.")
 
-	var msg_unknown = _format_relay_message(name_3, "+18645550222", "Hello there", "BM49")
-	assert(msg_unknown.begins_with("STUDY CENTER — Unknown Contact\n(864) 555-0222"), "TEST 4d FAIL: Header formatting incorrect for unknown contact")
+	# Test 5: Verify Header & Relay Message Formatting
+	var msg_known = _format_relay_message(name_actual, "+18646074831", "Thank you so much John!", "BM49")
+	assert(msg_known.begins_with("STUDY CENTER — khalil peake\n(864) 607-4831"), "TEST 5a FAIL: Header formatting incorrect for known contact")
+	assert(msg_known.contains("Ref: BM49"), "TEST 5b FAIL: Token missing from formatted message")
+	assert(msg_known.contains("BM49 your reply"), "TEST 5c FAIL: Token reply instructions missing")
 
-	print("✓ PASS 4: Message header and token body formatting verified for both known and unknown contacts.")
+	var msg_unknown = _format_relay_message(name_4, "+18645550222", "Hello there", "BM49")
+	assert(msg_unknown.begins_with("STUDY CENTER — Unknown Contact\n(864) 555-0222"), "TEST 5d FAIL: Header formatting incorrect for unknown contact")
+
+	print("✓ PASS 5: Message header and token body formatting verified for both known and unknown contacts.")
 
 	# Clean up test DB
 	if FileAccess.file_exists(test_db_path):

@@ -315,6 +315,13 @@ func _handle_shift_briefing_delete(payload: Dictionary) -> void:
 	)
 
 func _push_acknowledgements(callback: Callable, inserted_count: int) -> void:
+	# Always publish directory_index and active operational indices during sync
+	publish_directory_index()
+	publish_today_attendance_index()
+	publish_staff_credentials_index()
+	publish_person_notes()
+	publish_staff_tasks()
+
 	# Find processed events to acknowledge on relay
 	db.execute("ALTER TABLE inbound_event_queue ADD COLUMN status TEXT DEFAULT 'pending';")
 	db.execute("ALTER TABLE inbound_event_queue ADD COLUMN result_json TEXT DEFAULT NULL;")
@@ -351,11 +358,6 @@ func _push_acknowledgements(callback: Callable, inserted_count: int) -> void:
 		return
 		
 	http_client.request_completed.connect(func(_result: int, response_code: int, _r_headers: PackedStringArray, _body_bytes: PackedByteArray):
-		publish_directory_index()
-		publish_today_attendance_index()
-		publish_staff_credentials_index()
-		publish_person_notes()
-		publish_staff_tasks()
 		if response_code >= 200 and response_code < 300:
 			callback.call({"success": true, "inserted_count": inserted_count, "ack_count": event_ids.size()})
 		else:
