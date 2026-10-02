@@ -92,4 +92,34 @@ static func poll_event(handle: int) -> Dictionary:
 				}
 	return {}
 
+static func enable_external_drag() -> void:
+	if OS.get_name() != "macOS" or DisplayServer.get_name() == "headless":
+		return
+	if ClassDB.class_exists("MacWKWebViewHelper"):
+		var helper = ClassDB.instantiate("MacWKWebViewHelper")
+		if helper:
+			helper.call("enableExternalDrag")
+
+static func poll_external_drop() -> Dictionary:
+	if OS.get_name() != "macOS" or DisplayServer.get_name() == "headless":
+		return {}
+	if ClassDB.class_exists("MacWKWebViewHelper"):
+		var helper = ClassDB.instantiate("MacWKWebViewHelper")
+		if helper:
+			var res = helper.call("pollExternalDrop")
+			if res is String and res != "":
+				var parts = res.split("|", true, 6)
+				if parts.size() >= 7 and parts[0] == "EXTERNAL_DROP":
+					return {
+						"event": "EXTERNAL_DROP",
+						"raw_type": parts[1],
+						"x": float(parts[2]),
+						"y": float(parts[3]),
+						"window_w": float(parts[4]),
+						"window_h": float(parts[5]),
+						"payload": parts[6]
+					}
+	return {}
+
+
 

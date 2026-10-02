@@ -81,10 +81,77 @@ func _ready() -> void:
 		if not win.focus_entered.is_connected(_check_clipboard_on_focus):
 			win.focus_entered.connect(_check_clipboard_on_focus)
 
+	if OS.get_name() == "macOS":
+		NativePlayerBridge.enable_external_drag()
+
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	mouse_default_cursor_shape = Control.CURSOR_CAN_DROP
 
 	load_playlists()
+
+func _process(_delta: float) -> void:
+	if OS.get_name() == "macOS":
+		var drop_data = NativePlayerBridge.poll_external_drop()
+		if not drop_data.is_empty():
+			_handle_native_external_drop(drop_data)
+
+func _handle_native_external_drop(drop_data: Dictionary) -> void:
+	var raw_type = str(drop_data.get("raw_type", "unknown"))
+	var payload = str(drop_data.get("payload", ""))
+	var drop_x = float(drop_data.get("x", 0.0))
+	var drop_y = float(drop_data.get("y", 0.0))
+	
+	var payload_kind = "other"
+	if payload.begins_with("http://") or payload.begins_with("https://") or "youtube.com" in payload or "youtu.be" in payload:
+		payload_kind = "URL"
+	elif payload.ends_with(".webloc"):
+		payload_kind = ".webloc"
+	elif payload.begins_with("/"):
+		payload_kind = "file path"
+	elif payload.length() > 0:
+		payload_kind = "plain text"
+		
+	print("\n==============================================================================")
+	print("[EXTERNAL DROP RECEIVED] Native macOS External Drag Bridge")
+	print("- Source/Event Type: macOS Native Drag (%s)" % raw_type)
+	print("- Number of payload items: 1")
+	print("- Payload kind: %s" % payload_kind)
+	print("- Drop coordinates: (%.1f, %.1f)" % [drop_x, drop_y])
+	print("==============================================================================\n")
+	
+	var drop_pos = Vector2(drop_x, drop_y)
+	var target_pl_id = current_playlist_id
+	if target_pl_id.is_empty() and playlists_list.size() > 0:
+		target_pl_id = str(playlists_list[0].get("id", ""))
+		
+	var target_idx = -1
+	
+	if sidebar_vbox and playlists_vbox:
+		var sb_rect = sidebar_panel.get_global_rect() if sidebar_panel else Rect2()
+		if sb_rect.has_point(drop_pos):
+			for child in playlists_vbox.get_children():
+				if child is PlaylistCardControl and child.get_global_rect().has_point(drop_pos):
+					target_pl_id = child.playlist_id
+					target_idx = -1
+					break
+	
+	if items_vbox:
+		for child in items_vbox.get_children():
+			if child is SongDropSlotControl and child.get_global_rect().has_point(drop_pos):
+				target_idx = child.slot_index
+				break
+			elif child is Control and not (child is SongDropSlotControl) and child.get_global_rect().has_point(drop_pos):
+				var crect = child.get_global_rect()
+				var child_idx = child.get_index()
+				var slot_calc = int(child_idx / 2)
+				if drop_pos.y > crect.position.y + (crect.size.y / 2.0):
+					target_idx = slot_calc + 1
+				else:
+					target_idx = slot_calc
+				break
+
+	_process_dropped_url_or_file(payload, target_pl_id, target_idx)
+
 
 func _set_container_mouse_filters_pass() -> void:
 	var containers = [
@@ -813,8 +880,21 @@ func _format_duration(seconds: int) -> String:
 
 func _on_files_dropped(files: PackedStringArray) -> void:
 	if files.size() == 0: return
+	var payload_kind = "file path"
+	if files[0].ends_with(".webloc"):
+		payload_kind = ".webloc"
+	elif files[0].begins_with("http://") or files[0].begins_with("https://"):
+		payload_kind = "URL"
+	print("\n==============================================================================")
+	print("[EXTERNAL DROP RECEIVED] Godot Window.files_dropped")
+	print("- Source/Event Type: Godot Window.files_dropped")
+	print("- Number of payload items: %d" % files.size())
+	print("- Payload kind: %s" % payload_kind)
+	print("==============================================================================\n")
+
 	var drop_pos = get_global_mouse_position()
 	var target_pl_id = current_playlist_id
+
 
 	if target_pl_id.is_empty() and playlists_list.size() > 0:
 		target_pl_id = str(playlists_list[0].get("id", ""))

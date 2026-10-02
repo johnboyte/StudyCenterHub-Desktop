@@ -1,12 +1,214 @@
 #import <Foundation/Foundation.h>
 #import <AppKit/AppKit.h>
 #import <WebKit/WebKit.h>
+#import <objc/runtime.h>
 #include <mutex>
 #include <vector>
 #include <string>
 #include <cstdlib>
 #include <cstring>
 #include "gdextension_interface.h"
+
+// ==============================================================================
+// MACOS NATIVE BROWSER URL DRAG & DROP BRIDGE
+// ==============================================================================
+
+struct ExternalDropEvent {
+    std::string payload;
+    std::string raw_type;
+    float x;
+    float y;
+    float window_w;
+    float window_h;
+};
+
+static std::mutex g_drop_mutex;
+static std::vector<ExternalDropEvent> g_drop_events;
+static bool g_drag_bridge_initialized = false;
+
+typedef NSDragOperation (*OriginalDragEnteredIMP)(id, SEL, id<NSDraggingInfo>);
+typedef NSDragOperation (*OriginalDragUpdatedIMP)(id, SEL, id<NSDraggingInfo>);
+typedef BOOL (*OriginalPerformDragIMP)(id, SEL, id<NSDraggingInfo>);
+
+static OriginalDragEnteredIMP orig_draggingEntered = nullptr;
+static OriginalDragUpdatedIMP orig_draggingUpdated = nullptr;
+static OriginalPerformDragIMP orig_performDragOperation = nullptr;
+
+static NSString* extractURLFromPasteboard(NSPasteboard *pboard, NSString **outType) {
+    if (!pboard) return nil;
+    
+    // 1. Try URL objects
+    NSArray *urls = [pboard readObjectsForClasses:@[[NSURL class]] options:nil];
+    if (urls && urls.count > 0) {
+        for (NSURL *url in urls) {
+            if (url.absoluteString && url.absoluteString.length > 0) {
+                if (outType) *outType = url.isFileURL ? @"public.file-url" : @"public.url";
+                return url.absoluteString;
+            }
+        }
+    }
+    
+    // 2. Try NSPasteboardTypeURL
+    NSString *urlStr = [pboard stringForType:NSPasteboardTypeURL];
+    if (urlStr && urlStr.length > 0) {
+        if (outType) *outType = @"public.url";
+        return urlStr;
+    }
+
+    // 3. WebURLsWithTitlesPboardType (Safari drag)
+    NSArray *webUrls = [pboard propertyListForType:@"WebURLsWithTitlesPboardType"];
+    if (webUrls && [webUrls isKindOfClass:[NSArray class]] && webUrls.count > 0 && [webUrls[0] isKindOfClass:[NSArray class]]) {
+        NSArray *urlList = webUrls[0];
+        if (urlList.count > 0 && [urlList[0] isKindOfClass:[NSString class]]) {
+            if (outType) *outType = @"WebURLsWithTitlesPboardType";
+            return urlList[0];
+        }
+    }
+
+    // 4. Plain text (public.utf8-plain-text / NSPasteboardTypeString)
+    NSString *str = [pboard stringForType:NSPasteboardTypeString];
+    if (str && str.length > 0) {
+        if (outType) *outType = @"public.utf8-plain-text";
+        return str;
+    }
+
+    // 5. File URLs / filenames (e.g. .webloc)
+    NSArray *files = [pboard propertyListForType:NSFilenamesPboardType];
+    if (files && [files isKindOfClass:[NSArray class]] && files.count > 0) {
+        NSString *filePath = files[0];
+        if ([filePath hasSuffix:@".webloc"]) {
+            NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:filePath];
+            NSString *weblocUrl = dict[@"URL"];
+            if (weblocUrl && weblocUrl.length > 0) {
+                if (outType) *outType = @".webloc";
+                return weblocUrl;
+            }
+        }
+        if (outType) *outType = @"NSFilenamesPboardType";
+        return filePath;
+    }
+
+    return nil;
+}
+
+static NSDragOperation custom_draggingEntered(id self, SEL _cmd, id<NSDraggingInfo> sender) {
+    NSPasteboard *pboard = [sender draggingPasteboard];
+    NSString *rawType = nil;
+    NSString *extracted = extractURLFromPasteboard(pboard, &rawType);
+    if (extracted && extracted.length > 0) {
+        return NSDragOperationCopy;
+    }
+    if (orig_draggingEntered) {
+        return orig_draggingEntered(self, _cmd, sender);
+    }
+    return NSDragOperationNone;
+}
+
+static NSDragOperation custom_draggingUpdated(id self, SEL _cmd, id<NSDraggingInfo> sender) {
+    NSPasteboard *pboard = [sender draggingPasteboard];
+    NSString *rawType = nil;
+    NSString *extracted = extractURLFromPasteboard(pboard, &rawType);
+    if (extracted && extracted.length > 0) {
+        return NSDragOperationCopy;
+    }
+    if (orig_draggingUpdated) {
+        return orig_draggingUpdated(self, _cmd, sender);
+    }
+    return NSDragOperationNone;
+}
+
+static BOOL custom_performDragOperation(id self, SEL _cmd, id<NSDraggingInfo> sender) {
+    NSPasteboard *pboard = [sender draggingPasteboard];
+    NSString *rawType = @"unknown";
+    NSString *extracted = extractURLFromPasteboard(pboard, &rawType);
+    
+    if (extracted && extracted.length > 0) {
+        NSPoint loc = [sender draggingLocation];
+        NSView *view = (NSView *)self;
+        NSRect bounds = view.bounds;
+        
+        float godot_x = (float)loc.x;
+        float godot_y = (float)(bounds.size.height - loc.y);
+        
+        {
+            std::lock_guard<std::mutex> lock(g_drop_mutex);
+            g_drop_events.push_back({
+                [extracted UTF8String],
+                [rawType UTF8String],
+                godot_x,
+                godot_y,
+                (float)bounds.size.width,
+                (float)bounds.size.height
+            });
+        }
+        
+        NSLog(@"[NATIVE_LOG] EXTERNAL DROP RECEIVED type=%@ payload_len=%lu loc=(%.1f, %.1f)",
+              rawType, (unsigned long)extracted.length, godot_x, godot_y);
+        
+        return YES;
+    }
+    
+    if (orig_performDragOperation) {
+        return orig_performDragOperation(self, _cmd, sender);
+    }
+    return NO;
+}
+
+static void setup_drag_swizzle(Class cls) {
+    if (!cls) return;
+    static bool swizzled = false;
+    if (swizzled) return;
+    swizzled = true;
+
+    Method mEntered = class_getInstanceMethod(cls, @selector(draggingEntered:));
+    if (mEntered) {
+        orig_draggingEntered = (OriginalDragEnteredIMP)method_getImplementation(mEntered);
+        method_setImplementation(mEntered, (IMP)custom_draggingEntered);
+    } else {
+        class_addMethod(cls, @selector(draggingEntered:), (IMP)custom_draggingEntered, "q@:@");
+    }
+
+    Method mUpdated = class_getInstanceMethod(cls, @selector(draggingUpdated:));
+    if (mUpdated) {
+        orig_draggingUpdated = (OriginalDragUpdatedIMP)method_getImplementation(mUpdated);
+        method_setImplementation(mUpdated, (IMP)custom_draggingUpdated);
+    } else {
+        class_addMethod(cls, @selector(draggingUpdated:), (IMP)custom_draggingUpdated, "q@:@");
+    }
+
+    Method mPerform = class_getInstanceMethod(cls, @selector(performDragOperation:));
+    if (mPerform) {
+        orig_performDragOperation = (OriginalPerformDragIMP)method_getImplementation(mPerform);
+        method_setImplementation(mPerform, (IMP)custom_performDragOperation);
+    } else {
+        class_addMethod(cls, @selector(performDragOperation:), (IMP)custom_performDragOperation, "B@:@");
+    }
+}
+
+static void enable_external_drag_drop_native() {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSArray *wins = [NSApp windows];
+        for (NSWindow *win in wins) {
+            if (win.contentView) {
+                NSArray *dragTypes = @[
+                    NSPasteboardTypeURL,
+                    NSPasteboardTypeString,
+                    NSPasteboardTypeFileURL,
+                    @"public.url",
+                    @"public.file-url",
+                    @"public.utf8-plain-text",
+                    @"WebURLsWithTitlesPboardType",
+                    @"NSFilenamesPboardType"
+                ];
+                [win registerForDraggedTypes:dragTypes];
+                [win.contentView registerForDraggedTypes:dragTypes];
+                setup_drag_swizzle([win.contentView class]);
+                g_drag_bridge_initialized = true;
+            }
+        }
+    });
+}
+
 
 struct PlayerEvent {
     std::string name;
@@ -554,6 +756,33 @@ static void call_poll_event(void *userdata, GDExtensionClassInstancePtr instance
     }
 }
 
+static void call_enable_external_drag(void *userdata, GDExtensionClassInstancePtr instance, const GDExtensionConstVariantPtr *args, GDExtensionInt arg_count, GDExtensionVariantPtr r_return, GDExtensionCallError *r_error) {
+    enable_external_drag_drop_native();
+}
+
+static void call_poll_external_drop(void *userdata, GDExtensionClassInstancePtr instance, const GDExtensionConstVariantPtr *args, GDExtensionInt arg_count, GDExtensionVariantPtr r_return, GDExtensionCallError *r_error) {
+    std::string result_str = "";
+    {
+        std::lock_guard<std::mutex> lock(g_drop_mutex);
+        if (!g_drop_events.empty()) {
+            ExternalDropEvent ev = g_drop_events.front();
+            g_drop_events.erase(g_drop_events.begin());
+            
+            char buf[4096] = {0};
+            snprintf(buf, sizeof(buf), "EXTERNAL_DROP|%s|%.1f|%.1f|%.1f|%.1f|%s",
+                     ev.raw_type.c_str(), ev.x, ev.y, ev.window_w, ev.window_h, ev.payload.c_str());
+            result_str = buf;
+        }
+    }
+    
+    if (r_return && conv_to_string && p_string_new_utf8) {
+        uint8_t godot_str[64] = {0};
+        p_string_new_utf8(godot_str, result_str.c_str(), result_str.length());
+        conv_to_string(r_return, godot_str);
+    }
+}
+
+
 static void register_method_helper(GDExtensionClassLibraryPtr p_library, const char* class_name, const char* method_name, GDExtensionClassMethodCall call_func, bool has_return) {
 
     if (!p_register_method || !p_string_name_new) return;
@@ -672,7 +901,14 @@ static void initialize_mac_wkwebview_module(void *p_userdata, GDExtensionInitial
 
         register_method_helper(g_library, "MacWKWebViewHelper", "pollEvent", call_poll_event, true);
         register_method_helper(g_library, "MacWKWebViewHelper", "poll_event", call_poll_event, true);
+
+        register_method_helper(g_library, "MacWKWebViewHelper", "enableExternalDrag", call_enable_external_drag, false);
+        register_method_helper(g_library, "MacWKWebViewHelper", "enable_external_drag", call_enable_external_drag, false);
+
+        register_method_helper(g_library, "MacWKWebViewHelper", "pollExternalDrop", call_poll_external_drop, true);
+        register_method_helper(g_library, "MacWKWebViewHelper", "poll_external_drop", call_poll_external_drop, true);
         NSLog(@"[MAC_WKWEBVIEW_INIT] All methods registered!");
+
     }
 }
 
