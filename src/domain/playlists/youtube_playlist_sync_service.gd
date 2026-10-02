@@ -92,10 +92,10 @@ func sync_playlist(playlist_id: String) -> Dictionary:
 	if oauth_service:
 		token = await oauth_service.get_valid_access_token()
 	if token.is_empty() and not mock_mode:
-		playlists_service.update_playlist_sync_status(playlist_id, "youtube", "sync_error", "YouTube account authorization required.")
+		playlists_service.update_playlist_sync_status(playlist_id, "youtube", "sync_error", "YouTube connection expired. Reconnect YouTube in Settings.")
 		return {
 			"success": false,
-			"error": "YouTube account authorization required. Please connect your YouTube account in Settings."
+			"error": "YouTube connection expired. Reconnect YouTube in Settings."
 		}
 
 	# Perform item synchronization diff
@@ -141,10 +141,16 @@ func create_external_playlist(playlist_id: String) -> Dictionary:
 	if oauth_service:
 		token = await oauth_service.get_valid_access_token()
 
+	if token.is_empty() and not mock_mode:
+		return {
+			"success": false,
+			"error": "YouTube connection expired. Reconnect YouTube in Settings."
+		}
+
 	var ext_id = ""
 	var ext_url = ""
 
-	if mock_mode or token.begins_with("mock_") or token.is_empty():
+	if mock_mode or token.begins_with("mock_"):
 		ext_id = "PL_SCH_" + _generate_short_id()
 		ext_url = get_external_playlist_url(ext_id)
 	else:
@@ -179,6 +185,21 @@ func create_external_playlist(playlist_id: String) -> Dictionary:
 		"external_playlist_url": ext_url
 	}
 
+func _parse_api_error_response(response: Dictionary, fallback_msg: String) -> Dictionary:
+	var code = int(response.get("status_code", 0))
+	if code == 401:
+		return {"success": false, "error": "YouTube connection expired. Reconnect YouTube in Settings."}
+	elif code == 403:
+		return {"success": false, "error": "YouTube API permission denied or quota exceeded."}
+
+	var data = response.get("data", {})
+	if data is Dictionary and data.has("error"):
+		var err_obj = data.get("error", {})
+		if err_obj is Dictionary and err_obj.has("message"):
+			return {"success": false, "error": str(err_obj.get("message", fallback_msg))}
+
+	return {"success": false, "error": fallback_msg + ((" (HTTP " + str(code) + ")") if code > 0 else "")}
+
 # --- Official YouTube Data API v3 Endpoints Implementation ---
 
 ## 1. Create Playlist (POST /youtube/v3/playlists?part=snippet,status)
@@ -210,10 +231,7 @@ func create_api_playlist(access_token: String, title: String, description: Strin
 			"url": get_external_playlist_url(pl_id),
 			"data": data
 		}
-	return {
-		"success": false,
-		"error": "Failed to create YouTube playlist. Code: " + str(response.get("status_code", 0)) + " Body: " + str(response.get("body_raw", ""))
-	}
+	return _parse_api_error_response(response, "Failed to create YouTube playlist.")
 
 ## 2. Rename / Update Playlist Snippet (PUT /youtube/v3/playlists?part=snippet)
 func rename_api_playlist(access_token: String, external_playlist_id: String, new_title: String, new_description: String = "") -> Dictionary:
@@ -235,7 +253,7 @@ func rename_api_playlist(access_token: String, external_playlist_id: String, new
 
 	if response.get("status_code", 0) == 200:
 		return {"success": true, "id": external_playlist_id, "data": response.get("data", {})}
-	return {"success": false, "error": "Failed to rename YouTube playlist."}
+	return _parse_api_error_response(response, "Failed to rename YouTube playlist.")
 
 ## 3. Add Playlist Item (POST /youtube/v3/playlistItems?part=snippet)
 ## Note: Returns YouTube PLAYLIST ITEM ID (distinct from Video ID)
@@ -269,7 +287,7 @@ func add_api_playlist_item(access_token: String, external_playlist_id: String, v
 			"video_id": video_id,
 			"data": data
 		}
-	return {"success": false, "error": "Failed to add item to YouTube playlist."}
+	return _parse_api_error_response(response, "Failed to add item to YouTube playlist.")
 
 ## 4. Remove Playlist Item (DELETE /youtube/v3/playlistItems?id=<external_playlist_item_id>)
 func remove_api_playlist_item(access_token: String, external_playlist_item_id: String) -> Dictionary:
@@ -282,7 +300,7 @@ func remove_api_playlist_item(access_token: String, external_playlist_item_id: S
 
 	if response.get("status_code", 0) in [200, 204]:
 		return {"success": true, "playlist_item_id": external_playlist_item_id}
-	return {"success": false, "error": "Failed to remove item from YouTube playlist."}
+	return _parse_api_error_response(response, "Failed to remove item from YouTube playlist.")
 
 ## 5. Move / Reorder Playlist Item (PUT /youtube/v3/playlistItems?part=snippet)
 func move_api_playlist_item(access_token: String, external_playlist_item_id: String, external_playlist_id: String, video_id: String, new_position: int) -> Dictionary:
@@ -308,7 +326,7 @@ func move_api_playlist_item(access_token: String, external_playlist_item_id: Str
 
 	if response.get("status_code", 0) == 200:
 		return {"success": true, "playlist_item_id": external_playlist_item_id, "data": response.get("data", {})}
-	return {"success": false, "error": "Failed to reorder item in YouTube playlist."}
+	return _parse_api_error_response(response, "Failed to reorder item in YouTube playlist.")
 
 ## 6. Retrieve Playlist Details (GET /youtube/v3/playlists?part=snippet,status&id=<external_playlist_id>)
 func retrieve_api_playlist(access_token: String, external_playlist_id: String) -> Dictionary:
@@ -321,7 +339,7 @@ func retrieve_api_playlist(access_token: String, external_playlist_id: String) -
 
 	if response.get("status_code", 0) == 200:
 		return {"success": true, "data": response.get("data", {})}
-	return {"success": false, "error": "Failed to retrieve YouTube playlist details."}
+	return _parse_api_error_response(response, "Failed to retrieve YouTube playlist details.")
 
 ## 7. Retrieve Playlist Items (GET /youtube/v3/playlistItems?part=snippet&playlistId=<external_playlist_id>&maxResults=50)
 func retrieve_api_playlist_items(access_token: String, external_playlist_id: String) -> Dictionary:
@@ -334,7 +352,7 @@ func retrieve_api_playlist_items(access_token: String, external_playlist_id: Str
 
 	if response.get("status_code", 0) == 200:
 		return {"success": true, "data": response.get("data", {})}
-	return {"success": false, "error": "Failed to retrieve YouTube playlist items."}
+	return _parse_api_error_response(response, "Failed to retrieve YouTube playlist items.")
 
 # --- Internal Async HTTP Execution Engine ---
 func _execute_http_request_sync(url: String, headers: Array, method: int, body: String) -> Dictionary:

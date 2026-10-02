@@ -210,11 +210,17 @@ func _on_play_playlist_pressed() -> void:
 	if sync_svc and not current_playlist_id.is_empty():
 		var opened = sync_svc.open_playlist_in_browser(current_playlist_id)
 		if not opened:
-			var res = await sync_svc.sync_playlist(current_playlist_id)
-			if res.get("success", false):
-				sync_svc.open_playlist_in_browser(current_playlist_id)
+			var items = playlists_svc.get_playlist_items(current_playlist_id) if playlists_svc else []
+			var first_vid = ""
+			for item in items:
+				var vid = playlists_svc.extract_youtube_video_id(str(item.get("url", "")))
+				if not vid.is_empty():
+					first_vid = vid
+					break
+			if not first_vid.is_empty():
+				OS.shell_open("https://www.youtube.com/watch?v=" + first_vid)
 			else:
-				_show_temporary_toast("Could not open playlist on YouTube: " + str(res.get("error", "")), true)
+				_show_temporary_toast("No playable YouTube songs in this playlist.", true)
 
 func _on_open_playlist_pressed() -> void:
 	if sync_svc and not current_playlist_id.is_empty():
@@ -487,17 +493,27 @@ func _show_clipboard_banner(clip_url: String, meta: Dictionary) -> void:
 	detail_vbox.move_child(clipboard_banner_panel, 1)
 
 func _extract_url_from_data(data: Variant) -> String:
+	var raw_str = ""
 	if typeof(data) == TYPE_STRING:
-		var s = (data as String).strip_edges()
-		if s.begins_with("http://") or s.begins_with("https://") or s.begins_with("file://"):
-			return s
+		raw_str = (data as String).strip_edges()
 	elif typeof(data) == TYPE_DICTIONARY:
-		var u = str(data.get("url", "")).strip_edges()
-		if u != "": return u
+		raw_str = str(data.get("url", data.get("text", ""))).strip_edges()
 	elif typeof(data) == TYPE_PACKED_STRING_ARRAY:
 		var arr = data as PackedStringArray
 		if arr.size() > 0:
-			return arr[0].strip_edges()
+			raw_str = arr[0].strip_edges()
+
+	if raw_str.is_empty():
+		return ""
+
+	if playlists_svc:
+		var val = playlists_svc.validate_and_extract_url(raw_str)
+		if val.get("is_valid", false):
+			return raw_str
+
+	if raw_str.begins_with("http://") or raw_str.begins_with("https://") or raw_str.begins_with("file://"):
+		return raw_str
+
 	return ""
 
 func set_active_song_drop_slot(slot_index: int) -> void:
@@ -1425,10 +1441,10 @@ class SongDropSlotControl extends PanelContainer:
 				view_ref.reorder_song_to_index(str(data.get("id", "")), target_idx)
 		else:
 			var url_str = view_ref._extract_url_from_data(data)
-			if url_str == "":
-				url_str = DisplayServer.clipboard_get().strip_edges()
 			if url_str != "":
 				view_ref._process_dropped_url_or_file(url_str, view_ref.current_playlist_id, slot_index)
+			else:
+				view_ref._show_invalid_url_notification("No valid media URL found.")
 
 class PlaylistCardControl extends PanelContainer:
 	var playlist_id: String
@@ -1883,10 +1899,10 @@ class SongCardControl extends PanelContainer:
 				view_ref.reorder_song_to_index(str(data.get("id", "")), target_idx)
 		else:
 			var url_str = view_ref._extract_url_from_data(data)
-			if url_str == "":
-				url_str = DisplayServer.clipboard_get().strip_edges()
 			if url_str != "":
 				view_ref._process_dropped_url_or_file(url_str, view_ref.current_playlist_id, target_slot_idx)
+			else:
+				view_ref._show_invalid_url_notification("No valid media URL found.")
 
 	func set_selected(p_selected: bool) -> void:
 		if is_selected != p_selected:

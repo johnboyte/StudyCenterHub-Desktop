@@ -7,7 +7,7 @@ var db
 func _init(database) -> void:
 	db = database
 
-func record_check_in_atomic(person: Dictionary, method: String = "Manual", device_uuid: String = "dev_macbook_primary_node", session_id = null, mode: String = "Study Center Daily", shift_lead: String = "John Boyte") -> Dictionary:
+func record_check_in_atomic(person: Dictionary, method: String = "Manual", device_uuid: String = "dev_macbook_primary_node", session_id = null, mode: String = "Study Center Daily", shift_lead: String = "John Boyte", custom_check_in_date: String = "") -> Dictionary:
 	var start_time_usec = Time.get_ticks_usec()
 	
 	db.execute("ALTER TABLE attendance_log ADD COLUMN session_id INTEGER DEFAULT NULL;")
@@ -20,10 +20,10 @@ func record_check_in_atomic(person: Dictionary, method: String = "Manual", devic
 	var person_id = int(person.get("id", 0))
 	var person_uuid = String(person.get("person_uuid", ""))
 	var human_id = String(person.get("human_id", ""))
-	var check_in_date = Time.get_date_string_from_system()
+	var check_in_date = custom_check_in_date.strip_edges() if custom_check_in_date.strip_edges() != "" else Time.get_date_string_from_system()
 	var check_in_time = Time.get_time_string_from_system()
 	
-	# ATOMIC DUPLICATE CHECK: If member is already checked in today, do not log a second attendance row
+	# ATOMIC DUPLICATE CHECK: If member is already checked in on target date, do not log a second attendance row
 	if person_id > 0:
 		var dup_chk = db.execute("SELECT id, checkin_uuid FROM attendance_log WHERE person_id = ? AND check_in_date = ? LIMIT 1;", [person_id, check_in_date])
 		if dup_chk["success"] and dup_chk["data"].size() > 0:
@@ -37,7 +37,7 @@ func record_check_in_atomic(person: Dictionary, method: String = "Manual", devic
 				"checkin_id": existing_id,
 				"checkin_uuid": existing_uuid,
 				"elapsed_ms": elapsed_ms,
-				"message": "Member is already checked in today."
+				"message": "Member is already checked in for " + check_in_date + "."
 			}
 	
 	var payload_dict = {

@@ -173,8 +173,9 @@ func get_valid_access_token() -> String:
 		return _access_token
 
 	if not _refresh_token.is_empty():
-		await _refresh_access_token_sync()
-		return _access_token
+		var success = await _refresh_access_token_sync()
+		if success:
+			return _access_token
 
 	return ""
 
@@ -328,8 +329,10 @@ func _exchange_code_for_tokens(auth_code: String) -> Dictionary:
 		auth_completed.emit(false, raw_err)
 		return {"success": false, "error": raw_err}
 
-func _refresh_access_token_sync() -> void:
-	if _refresh_token.is_empty(): return
+func _refresh_access_token_sync() -> bool:
+	if _refresh_token.is_empty():
+		_access_token = ""
+		return false
 	var client_id = get_client_id()
 	var client_secret = get_client_secret()
 
@@ -358,6 +361,9 @@ func _refresh_access_token_sync() -> void:
 			if dict.has("refresh_token") and not str(dict.get("refresh_token", "")).is_empty():
 				_refresh_token = str(dict.get("refresh_token", ""))
 			_save_stored_credentials()
+			return true
+	_access_token = ""
+	return false
 
 func _fetch_youtube_channel_identity() -> void:
 	if _access_token.is_empty(): return

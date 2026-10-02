@@ -47,7 +47,7 @@ func _ensure_default_seed() -> void:
 	if db.has_method("_is_test_execution_context") and db._is_test_execution_context():
 		return
 	var check_res = db.execute("SELECT COUNT(*) AS cnt FROM playlists")
-	var rows = check_res.get("rows", [])
+	var rows = check_res.get("data", [])
 	var cnt = 0
 	if rows.size() > 0:
 		cnt = int(rows[0].get("cnt", 0))
@@ -659,32 +659,42 @@ func extract_youtube_video_id(raw_input: String) -> String:
 	var lower_url = clean_str.to_lower()
 	var video_id = ""
 
+	var delims = ["&", "?", "#", "/", " ", "\t", "\n", "\r", '"', "'"]
+
 	if "youtube.com/watch" in lower_url:
 		var v_idx = clean_str.find("v=")
 		if v_idx != -1:
 			var sub = clean_str.substr(v_idx + 2)
-			var amp_idx = sub.find("&")
-			video_id = sub.substr(0, amp_idx) if amp_idx != -1 else sub
+			var end_idx = _find_first_delimiter(sub, delims)
+			video_id = sub.substr(0, end_idx) if end_idx != -1 else sub
 	elif "youtu.be/" in lower_url:
 		var parts = clean_str.split("youtu.be/")
 		if parts.size() > 1:
 			var sub = parts[1]
-			var q_idx = sub.find("?")
-			video_id = sub.substr(0, q_idx) if q_idx != -1 else sub
+			var end_idx = _find_first_delimiter(sub, delims)
+			video_id = sub.substr(0, end_idx) if end_idx != -1 else sub
 	elif "youtube.com/embed/" in lower_url:
 		var parts = clean_str.split("youtube.com/embed/")
 		if parts.size() > 1:
 			var sub = parts[1]
-			var q_idx = sub.find("?")
-			video_id = sub.substr(0, q_idx) if q_idx != -1 else sub
+			var end_idx = _find_first_delimiter(sub, delims)
+			video_id = sub.substr(0, end_idx) if end_idx != -1 else sub
 	elif "youtube.com/shorts/" in lower_url:
 		var parts = clean_str.split("youtube.com/shorts/")
 		if parts.size() > 1:
 			var sub = parts[1]
-			var q_idx = sub.find("?")
-			video_id = sub.substr(0, q_idx) if q_idx != -1 else sub
+			var end_idx = _find_first_delimiter(sub, delims)
+			video_id = sub.substr(0, end_idx) if end_idx != -1 else sub
 
 	return video_id.strip_edges()
+
+func _find_first_delimiter(s: String, delims: Array) -> int:
+	var min_pos = -1
+	for d in delims:
+		var pos = s.find(d)
+		if pos != -1 and (min_pos == -1 or pos < min_pos):
+			min_pos = pos
+	return min_pos
 
 func check_duplicate_in_playlist(playlist_id: String, url: String, title: String = "") -> bool:
 	if not db or playlist_id.is_empty():

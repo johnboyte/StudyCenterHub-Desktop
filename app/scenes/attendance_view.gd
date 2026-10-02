@@ -360,6 +360,7 @@ func _connect_signals() -> void:
 		suggestion_list.item_selected.connect(_on_suggestion_item_selected)
 	if btn_prev_day: btn_prev_day.pressed.connect(_on_prev_day_pressed)
 	if btn_next_day: btn_next_day.pressed.connect(_on_next_day_pressed)
+	if btn_date_pick: btn_date_pick.pressed.connect(_on_date_pick_pressed)
 	if btn_acknowledge_bday: btn_acknowledge_bday.pressed.connect(_on_acknowledge_bday_pressed)
 
 func _on_acknowledge_bday_pressed() -> void:
@@ -580,27 +581,41 @@ func _execute_check_in_for_person_id(pid: int, method: String) -> void:
 
 	var lead = shift_lead_dropdown.get_item_text(shift_lead_dropdown.selected) if shift_lead_dropdown.selected >= 0 else "John Boyte"
 
+	var date_dict = Time.get_datetime_dict_from_unix_time(selected_date_unix)
+	var target_date_str = "%04d-%02d-%02d" % [date_dict["year"], date_dict["month"], date_dict["day"]]
+
 	# Record main check-in
-	var res = att_service.record_check_in_atomic(person, method, "dev_macbook_primary_node", sess_id, current_mode, lead)
+	var res = att_service.record_check_in_atomic(person, method, "dev_macbook_primary_node", sess_id, current_mode, lead, target_date_str)
 	if not res["success"]:
 		_show_toast_message("❌ Check-in failed.")
+		return
+
+	var fn = str(person.get("first_name", "")) + " " + str(person.get("last_name", ""))
+	if res.get("already_checked_in", false):
+		_show_toast_message("ℹ️ " + fn.strip_edges() + " is already checked in for " + target_date_str + ".")
+		_refresh_dashboard()
 		return
 
 	print("Check-In recorded successfully: ", res["checkin_uuid"])
 	_refresh_dashboard()
 
-	var fn = str(person.get("first_name", "")) + " " + str(person.get("last_name", ""))
 	var mode_name = "Session Attendance" if current_mode == "Session Attendance" else "Daily Attendance"
-	_show_toast_message("✨ Check-in complete: " + fn.strip_edges() + " is checked in for " + mode_name)
+	var today_str = Time.get_date_string_from_system()
+	if target_date_str == today_str:
+		_show_toast_message("✨ Check-in complete: " + fn.strip_edges() + " is checked in for " + mode_name)
+	else:
+		_show_toast_message("✨ Historical check-in recorded for " + target_date_str + ": " + fn.strip_edges() + " (" + mode_name + ")")
 
 	# Handle auto daily checkin when checking into session
 	if current_mode == "Session Attendance":
-		var today_str = Time.get_date_string_from_system()
-		var check_daily_res = db.execute("SELECT COUNT(*) as cnt FROM attendance_log WHERE person_id = ? AND check_in_date = ? AND (mode = 'Daily Check In' OR mode = 'Study Center Daily');", [pid, today_str])
+		var check_daily_res = db.execute("SELECT COUNT(*) as cnt FROM attendance_log WHERE person_id = ? AND check_in_date = ? AND (mode = 'Daily Check In' OR mode = 'Study Center Daily');", [pid, target_date_str])
 		var already_daily = (check_daily_res["success"] and check_daily_res["data"].size() > 0 and int(check_daily_res["data"][0]["cnt"]) > 0)
 		if not already_daily:
-			att_service.record_check_in_atomic(person, method, "dev_macbook_primary_node", null, "Daily Check In", lead)
-			_show_toast_message("✨ Checked in for Session & Daily Attendance: " + fn.strip_edges())
+			att_service.record_check_in_atomic(person, method, "dev_macbook_primary_node", null, "Daily Check In", lead, target_date_str)
+			if target_date_str == today_str:
+				_show_toast_message("✨ Checked in for Session & Daily Attendance: " + fn.strip_edges())
+			else:
+				_show_toast_message("✨ Checked in for Session & Daily Attendance on " + target_date_str + ": " + fn.strip_edges())
 
 func _show_toast_message(text: String) -> void:
 	if not toast_panel or not toast_label: return
@@ -739,27 +754,44 @@ func _on_record_check_in() -> void:
 
 	var lead = shift_lead_dropdown.get_item_text(shift_lead_dropdown.selected)
 
+	var date_dict = Time.get_datetime_dict_from_unix_time(selected_date_unix)
+	var target_date_str = "%04d-%02d-%02d" % [date_dict["year"], date_dict["month"], date_dict["day"]]
+
 	# 1. Record the primary check-in
-	var res = att_service.record_check_in_atomic(person, method, "dev_macbook_primary_node", sess_id, current_mode, lead)
+	var res = att_service.record_check_in_atomic(person, method, "dev_macbook_primary_node", sess_id, current_mode, lead, target_date_str)
 	if not res["success"]: return
 
+	var fn = (str(person.get("first_name", "")) + " " + str(person.get("last_name", ""))).strip_edges()
+	if res.get("already_checked_in", false):
+		_show_toast_message("ℹ️ " + fn + " is already checked in for " + target_date_str + ".")
+		_refresh_dashboard()
+		return
+
 	print("Check-In recorded successfully: ", res["checkin_uuid"])
+
+	var today_str = Time.get_date_string_from_system()
+	var mode_name = "Session Attendance" if current_mode == "Session Attendance" else "Daily Attendance"
+	if target_date_str == today_str:
+		_show_toast_message("✨ Check-in complete: " + fn + " is checked in for " + mode_name)
+	else:
+		_show_toast_message("✨ Historical check-in recorded for " + target_date_str + ": " + fn + " (" + mode_name + ")")
 
 	# Requirement 3: If checking into a session, check if automatically checked in for daily attendance today
 	if current_mode == "Session Attendance":
 		var p_id = int(person.get("id", 0))
-		var today_str = Time.get_date_string_from_system()
 
-		var check_daily_res = db.execute("SELECT COUNT(*) as cnt FROM attendance_log WHERE person_id = ? AND check_in_date = ? AND (mode = 'Daily Check In' OR mode = 'Study Center Daily');", [p_id, today_str])
+		var check_daily_res = db.execute("SELECT COUNT(*) as cnt FROM attendance_log WHERE person_id = ? AND check_in_date = ? AND (mode = 'Daily Check In' OR mode = 'Study Center Daily');", [p_id, target_date_str])
 		var already_daily = (check_daily_res["success"] and check_daily_res["data"].size() > 0 and int(check_daily_res["data"][0]["cnt"]) > 0)
 
 		if not already_daily:
 			# Automatically check them in for Daily Attendance as well
-			att_service.record_check_in_atomic(person, method, "dev_macbook_primary_node", null, "Daily Check In", lead)
+			att_service.record_check_in_atomic(person, method, "dev_macbook_primary_node", null, "Daily Check In", lead, target_date_str)
 
 			# Show Friendly Toast Banner
-			var fn = str(person.get("first_name", "")) + " " + str(person.get("last_name", ""))
-			toast_label.text = "✨ Check-In Complete! " + fn.strip_edges() + " has also been automatically checked in for Today's Daily Attendance."
+			if target_date_str == today_str:
+				toast_label.text = "✨ Check-In Complete! " + fn + " has also been automatically checked in for Today's Daily Attendance."
+			else:
+				toast_label.text = "✨ Check-In Complete! " + fn + " has also been automatically checked in for " + target_date_str + " Daily Attendance."
 			toast_panel.visible = true
 
 			# Auto-dismiss after 4 seconds
@@ -773,7 +805,6 @@ func _on_record_check_in() -> void:
 		if bday_res.get("trigger_alert", false):
 			active_bday_log_id = int(bday_res.get("log_id", 0))
 			var notif_type = str(bday_res.get("notification_type", ""))
-			var fn = (str(person.get("first_name", "")) + " " + str(person.get("last_name", ""))).strip_edges()
 
 			if notif_type == "birthday_today":
 				bday_body_label.text = "Today is " + fn + "'s birthday!"
@@ -881,6 +912,298 @@ func _on_next_day_pressed() -> void:
 	_dismiss_toast()
 	selected_date_unix += 86400
 	_refresh_dashboard()
+
+func _on_date_pick_pressed() -> void:
+	_dismiss_toast()
+	var date_dict = Time.get_datetime_dict_from_unix_time(selected_date_unix)
+	var curr_date_str = "%02d/%02d/%04d" % [date_dict["month"], date_dict["day"], date_dict["year"]]
+	_open_calendar_picker_dialog(func(sel_date: String):
+		var y = date_dict["year"]
+		var m = date_dict["month"]
+		var d = date_dict["day"]
+		if "-" in sel_date:
+			var p = sel_date.split("-")
+			if p.size() == 3:
+				y = int(p[0])
+				m = int(p[1])
+				d = int(p[2])
+		elif "/" in sel_date:
+			var p = sel_date.split("/")
+			if p.size() == 3:
+				m = int(p[0])
+				d = int(p[1])
+				y = int(p[2])
+		selected_date_unix = Time.get_unix_time_from_datetime_dict({
+			"year": y, "month": m, "day": d, "hour": 12, "minute": 0, "second": 0
+		})
+		_refresh_dashboard()
+	, curr_date_str, self)
+
+func _open_calendar_picker_dialog(on_date_selected: Callable, current_ui_date: String = "", caller_node: Node = null) -> void:
+	var init_year = 2026
+	var init_month = 10
+	var init_day = 1
+
+	var parts = current_ui_date.strip_edges().split("/")
+	if parts.size() == 3:
+		init_month = int(parts[0])
+		init_day = int(parts[1])
+		init_year = int(parts[2])
+	else:
+		var sys_dt = Time.get_datetime_dict_from_system()
+		init_year = int(sys_dt.get("year", 2026))
+		init_month = int(sys_dt.get("month", 10))
+		init_day = int(sys_dt.get("day", 1))
+
+	var canvas_layer = CanvasLayer.new()
+	canvas_layer.layer = 128
+
+	var backdrop = ColorRect.new()
+	backdrop.color = Color(0.08, 0.12, 0.18, 0.70)
+	backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
+	canvas_layer.add_child(backdrop)
+
+	var backdrop_button = TextureButton.new()
+	backdrop_button.set_anchors_preset(Control.PRESET_FULL_RECT)
+	backdrop_button.pressed.connect(func(): canvas_layer.queue_free())
+	backdrop.add_child(backdrop_button)
+
+	var center = CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	backdrop.add_child(center)
+
+	var card = PanelContainer.new()
+	var card_st = StyleBoxFlat.new()
+	card_st.bg_color = Color(0.14, 0.17, 0.23, 1.0)
+	card_st.border_width_left = 2; card_st.border_width_top = 2; card_st.border_width_right = 2; card_st.border_width_bottom = 2
+	card_st.border_color = Color(0.32, 0.42, 0.58, 1.0)
+	card_st.corner_radius_top_left = 12; card_st.corner_radius_top_right = 12; card_st.corner_radius_bottom_left = 12; card_st.corner_radius_bottom_right = 12
+	card_st.content_margin_left = 20; card_st.content_margin_top = 16; card_st.content_margin_right = 20; card_st.content_margin_bottom = 18
+	card.add_theme_stylebox_override("panel", card_st)
+	center.add_child(card)
+
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 10)
+	vbox.custom_minimum_size = Vector2(340, 0)
+	card.add_child(vbox)
+
+	var title_lbl = Label.new()
+	title_lbl.text = "📅 Select Check-In Date"
+	title_lbl.add_theme_font_size_override("font_size", 18)
+	title_lbl.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
+	title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(title_lbl)
+
+	var state = {
+		"year": init_year,
+		"month": init_month,
+		"day": init_day
+	}
+
+	var month_names = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+	var nav_hbox = HBoxContainer.new()
+	nav_hbox.size_flags_horizontal = SIZE_EXPAND_FILL
+	nav_hbox.alignment = HBoxContainer.ALIGNMENT_CENTER
+	nav_hbox.add_theme_constant_override("separation", 6)
+
+	var prev_year_btn = Button.new(); prev_year_btn.text = "◄◄"
+	prev_year_btn.tooltip_text = "Previous Year"
+	var prev_btn = Button.new(); prev_btn.text = "◀"
+	prev_btn.tooltip_text = "Previous Month"
+
+	var month_lbl = Label.new()
+	month_lbl.add_theme_font_size_override("font_size", 16)
+	month_lbl.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
+	month_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	month_lbl.custom_minimum_size = Vector2(100, 0)
+
+	var year_edit = LineEdit.new()
+	year_edit.custom_minimum_size = Vector2(65, 32)
+	year_edit.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	year_edit.add_theme_font_size_override("font_size", 14)
+	year_edit.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
+	var edit_st = StyleBoxFlat.new()
+	edit_st.bg_color = Color(0.08, 0.11, 0.16, 1.0)
+	edit_st.border_width_left = 1; edit_st.border_width_top = 1; edit_st.border_width_right = 1; edit_st.border_width_bottom = 1
+	edit_st.border_color = Color(0.32, 0.42, 0.58, 1.0)
+	edit_st.corner_radius_top_left = 4; edit_st.corner_radius_top_right = 4; edit_st.corner_radius_bottom_left = 4; edit_st.corner_radius_bottom_right = 4
+	year_edit.add_theme_stylebox_override("normal", edit_st)
+
+	var next_btn = Button.new(); next_btn.text = "▶"
+	next_btn.tooltip_text = "Next Month"
+	var next_year_btn = Button.new(); next_year_btn.text = "►►"
+	next_year_btn.tooltip_text = "Next Year"
+
+	var active_col = _get_active_theme_color()
+	for b in [prev_year_btn, prev_btn, next_btn, next_year_btn]:
+		_style_button_high_contrast(b, Color(0.20, 0.26, 0.36, 1.0), Color(0.40, 0.55, 0.75, 1.0), 13)
+
+	nav_hbox.add_child(prev_year_btn)
+	nav_hbox.add_child(prev_btn)
+	nav_hbox.add_child(month_lbl)
+	nav_hbox.add_child(year_edit)
+	nav_hbox.add_child(next_btn)
+	nav_hbox.add_child(next_year_btn)
+	vbox.add_child(nav_hbox)
+
+	var headers_grid = GridContainer.new()
+	headers_grid.columns = 7
+	headers_grid.size_flags_horizontal = SIZE_EXPAND_FILL
+
+	var day_abbrs = ["S", "M", "T", "W", "T", "F", "S"]
+	for day_name in day_abbrs:
+		var lbl = Label.new()
+		lbl.text = day_name
+		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		lbl.custom_minimum_size = Vector2(40, 24)
+		lbl.size_flags_horizontal = SIZE_EXPAND_FILL
+		lbl.add_theme_font_size_override("font_size", 12)
+		lbl.add_theme_color_override("font_color", Color(0.65, 0.75, 0.88, 1.0))
+		headers_grid.add_child(lbl)
+	vbox.add_child(headers_grid)
+
+	var days_grid = GridContainer.new()
+	days_grid.columns = 7
+	days_grid.size_flags_horizontal = SIZE_EXPAND_FILL
+	vbox.add_child(days_grid)
+
+	var _render_calendar = [null]
+	_render_calendar[0] = func():
+		month_lbl.text = month_names[state["month"] - 1]
+		year_edit.text = str(state["year"])
+
+		for c in days_grid.get_children():
+			c.queue_free()
+
+		var dt_dict = {"year": state["year"], "month": state["month"], "day": 1, "hour": 12, "minute": 0, "second": 0}
+		var start_unix = Time.get_unix_time_from_datetime_dict(dt_dict)
+		var full_dt = Time.get_datetime_dict_from_unix_time(start_unix)
+		var start_weekday = full_dt.get("weekday", 0)
+
+		var days_in_month = 31
+		if state["month"] in [4, 6, 9, 11]:
+			days_in_month = 30
+		elif state["month"] == 2:
+			var is_leap = (state["year"] % 4 == 0 and state["year"] % 100 != 0) or (state["year"] % 400 == 0)
+			days_in_month = 29 if is_leap else 28
+
+		for i in range(start_weekday):
+			var blank = Control.new()
+			blank.custom_minimum_size = Vector2(40, 32)
+			days_grid.add_child(blank)
+
+		for d in range(1, days_in_month + 1):
+			var day_btn = Button.new()
+			day_btn.text = str(d)
+			day_btn.custom_minimum_size = Vector2(40, 32)
+			day_btn.size_flags_horizontal = SIZE_EXPAND_FILL
+			day_btn.add_theme_font_size_override("font_size", 13)
+
+			var d_val = d
+			var is_selected = (d_val == state["day"])
+
+			if is_selected:
+				var sel_st = StyleBoxFlat.new()
+				sel_st.bg_color = active_col
+				sel_st.corner_radius_top_left = 6; sel_st.corner_radius_top_right = 6
+				sel_st.corner_radius_bottom_left = 6; sel_st.corner_radius_bottom_right = 6
+				day_btn.add_theme_stylebox_override("normal", sel_st)
+				day_btn.add_theme_stylebox_override("hover", sel_st)
+				day_btn.add_theme_stylebox_override("pressed", sel_st)
+				day_btn.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
+			else:
+				var normal_st = StyleBoxFlat.new()
+				normal_st.bg_color = Color(0.18, 0.22, 0.30, 1.0)
+				normal_st.corner_radius_top_left = 4; normal_st.corner_radius_top_right = 4
+				normal_st.corner_radius_bottom_left = 4; normal_st.corner_radius_bottom_right = 4
+				day_btn.add_theme_stylebox_override("normal", normal_st)
+				day_btn.add_theme_color_override("font_color", Color(0.90, 0.95, 1.0, 1.0))
+
+			day_btn.pressed.connect(func():
+				state["day"] = d_val
+				_render_calendar[0].call()
+			)
+			days_grid.add_child(day_btn)
+
+	_render_calendar[0].call()
+
+	year_edit.text_submitted.connect(func(new_txt: String):
+		if new_txt.is_valid_int():
+			var val = int(new_txt)
+			if val >= 1900 and val <= 2100:
+				state["year"] = val
+				_render_calendar[0].call()
+	)
+
+	prev_year_btn.pressed.connect(func():
+		state["year"] -= 1
+		_render_calendar[0].call()
+	)
+
+	next_year_btn.pressed.connect(func():
+		state["year"] += 1
+		_render_calendar[0].call()
+	)
+
+	prev_btn.pressed.connect(func():
+		state["month"] -= 1
+		if state["month"] < 1:
+			state["month"] = 12
+			state["year"] -= 1
+		_render_calendar[0].call()
+	)
+
+	next_btn.pressed.connect(func():
+		state["month"] += 1
+		if state["month"] > 12:
+			state["month"] = 1
+			state["year"] += 1
+		_render_calendar[0].call()
+	)
+
+	var footer_hbox = HBoxContainer.new()
+	footer_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	footer_hbox.add_theme_constant_override("separation", 10)
+	vbox.add_child(footer_hbox)
+
+	var select_btn = Button.new()
+	select_btn.text = "✔ Select Date"
+	select_btn.custom_minimum_size = Vector2(110, 36)
+	_style_button_high_contrast(select_btn, active_col, Color(1, 1, 1, 0.5), 14)
+	select_btn.pressed.connect(func():
+		var mm_str = str(state["month"]).pad_zeros(2)
+		var dd_str = str(state["day"]).pad_zeros(2)
+		var yyyy_str = str(state["year"])
+		on_date_selected.call(yyyy_str + "-" + mm_str + "-" + dd_str)
+		canvas_layer.queue_free()
+	)
+	footer_hbox.add_child(select_btn)
+
+	var today_btn = Button.new()
+	today_btn.text = "📅 Today"
+	today_btn.custom_minimum_size = Vector2(85, 36)
+	_style_button_high_contrast(today_btn, Color(0.20, 0.26, 0.36, 1.0), Color(0.40, 0.55, 0.75, 1.0), 14)
+	today_btn.pressed.connect(func():
+		var sys_dt = Time.get_datetime_dict_from_system()
+		var mm_str = str(sys_dt.month).pad_zeros(2)
+		var dd_str = str(sys_dt.day).pad_zeros(2)
+		var yyyy_str = str(sys_dt.year)
+		on_date_selected.call(yyyy_str + "-" + mm_str + "-" + dd_str)
+		canvas_layer.queue_free()
+	)
+	footer_hbox.add_child(today_btn)
+
+	var cancel_btn = Button.new()
+	cancel_btn.text = "Cancel"
+	cancel_btn.custom_minimum_size = Vector2(85, 36)
+	_style_button_high_contrast(cancel_btn, Color(0.25, 0.30, 0.40, 1.0), Color(0.40, 0.50, 0.65, 1.0), 14)
+	cancel_btn.pressed.connect(func(): canvas_layer.queue_free())
+	footer_hbox.add_child(cancel_btn)
+
+	if caller_node and caller_node.is_inside_tree():
+		caller_node.add_child(canvas_layer)
+	else:
+		add_child(canvas_layer)
 
 func _refresh_dashboard() -> void:
 	var date_dict = Time.get_datetime_dict_from_unix_time(selected_date_unix)
