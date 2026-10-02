@@ -11,10 +11,16 @@ const PlaylistsServiceScript = preload("res://src/domain/playlists/playlists_ser
 const YouTubeOAuthServiceScript = preload("res://src/domain/playlists/youtube_oauth_service.gd")
 const YouTubePlaylistSyncServiceScript = preload("res://src/domain/playlists/youtube_playlist_sync_service.gd")
 
-var db: RefCounted
+var db: RefCounted:
+	set(value):
+		db = value
+		if is_node_ready():
+			_init_services()
+			load_playlists()
 var playlists_svc: RefCounted
 var oauth_svc: Node
 var sync_svc: Node
+
 
 var current_playlist_id: String = ""
 var selected_song_item_id: String = ""
@@ -126,8 +132,9 @@ func _handle_native_external_drop(drop_data: Dictionary) -> void:
 		
 	var target_idx = -1
 	
-	if sidebar_vbox and playlists_vbox:
+	if sidebar_panel and playlists_vbox:
 		var sb_rect = sidebar_panel.get_global_rect() if sidebar_panel else Rect2()
+
 		if sb_rect.has_point(drop_pos):
 			for child in playlists_vbox.get_children():
 				if child is PlaylistCardControl and child.get_global_rect().has_point(drop_pos):
@@ -407,10 +414,16 @@ func _init_services() -> void:
 			db = SQLiteDatabaseScript.new()
 	if db:
 		playlists_svc = PlaylistsServiceScript.new(db)
+		if oauth_svc and is_instance_valid(oauth_svc):
+			oauth_svc.queue_free()
 		oauth_svc = YouTubeOAuthServiceScript.new(db)
 		add_child(oauth_svc)
+
+		if sync_svc and is_instance_valid(sync_svc):
+			sync_svc.queue_free()
 		sync_svc = YouTubePlaylistSyncServiceScript.new(playlists_svc, oauth_svc)
 		add_child(sync_svc)
+
 
 func _apply_input_and_button_rules() -> void:
 	var line_edits = [search_library_input, item_search_input]

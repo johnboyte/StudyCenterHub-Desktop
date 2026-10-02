@@ -119,11 +119,11 @@ func create_playlist(name: String, description: String = "", provider_type: Stri
 func get_all_playlists() -> Array:
 	if not db:
 		return []
-	_refresh_item_counts()
-	var res = db.execute("SELECT * FROM playlists ORDER BY sort_order ASC, created_at ASC;")
+	var res = db.execute("SELECT id, name, description, sort_order, (SELECT COUNT(*) FROM playlist_items WHERE playlist_items.playlist_id = playlists.id) AS item_count, created_at, updated_at, provider_type FROM playlists ORDER BY sort_order ASC, created_at ASC;")
 	if res["success"]:
 		return res["data"]
 	return []
+
 
 func get_playlist_by_id(playlist_id: String) -> Dictionary:
 	if not db or playlist_id.is_empty():
