@@ -1663,6 +1663,22 @@ class PlaylistCardControl extends PanelContainer:
 					(child as Control).mouse_filter = Control.MOUSE_FILTER_IGNORE
 					_set_mouse_filter_recursive(child)
 
+	func _get_drag_data(_at_position: Vector2) -> Variant:
+		view_ref.select_playlist(playlist_id)
+		var drag_data = {
+			"type": "playlist",
+			"id": playlist_id,
+			"index": playlist_index
+		}
+		var preview = _create_drag_preview()
+		set_drag_preview(preview)
+		modulate.a = 0.4
+		return drag_data
+
+	func _notification(what: int) -> void:
+		if what == NOTIFICATION_DRAG_END:
+			modulate.a = 1.0
+
 	func _gui_input(event: InputEvent) -> void:
 		if event is InputEventMouseButton:
 			if event.button_index == MOUSE_BUTTON_LEFT:
@@ -1692,6 +1708,7 @@ class PlaylistCardControl extends PanelContainer:
 					var preview = _create_drag_preview()
 					modulate.a = 0.4
 					force_drag(drag_data, preview)
+
 
 	func _can_drop_data(at_position: Vector2, data: Variant) -> bool:
 		if typeof(data) == TYPE_DICTIONARY and data.get("type") == "playlist":
@@ -2033,6 +2050,22 @@ class SongCardControl extends PanelContainer:
 					(child as Control).mouse_filter = Control.MOUSE_FILTER_IGNORE
 					_set_mouse_filter_recursive(child)
 
+	func _get_drag_data(_at_position: Vector2) -> Variant:
+		view_ref.set_selected_song_item(item_id)
+		var drag_data = {
+			"type": "song_item",
+			"id": item_id,
+			"index": item_index
+		}
+		var preview = _create_drag_preview()
+		set_drag_preview(preview)
+		modulate.a = 0.4
+		return drag_data
+
+	func _notification(what: int) -> void:
+		if what == NOTIFICATION_DRAG_END:
+			modulate.a = 1.0
+
 	func _gui_input(event: InputEvent) -> void:
 		if event is InputEventMouseButton:
 			if event.button_index == MOUSE_BUTTON_LEFT:
@@ -2060,6 +2093,7 @@ class SongCardControl extends PanelContainer:
 					var preview = _create_drag_preview()
 					modulate.a = 0.4
 					force_drag(drag_data, preview)
+
 		elif event is InputEventKey and event.pressed:
 			if event.keycode == KEY_DELETE or event.keycode == KEY_BACKSPACE:
 				var focus_owner = get_viewport().gui_get_focus_owner()

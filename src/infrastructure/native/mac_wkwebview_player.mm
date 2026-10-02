@@ -91,11 +91,34 @@ static NSString* extractURLFromPasteboard(NSPasteboard *pboard, NSString **outTy
     return nil;
 }
 
+static BOOL isSupportedDragType(NSPasteboard *pboard) {
+    if (!pboard) return NO;
+    NSArray *types = [pboard types];
+    if (!types) return NO;
+    
+    NSArray *supported = @[
+        NSPasteboardTypeURL,
+        NSPasteboardTypeString,
+        NSPasteboardTypeFileURL,
+        @"public.url",
+        @"public.file-url",
+        @"public.utf8-plain-text",
+        @"WebURLsWithTitlesPboardType",
+        @"NSFilenamesPboardType",
+        @"text/uri-list"
+    ];
+    
+    for (NSString *t in supported) {
+        if ([types containsObject:t]) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
 static NSDragOperation custom_draggingEntered(id self, SEL _cmd, id<NSDraggingInfo> sender) {
     NSPasteboard *pboard = [sender draggingPasteboard];
-    NSString *rawType = nil;
-    NSString *extracted = extractURLFromPasteboard(pboard, &rawType);
-    if (extracted && extracted.length > 0) {
+    if (isSupportedDragType(pboard)) {
         return NSDragOperationCopy;
     }
     if (orig_draggingEntered) {
@@ -106,9 +129,7 @@ static NSDragOperation custom_draggingEntered(id self, SEL _cmd, id<NSDraggingIn
 
 static NSDragOperation custom_draggingUpdated(id self, SEL _cmd, id<NSDraggingInfo> sender) {
     NSPasteboard *pboard = [sender draggingPasteboard];
-    NSString *rawType = nil;
-    NSString *extracted = extractURLFromPasteboard(pboard, &rawType);
-    if (extracted && extracted.length > 0) {
+    if (isSupportedDragType(pboard)) {
         return NSDragOperationCopy;
     }
     if (orig_draggingUpdated) {
@@ -154,11 +175,43 @@ static BOOL custom_performDragOperation(id self, SEL _cmd, id<NSDraggingInfo> se
     return NO;
 }
 
+typedef void (*OriginalRegisterDragTypesIMP)(id, SEL, NSArray*);
+static OriginalRegisterDragTypesIMP orig_registerForDraggedTypes = nullptr;
+
+static void custom_registerForDraggedTypes(id self, SEL _cmd, NSArray *pboardTypes) {
+    NSMutableArray *merged = [NSMutableArray arrayWithArray:pboardTypes ?: @[]];
+    NSArray *browserTypes = @[
+        NSPasteboardTypeURL,
+        NSPasteboardTypeString,
+        NSPasteboardTypeFileURL,
+        @"public.url",
+        @"public.file-url",
+        @"public.utf8-plain-text",
+        @"WebURLsWithTitlesPboardType",
+        @"NSFilenamesPboardType",
+        @"text/uri-list"
+    ];
+    for (NSString *t in browserTypes) {
+        if (![merged containsObject:t]) {
+            [merged addObject:t];
+        }
+    }
+    if (orig_registerForDraggedTypes) {
+        orig_registerForDraggedTypes(self, _cmd, merged);
+    }
+}
+
 static void setup_drag_swizzle(Class cls) {
     if (!cls) return;
     static bool swizzled = false;
     if (swizzled) return;
     swizzled = true;
+
+    Method mRegister = class_getInstanceMethod(cls, @selector(registerForDraggedTypes:));
+    if (mRegister) {
+        orig_registerForDraggedTypes = (OriginalRegisterDragTypesIMP)method_getImplementation(mRegister);
+        method_setImplementation(mRegister, (IMP)custom_registerForDraggedTypes);
+    }
 
     Method mEntered = class_getInstanceMethod(cls, @selector(draggingEntered:));
     if (mEntered) {
@@ -198,7 +251,8 @@ static void enable_external_drag_drop_native() {
                     @"public.file-url",
                     @"public.utf8-plain-text",
                     @"WebURLsWithTitlesPboardType",
-                    @"NSFilenamesPboardType"
+                    @"NSFilenamesPboardType",
+                    @"text/uri-list"
                 ];
                 [win registerForDraggedTypes:dragTypes];
                 [win.contentView registerForDraggedTypes:dragTypes];
@@ -208,6 +262,7 @@ static void enable_external_drag_drop_native() {
         }
     });
 }
+
 
 
 struct PlayerEvent {
