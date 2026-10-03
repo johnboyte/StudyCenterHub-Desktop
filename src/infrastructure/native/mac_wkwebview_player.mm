@@ -118,6 +118,7 @@ static BOOL isSupportedDragType(NSPasteboard *pboard) {
 
 static NSDragOperation custom_draggingEntered(id self, SEL _cmd, id<NSDraggingInfo> sender) {
     NSPasteboard *pboard = [sender draggingPasteboard];
+    NSLog(@"[NATIVE_LOG] EXTERNAL DRAG ENTERED types=%@", [pboard types]);
     if (isSupportedDragType(pboard)) {
         return NSDragOperationCopy;
     }
@@ -140,6 +141,7 @@ static NSDragOperation custom_draggingUpdated(id self, SEL _cmd, id<NSDraggingIn
 
 static BOOL custom_performDragOperation(id self, SEL _cmd, id<NSDraggingInfo> sender) {
     NSPasteboard *pboard = [sender draggingPasteboard];
+    NSLog(@"[NATIVE_LOG] EXTERNAL DROP CALLBACK RECEIVED types=%@", [pboard types]);
     NSString *rawType = @"unknown";
     NSString *extracted = extractURLFromPasteboard(pboard, &rawType);
     
@@ -163,10 +165,13 @@ static BOOL custom_performDragOperation(id self, SEL _cmd, id<NSDraggingInfo> se
             });
         }
         
+        NSLog(@"[NATIVE_LOG] EXTERNAL PAYLOAD TYPE: %@ payload=%@", rawType, extracted);
         NSLog(@"[NATIVE_LOG] EXTERNAL DROP RECEIVED type=%@ payload_len=%lu loc=(%.1f, %.1f)",
               rawType, (unsigned long)extracted.length, godot_x, godot_y);
         
         return YES;
+    } else {
+        NSLog(@"[NATIVE_LOG] EXTERNAL DROP FAILED TO EXTRACT URL FROM PASTEBOARD types=%@", [pboard types]);
     }
     
     if (orig_performDragOperation) {

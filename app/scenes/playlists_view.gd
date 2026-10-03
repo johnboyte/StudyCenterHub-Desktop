@@ -57,6 +57,10 @@ var sync_badge_lbl: Button
 var _last_detected_clip_url: String = ""
 var clipboard_banner_panel: PanelContainer
 
+var _drag_debug_panel: PanelContainer
+var _drag_debug_lbl: Label
+var _drag_debug_history: Array = []
+
 @onready var item_search_input: LineEdit = $MainMargin/WorkspaceHBox/DetailWorkspacePanel/DetailMargin/DetailVBox/ItemSearchInput
 @onready var items_vbox: VBoxContainer = $MainMargin/WorkspaceHBox/DetailWorkspacePanel/DetailMargin/DetailVBox/ItemsScroll/ItemsVBox
 
@@ -68,6 +72,7 @@ func _ready() -> void:
 	_set_container_mouse_filters_pass()
 	_setup_header_actions()
 	_setup_sidebar_toggle()
+	_setup_drag_debug_ui()
 	_apply_input_and_button_rules()
 	_init_services()
 	_connect_signals()
@@ -89,11 +94,57 @@ func _ready() -> void:
 
 	if OS.get_name() == "macOS":
 		NativePlayerBridge.enable_external_drag()
+		_update_drag_debug("EXTERNAL DRAG ENTERED / INITIALIZED (Native Bridge Active)")
 
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	mouse_default_cursor_shape = Control.CURSOR_CAN_DROP
 
 	load_playlists()
+
+func _setup_drag_debug_ui() -> void:
+	if _drag_debug_panel and is_instance_valid(_drag_debug_panel):
+		return
+	_drag_debug_panel = PanelContainer.new()
+	var st = StyleBoxFlat.new()
+	st.bg_color = Color(0.08, 0.12, 0.20, 0.95)
+	st.border_width_left = 4
+	st.border_color = Color(0.9, 0.7, 0.1, 1.0)
+	st.content_margin_left = 12
+	st.content_margin_right = 12
+	st.content_margin_top = 8
+	st.content_margin_bottom = 8
+	st.corner_radius_top_left = 6
+	st.corner_radius_top_right = 6
+	st.corner_radius_bottom_left = 6
+	st.corner_radius_bottom_right = 6
+	_drag_debug_panel.add_theme_stylebox_override("panel", st)
+
+	var vbox = VBoxContainer.new()
+	var title_lbl = Label.new()
+	title_lbl.text = "🔍 DRAG DEBUG MONITOR (DEVELOPMENT)"
+	title_lbl.add_theme_font_size_override("font_size", 12)
+	title_lbl.add_theme_color_override("font_color", Color(0.9, 0.7, 0.1, 1.0))
+	vbox.add_child(title_lbl)
+
+	_drag_debug_lbl = Label.new()
+	_drag_debug_lbl.text = "Waiting for drag events..."
+	_drag_debug_lbl.add_theme_font_size_override("font_size", 11)
+	_drag_debug_lbl.add_theme_color_override("font_color", Color(0.9, 0.95, 1.0, 1.0))
+	_drag_debug_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vbox.add_child(_drag_debug_lbl)
+
+	_drag_debug_panel.add_child(vbox)
+	if detail_vbox:
+		detail_vbox.add_child(_drag_debug_panel)
+		detail_vbox.move_child(_drag_debug_panel, 0)
+
+func _update_drag_debug(msg: String) -> void:
+	print("[DRAG_DEBUG] %s" % msg)
+	_drag_debug_history.append(msg)
+	if _drag_debug_history.size() > 6:
+		_drag_debug_history.pop_front()
+	if _drag_debug_lbl and is_instance_valid(_drag_debug_lbl):
+		_drag_debug_lbl.text = "\n".join(_drag_debug_history)
 
 func _process(_delta: float) -> void:
 	if OS.get_name() == "macOS":
@@ -107,23 +158,12 @@ func _handle_native_external_drop(drop_data: Dictionary) -> void:
 	var drop_x = float(drop_data.get("x", 0.0))
 	var drop_y = float(drop_data.get("y", 0.0))
 	
-	var payload_kind = "other"
-	if payload.begins_with("http://") or payload.begins_with("https://") or "youtube.com" in payload or "youtu.be" in payload:
-		payload_kind = "URL"
-	elif payload.ends_with(".webloc"):
-		payload_kind = ".webloc"
-	elif payload.begins_with("/"):
-		payload_kind = "file path"
-	elif payload.length() > 0:
-		payload_kind = "plain text"
-		
-	print("\n==============================================================================")
-	print("[EXTERNAL DROP RECEIVED] Native macOS External Drag Bridge")
-	print("- Source/Event Type: macOS Native Drag (%s)" % raw_type)
-	print("- Number of payload items: 1")
-	print("- Payload kind: %s" % payload_kind)
-	print("- Drop coordinates: (%.1f, %.1f)" % [drop_x, drop_y])
-	print("==============================================================================\n")
+	print("EXTERNAL DROP CALLBACK RECEIVED")
+	print("EXTERNAL PAYLOAD TYPE: %s" % raw_type)
+	if payload != "":
+		print("EXTERNAL URL RECEIVED: %s" % payload)
+	
+	_update_drag_debug("EXTERNAL DROP CALLBACK RECEIVED\nPayload Type: %s\nPayload: %s\nDrop Loc: (%.1f, %.1f)" % [raw_type, payload, drop_x, drop_y])
 	
 	var drop_pos = Vector2(drop_x, drop_y)
 	var target_pl_id = current_playlist_id
@@ -157,6 +197,9 @@ func _handle_native_external_drop(drop_data: Dictionary) -> void:
 					target_idx = slot_calc
 				break
 
+	print("EXTERNAL DROP TARGET SLOT: %d" % target_idx)
+	print("EXTERNAL ADD REQUESTED")
+	_update_drag_debug("EXTERNAL DROP TARGET SLOT: %d\nEXTERNAL ADD REQUESTED for: %s" % [target_idx, payload])
 	_process_dropped_url_or_file(payload, target_pl_id, target_idx)
 
 
@@ -863,10 +906,27 @@ func set_selected_song_item(item_id: String) -> void:
 		if c is SongCardControl:
 			c.set_selected(c.item_id == selected_song_item_id)
 
-func reorder_song_to_index(item_id: String, target_index: int) -> void:
+func reorder_song_to_index(item_id: String, source_index: int, target_index: int) -> void:
+	print("INTERNAL_DROP_CALLED item_id=%s source_index=%d destination_index=%d" % [item_id, source_index, target_index])
+	print("REORDER_SERVICE_CALLED")
+	_update_drag_debug("INTERNAL_DROP_CALLED item_id=%s source_index=%d dest_index=%d" % [item_id, source_index, target_index])
 	if not playlists_svc: return
-	playlists_svc.reorder_playlist_item(current_playlist_id, item_id, target_index)
+	var db_success = playlists_svc.reorder_song_to_index(item_id, target_index)
+	print("REORDER_DB_RESULT success=%s" % str(db_success))
+	
+	var db_items = playlists_svc.get_playlist_items(current_playlist_id)
+	var db_ids = []
+	for it in db_items:
+		db_ids.append(str(it.get("id", "")))
+	print("ORDER_AFTER_DB %s" % str(db_ids))
+	
 	load_playlist_items()
+	
+	var refreshed_ids = []
+	for it in items_list:
+		refreshed_ids.append(str(it.get("id", "")))
+	print("ORDER_AFTER_REFRESH %s" % str(refreshed_ids))
+	_update_drag_debug("REORDER_DB_RESULT success=%s\nORDER_AFTER_REFRESH: %s" % [str(db_success), str(refreshed_ids)])
 	_trigger_auto_sync(current_playlist_id)
 
 func _get_source_badge_color(st: String) -> Color:
@@ -1513,6 +1573,8 @@ class SongDropSlotControl extends PanelContainer:
 				can_drop = true
 
 		if can_drop:
+			view_ref._update_drag_debug("INTERNAL_DROP_TARGET slot_index=%d" % slot_index)
+			print("INTERNAL_DROP_TARGET slot_index=%d" % slot_index)
 			view_ref.set_active_song_drop_slot(slot_index)
 			return true
 		else:
@@ -1531,7 +1593,7 @@ class SongDropSlotControl extends PanelContainer:
 			if from_index >= 0:
 				if from_index < target_idx:
 					target_idx -= 1
-				view_ref.reorder_song_to_index(str(data.get("id", "")), target_idx)
+				view_ref.reorder_song_to_index(str(data.get("id", "")), from_index, target_idx)
 		else:
 			var url_str = view_ref._extract_url_from_data(data)
 			if url_str != "":
@@ -2006,7 +2068,7 @@ class SongCardControl extends PanelContainer:
 			if from_index >= 0:
 				if from_index < target_idx:
 					target_idx -= 1
-				view_ref.reorder_song_to_index(str(data.get("id", "")), target_idx)
+				view_ref.reorder_song_to_index(str(data.get("id", "")), from_index, target_idx)
 		else:
 			var url_str = view_ref._extract_url_from_data(data)
 			if url_str != "":
@@ -2052,6 +2114,8 @@ class SongCardControl extends PanelContainer:
 
 	func _get_drag_data(_at_position: Vector2) -> Variant:
 		view_ref.set_selected_song_item(item_id)
+		print("INTERNAL_DRAG_STARTED item_id=%s source_index=%d" % [item_id, item_index])
+		view_ref._update_drag_debug("INTERNAL_DRAG_STARTED item_id=%s source_index=%d" % [item_id, item_index])
 		var drag_data = {
 			"type": "song_item",
 			"id": item_id,
