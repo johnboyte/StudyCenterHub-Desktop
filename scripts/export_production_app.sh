@@ -42,8 +42,6 @@ echo "✅ All regression test suites passed 100% cleanly."
 echo "=============================================================================="
 echo "3. EXPORTING PRODUCTION RESOURCE PACK"
 echo "=============================================================================="
-pkill -f "StudyCenterHub" || true
-sleep 1
 
 "$GODOT_BIN" --headless --path "$PROJECT_DIR" --export-pack "macOS" "$TARGET_PCK"
 
