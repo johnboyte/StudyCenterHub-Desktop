@@ -179,6 +179,7 @@ static BOOL isSupportedDragType(NSPasteboard *pboard) {
 
 // Dedicated Native Drag Destination Receiver View
 @interface NativeDragDestinationView : NSView <NSDraggingDestination>
+@property (nonatomic, strong) NSTextField *debugBadge;
 @end
 
 @implementation NativeDragDestinationView
@@ -200,6 +201,21 @@ static BOOL isSupportedDragType(NSPasteboard *pboard) {
         ];
         [self registerForDraggedTypes:dragTypes];
         self.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+        
+        // Visible native indicator badge at top-right of window
+        _debugBadge = [[NSTextField alloc] initWithFrame:NSMakeRect(frame.size.width - 270, frame.size.height - 32, 260, 26)];
+        [_debugBadge setEditable:NO];
+        [_debugBadge setSelectable:NO];
+        [_debugBadge setBezeled:NO];
+        [_debugBadge setDrawsBackground:YES];
+        [_debugBadge setBackgroundColor:[NSColor colorWithCalibratedRed:0.0 green:0.3 blue:0.7 alpha:0.9]];
+        [_debugBadge setTextColor:[NSColor whiteColor]];
+        [_debugBadge setFont:[NSFont boldSystemFontOfSize:11]];
+        [_debugBadge setAlignment:NSTextAlignmentCenter];
+        [_debugBadge setStringValue:@"🟢 NATIVE DRAG RECEIVER READY"];
+        [_debugBadge setAutoresizingMask:NSViewMinXMargin | NSViewMinYMargin];
+        [self addSubview:_debugBadge];
+        
         NSLog(@"[NATIVE_LOG] NativeDragDestinationView initialized with frame (%.1f, %.1f, %.1f, %.1f)", frame.origin.x, frame.origin.y, frame.size.width, frame.size.height);
     }
     return self;
@@ -229,6 +245,11 @@ static BOOL isSupportedDragType(NSPasteboard *pboard) {
     
     NSString *typesStr = [[pboard types] componentsJoinedByString:@", "];
     NSLog(@"[NATIVE_LOG] EXTERNAL DRAG ENTERED (NativeDragDestinationView) types=%@", typesStr);
+    
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self->_debugBadge setStringValue:@"🟢 DRAG ENTERED NATIVE RECEIVER!"];
+        [self->_debugBadge setBackgroundColor:[NSColor colorWithCalibratedRed:0.0 green:0.6 blue:0.2 alpha:0.95]];
+    });
     
     if (isSupportedDragType(pboard)) {
         queue_external_event({
@@ -267,6 +288,13 @@ static BOOL isSupportedDragType(NSPasteboard *pboard) {
     return NSDragOperationNone;
 }
 
+- (void)draggingExited:(id<NSDraggingInfo>)sender {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self->_debugBadge setStringValue:@"🟢 NATIVE DRAG RECEIVER READY"];
+        [self->_debugBadge setBackgroundColor:[NSColor colorWithCalibratedRed:0.0 green:0.3 blue:0.7 alpha:0.9]];
+    });
+}
+
 - (BOOL)performDragOperation:(id<NSDraggingInfo>)sender {
     NSPasteboard *pboard = [sender draggingPasteboard];
     NSString *typesStr = [[pboard types] componentsJoinedByString:@", "];
@@ -281,6 +309,11 @@ static BOOL isSupportedDragType(NSPasteboard *pboard) {
     float godot_y = (float)(bounds.size.height - loc.y);
     
     if (extracted && extracted.length > 0) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self->_debugBadge setStringValue:@"🎉 DROP RECEIVED NATIVE RECEIVER!"];
+            [self->_debugBadge setBackgroundColor:[NSColor colorWithCalibratedRed:0.1 green:0.5 blue:0.9 alpha:0.95]];
+        });
+        
         queue_external_event({
             "EXTERNAL_DROP",
             [rawType UTF8String] ?: "unknown",

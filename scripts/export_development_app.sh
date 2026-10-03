@@ -35,7 +35,18 @@ echo "3. EXPORTING DEVELOPMENT APP PCK PACKAGE"
 echo "=============================================================================="
 mkdir -p "$BUILDS_DIR"
 mkdir -p "$TARGET_APP/Contents/Resources"
+mkdir -p "$TARGET_APP/Contents/Frameworks"
+mkdir -p "$TARGET_APP/Contents/MacOS/bin"
+mkdir -p "$TARGET_APP/Contents/Resources/bin"
 mkdir -p "$MACOS_DIR"
+
+if [ -f "$PROJECT_DIR/bin/libmac_wkwebview.dylib" ]; then
+    cp -f "$PROJECT_DIR/bin/libmac_wkwebview.dylib" "$TARGET_APP/Contents/Frameworks/libmac_wkwebview.dylib"
+    cp -f "$PROJECT_DIR/bin/libmac_wkwebview.dylib" "$TARGET_APP/Contents/MacOS/libmac_wkwebview.dylib"
+    cp -f "$PROJECT_DIR/bin/libmac_wkwebview.dylib" "$TARGET_APP/Contents/MacOS/bin/libmac_wkwebview.dylib"
+    cp -f "$PROJECT_DIR/bin/libmac_wkwebview.dylib" "$TARGET_APP/Contents/Resources/bin/libmac_wkwebview.dylib"
+    echo "✅ Native GDExtension Dylib Packaged into Development App Bundle"
+fi
 
 "$GODOT_BIN" --headless --path "$PROJECT_DIR" --export-pack "macOS" "$TARGET_PCK"
 
