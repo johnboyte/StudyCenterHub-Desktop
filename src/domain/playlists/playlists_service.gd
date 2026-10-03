@@ -17,12 +17,14 @@ func _ensure_tables() -> void:
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
 			description TEXT DEFAULT '',
+			provider_type TEXT NOT NULL DEFAULT 'general',
 			sort_order INTEGER NOT NULL DEFAULT 0,
 			item_count INTEGER NOT NULL DEFAULT 0,
 			created_at TEXT NOT NULL DEFAULT (datetime('now')),
 			updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 		);
 	""")
+	db.execute("ALTER TABLE playlists ADD COLUMN provider_type TEXT NOT NULL DEFAULT 'general';")
 	db.execute("""
 		CREATE TABLE IF NOT EXISTS playlist_items (
 			id TEXT PRIMARY KEY,

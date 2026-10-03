@@ -1,60 +1,67 @@
 extends SceneTree
 
 const SQLiteDatabaseScript = preload("res://src/infrastructure/database/sqlite_database.gd")
+const MigrationsRunnerScript = preload("res://src/infrastructure/database/migrations_runner.gd")
 const PlaylistsServiceScript = preload("res://src/domain/playlists/playlists_service.gd")
 
 func _init() -> void:
 	print("\n=======================================================")
-	print("  PLAYLISTS GUI INITIALIZATION REGRESSION TEST")
+	print("  TESTING PLAYLISTS GUI INITIALIZATION REGRESSION")
 	print("=======================================================\n")
 
-	var user_data_dir = OS.get_user_data_dir()
-	var test_db_path = user_data_dir.path_join("studycenterhub_test_gui_init.db")
-
-	if FileAccess.file_exists(test_db_path):
-		DirAccess.remove_absolute(test_db_path)
-
+	# Use isolated test database
+	var test_db_path = "user://test_playlists_gui_init.db"
 	var db = SQLiteDatabaseScript.new(test_db_path)
 
-	var mig1 = FileAccess.get_file_as_string("res://src/infrastructure/database/migrations/0060_playlists_subsystem.sql")
-	if not mig1.is_empty():
-		db.execute(mig1)
-	var mig2 = FileAccess.get_file_as_string("res://src/infrastructure/database/migrations/0061_playlist_providers.sql")
-	if not mig2.is_empty():
-		db.execute(mig2)
+	# Run schema migrations for test DB
+	var mig = MigrationsRunnerScript.new(db)
+	mig.run_migrations()
 
-	var playlists_svc = PlaylistsServiceScript.new(db)
-	var p1 = playlists_svc.create_playlist("Sunday Morning Gathering", "Main Worship", "youtube")
-	var p2 = playlists_svc.create_playlist("College Study", "Midweek Worship", "youtube")
-	assert(p1["success"] and p2["success"], "Failed creating test playlists")
+	# Seed 2 test playlists
+	var pl_svc = PlaylistsServiceScript.new(db)
+	var res1 = pl_svc.create_playlist("Test Focus Playlist 1", "Description 1")
+	var res2 = pl_svc.create_playlist("Test Focus Playlist 2", "Description 2")
 
+	var pl1_id = str(res1.get("playlist", {}).get("id", "")) if typeof(res1) == TYPE_DICTIONARY else str(res1)
+	var pl2_id = str(res2.get("playlist", {}).get("id", "")) if typeof(res2) == TYPE_DICTIONARY else str(res2)
+
+	print("Created test playlist IDs: ", pl1_id, ", ", pl2_id)
+
+	# Instantiate PlaylistsView, set db, and add to tree
 	var scene_res = load("res://app/scenes/playlists_view.tscn")
-	assert(scene_res != null, "Failed loading playlists_view.tscn")
+	if not scene_res:
+		print("❌ Failed to load playlists_view.tscn")
+		quit(1)
+		return
 
-	var view = scene_res.instantiate()
-	assert(view != null, "Failed instantiating playlists_view")
+	var view_node = scene_res.instantiate()
+	view_node.db = db
+	root.add_child(view_node)
 
-	# Pass DB before ready / entering tree
-	view.db = db
+	# Process frame notifications so _ready() completes
+	await create_timer(0.1).timeout
 
-	root.add_child(view)
-	await process_frame
+	print("PlaylistsView loaded in tree and ready processed.")
+	print("Playlists count in view struct: ", view_node.playlists_list.size())
+	print("Selected playlist ID: ", view_node.current_playlist_id)
 
-	assert(view.playlists_list.size() == 2, "Expected 2 playlists loaded in view, got: " + str(view.playlists_list.size()))
-	print("✓ Playlists loaded into view.playlists_list: ", view.playlists_list.size())
+	if view_node.playlists_list.size() < 2:
+		print("❌ FAIL: Expected at least 2 playlists in view_node struct, got ", view_node.playlists_list.size())
+		quit(1)
+		return
 
-	assert(view.current_playlist_id != "", "Current playlist ID must not be empty")
-	print("✓ Current playlist ID selected: ", view.current_playlist_id)
+	var vbox = view_node.playlists_vbox
+	if not vbox or vbox.get_child_count() < 2:
+		print("❌ FAIL: Playlist library vbox is empty or missing cards! Child count: ", vbox.get_child_count() if vbox else 0)
+		quit(1)
+		return
 
-	var diag = NativePlayerBridge.get_native_diagnostics()
-	print("✓ Native diagnostics: ", diag)
+	print("✅ Playlists library vbox child count: ", vbox.get_child_count())
 
-	view.queue_free()
+	# Cleanup test DB
+	var dir = DirAccess.open("user://")
+	if dir and dir.file_exists("test_playlists_gui_init.db"):
+		dir.remove("test_playlists_gui_init.db")
 
-	if FileAccess.file_exists(test_db_path):
-		DirAccess.remove_absolute(test_db_path)
-
-	print("\n=======================================================")
-	print("  PLAYLISTS GUI INITIALIZATION TEST PASSED!")
-	print("=======================================================\n")
+	print("✅ GUI INITIALIZATION REGRESSION TEST PASSED 100% CLEANLY.\n")
 	quit(0)

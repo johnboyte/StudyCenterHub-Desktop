@@ -91,18 +91,40 @@ func _ready() -> void:
 		if not win.focus_entered.is_connected(_check_clipboard_on_focus):
 			win.focus_entered.connect(_check_clipboard_on_focus)
 
-	if OS.get_name() == "macOS":
-		NativePlayerBridge.enable_external_drag()
-		NativePlayerBridge.set_drag_box_visible(true)
-
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	mouse_default_cursor_shape = Control.CURSOR_CAN_DROP
 
+	# 1. ALWAYS load and render playlists from SQLite FIRST
 	load_playlists()
+
+	# 2. Update native drop surface safely on deferred frame
+	if OS.get_name() == "macOS":
+		_safe_update_native_drop_window()
 
 func _exit_tree() -> void:
 	if OS.get_name() == "macOS":
 		NativePlayerBridge.set_drag_box_visible(false)
+
+func _safe_update_native_drop_window(playlist_name: String = "") -> void:
+	if OS.get_name() != "macOS":
+		return
+	call_deferred("_do_safe_native_update", playlist_name)
+
+func _do_safe_native_update(playlist_name: String) -> void:
+	if OS.get_name() != "macOS": return
+	NativePlayerBridge.enable_external_drag()
+	NativePlayerBridge.set_drag_box_visible(true)
+	
+	var target_name = playlist_name
+	if target_name.is_empty() and not current_playlist_id.is_empty() and playlists_svc:
+		var pl = playlists_svc.get_playlist_by_id(current_playlist_id)
+		target_name = str(pl.get("name", ""))
+	
+	NativePlayerBridge.update_target_playlist(target_name)
+	if current_playlist_id.is_empty():
+		NativePlayerBridge.update_drop_status("NO PLAYLIST SELECTED", "error")
+	else:
+		NativePlayerBridge.update_drop_status("READY — Drop YouTube song here", "ready")
 
 func _setup_drag_debug_ui() -> void:
 	if _drag_debug_panel and is_instance_valid(_drag_debug_panel):
@@ -249,7 +271,7 @@ func _handle_native_external_drop(drop_data: Dictionary) -> void:
 	if playlists_svc.check_duplicate_in_playlist(current_playlist_id, canonical_url, default_title):
 		print("EXTERNAL DROP REJECTED: DUPLICATE VIDEO IN PLAYLIST")
 		NativePlayerBridge.update_drop_status("ALREADY IN PLAYLIST", "duplicate")
-		_show_toast_notification("⚠️ ALREADY IN PLAYLIST: Song is already in this playlist")
+		_show_temporary_toast("⚠️ ALREADY IN PLAYLIST: Song is already in this playlist", true)
 		_reset_drop_status_delayed(3.5)
 		return
 
@@ -840,11 +862,7 @@ func select_playlist(playlist_id: String) -> void:
 	load_playlist_items()
 
 	if OS.get_name() == "macOS":
-		NativePlayerBridge.update_target_playlist(pl_name)
-		if playlist_id.is_empty():
-			NativePlayerBridge.update_drop_status("NO PLAYLIST SELECTED", "error")
-		else:
-			NativePlayerBridge.update_drop_status("READY — Drop YouTube song here", "ready")
+		_safe_update_native_drop_window(pl_name)
 
 func reorder_playlist_to_index(playlist_id: String, target_index: int) -> void:
 	if not playlists_svc: return

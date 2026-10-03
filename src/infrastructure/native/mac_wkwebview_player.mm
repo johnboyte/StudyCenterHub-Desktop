@@ -781,9 +781,12 @@ static void updateIndependentWindowPosition() {
     if (!g_independentWindow) return;
     
     NSWindow *mainWin = getGodotMainWindow();
-    if (!mainWin) return;
+    NSRect mainFrame = mainWin ? mainWin.frame : NSMakeRect(0, 0, 0, 0);
+    if (mainFrame.size.width < 400 || mainFrame.size.height < 300) {
+        NSScreen *screen = [NSScreen mainScreen];
+        mainFrame = screen ? screen.visibleFrame : NSMakeRect(100, 100, 1440, 900);
+    }
 
-    NSRect mainFrame = mainWin.frame;
     CGFloat dropW = 440.0;
     CGFloat dropH = 130.0;
     CGFloat x = mainFrame.origin.x + mainFrame.size.width - dropW - 24.0;
@@ -847,7 +850,12 @@ static void ensure_external_drag_receiver() {
     g_diag_info.key_window_ptr = keyWin ? [NSString stringWithFormat:@"%p", keyWin].UTF8String : "nil";
 
     if (!g_independentWindow) {
-        NSRect winFrame = mainWin ? mainWin.frame : NSMakeRect(100, 100, 1000, 700);
+        NSRect winFrame = mainWin ? mainWin.frame : NSMakeRect(0, 0, 0, 0);
+        if (winFrame.size.width < 400 || winFrame.size.height < 300) {
+            NSScreen *screen = [NSScreen mainScreen];
+            winFrame = screen ? screen.visibleFrame : NSMakeRect(100, 100, 1440, 900);
+        }
+
         CGFloat dropW = 440.0;
         CGFloat dropH = 130.0;
         CGFloat x = winFrame.origin.x + winFrame.size.width - dropW - 24.0;
