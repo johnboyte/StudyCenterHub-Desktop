@@ -17,6 +17,24 @@
 // MACOS NATIVE BROWSER URL DRAG & DROP BRIDGE
 // ==============================================================================
 
+#define NATIVE_DRAG_BRIDGE_VERSION_STR "v4.0.0-AUTONOMOUS-FIX"
+
+struct NativeDiagnosticsInfo {
+    bool bridge_loaded;
+    bool window_found;
+    std::string window_class;
+    std::string content_view_class;
+    std::string receiver_class;
+    bool receiver_attached;
+    bool receiver_enabled;
+    std::string frame_str;
+    std::string registered_types;
+};
+
+static NativeDiagnosticsInfo g_diag_info = {
+    false, false, "Unknown", "Unknown", "Unknown", false, false, "0,0,0,0", ""
+};
+
 struct ExternalDropEvent {
     std::string event;
     std::string raw_type;
@@ -37,6 +55,24 @@ static void queue_external_event(const ExternalDropEvent& ev) {
         g_drop_events.erase(g_drop_events.begin());
     }
     g_drop_events.push_back(ev);
+}
+
+typedef NSDragOperation (*DragEnteredIMP)(id, SEL, id<NSDraggingInfo>);
+typedef NSDragOperation (*DragUpdatedIMP)(id, SEL, id<NSDraggingInfo>);
+typedef BOOL (*PerformDragIMP)(id, SEL, id<NSDraggingInfo>);
+
+static IMP get_orig_imp(Class cls, SEL sel) {
+    if (!cls) return NULL;
+    NSString *key = [NSString stringWithFormat:@"%@_%@", NSStringFromClass(cls), NSStringFromSelector(sel)];
+    NSValue *val = objc_getAssociatedObject([NSApp class], (__bridge const void *)key);
+    return val ? (IMP)[val pointerValue] : NULL;
+}
+
+static void set_orig_imp(Class cls, SEL sel, IMP imp) {
+    if (!cls || !imp) return;
+    NSString *key = [NSString stringWithFormat:@"%@_%@", NSStringFromClass(cls), NSStringFromSelector(sel)];
+    NSValue *val = [NSValue valueWithPointer:(const void *)imp];
+    objc_setAssociatedObject([NSApp class], (__bridge const void *)key, val, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
 static NSString* extractURLFromPasteboard(NSPasteboard *pboard, NSString **outType) {
@@ -141,61 +177,15 @@ static BOOL isSupportedDragType(NSPasteboard *pboard) {
     return NO;
 }
 
-// Transparent Native Drag Overlay View
-@interface NativeExternalDragOverlayView : NSView
-@end
-
-@implementation NativeExternalDragOverlayView
-
-- (instancetype)initWithFrame:(NSRect)frame {
-    self = [super initWithFrame:frame];
-    if (self) {
-        NSArray *dragTypes = @[
-            NSPasteboardTypeURL,
-            NSPasteboardTypeString,
-            NSPasteboardTypeFileURL,
-            @"public.url",
-            @"public.file-url",
-            @"public.utf8-plain-text",
-            @"WebURLsWithTitlesPboardType",
-            @"NSFilenamesPboardType",
-            @"text/uri-list",
-            @"public.url-name"
-        ];
-        [self registerForDraggedTypes:dragTypes];
-        self.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-        NSLog(@"[NATIVE_LOG] NativeExternalDragOverlayView initialized with frame (%.1f, %.1f)", frame.size.width, frame.size.height);
-    }
-    return self;
-}
-
-- (NSView *)hitTest:(NSPoint)point {
-    // Return nil for ordinary mouse clicks, drags, moves, scroll events so Godot UI receives them completely!
-    NSEvent *currentEvent = [NSApp currentEvent];
-    if (currentEvent) {
-        NSEventType type = [currentEvent type];
-        if (type == NSEventTypeLeftMouseDown || type == NSEventTypeLeftMouseUp ||
-            type == NSEventTypeRightMouseDown || type == NSEventTypeRightMouseUp ||
-            type == NSEventTypeOtherMouseDown || type == NSEventTypeOtherMouseUp ||
-            type == NSEventTypeLeftMouseDragged || type == NSEventTypeRightMouseDragged ||
-            type == NSEventTypeOtherMouseDragged || type == NSEventTypeMouseMoved ||
-            type == NSEventTypeScrollWheel || type == NSEventTypeKeyDown || type == NSEventTypeKeyUp) {
-            return nil;
-        }
-    }
-    // Return self so Cocoa drag & drop manager delivers draggingEntered:, draggingUpdated:, performDragOperation:
-    return self;
-}
-
-- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)sender {
+static NSDragOperation custom_draggingEntered(id self, SEL _cmd, id<NSDraggingInfo> sender) {
     NSPasteboard *pboard = [sender draggingPasteboard];
     NSPoint loc = [sender draggingLocation];
-    NSRect bounds = self.bounds;
+    NSRect bounds = [self respondsToSelector:@selector(bounds)] ? [self bounds] : NSMakeRect(0, 0, 1280, 800);
     float godot_x = (float)loc.x;
     float godot_y = (float)(bounds.size.height - loc.y);
     
     NSString *typesStr = [[pboard types] componentsJoinedByString:@", "];
-    NSLog(@"[NATIVE_LOG] EXTERNAL DRAG ENTERED (Overlay) types=%@", typesStr);
+    NSLog(@"[NATIVE_LOG] EXTERNAL DRAG ENTERED (%@) types=%@", [self className], typesStr);
     
     if (isSupportedDragType(pboard)) {
         queue_external_event({
@@ -209,14 +199,19 @@ static BOOL isSupportedDragType(NSPasteboard *pboard) {
         });
         return NSDragOperationCopy;
     }
+    
+    IMP orig = get_orig_imp([self class], _cmd);
+    if (orig) {
+        return ((DragEnteredIMP)orig)(self, _cmd, sender);
+    }
     return NSDragOperationNone;
 }
 
-- (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)sender {
+static NSDragOperation custom_draggingUpdated(id self, SEL _cmd, id<NSDraggingInfo> sender) {
     NSPasteboard *pboard = [sender draggingPasteboard];
     if (isSupportedDragType(pboard)) {
         NSPoint loc = [sender draggingLocation];
-        NSRect bounds = self.bounds;
+        NSRect bounds = [self respondsToSelector:@selector(bounds)] ? [self bounds] : NSMakeRect(0, 0, 1280, 800);
         float godot_x = (float)loc.x;
         float godot_y = (float)(bounds.size.height - loc.y);
         
@@ -231,19 +226,24 @@ static BOOL isSupportedDragType(NSPasteboard *pboard) {
         });
         return NSDragOperationCopy;
     }
+    
+    IMP orig = get_orig_imp([self class], _cmd);
+    if (orig) {
+        return ((DragUpdatedIMP)orig)(self, _cmd, sender);
+    }
     return NSDragOperationNone;
 }
 
-- (BOOL)performDragOperation:(id<NSDraggingInfo>)sender {
+static BOOL custom_performDragOperation(id self, SEL _cmd, id<NSDraggingInfo> sender) {
     NSPasteboard *pboard = [sender draggingPasteboard];
     NSString *typesStr = [[pboard types] componentsJoinedByString:@", "];
-    NSLog(@"[NATIVE_LOG] EXTERNAL DROP CALLBACK RECEIVED (Overlay) types=%@", typesStr);
+    NSLog(@"[NATIVE_LOG] EXTERNAL DROP CALLBACK RECEIVED (%@) types=%@", [self className], typesStr);
     
     NSString *rawType = @"unknown";
     NSString *extracted = extractURLFromPasteboard(pboard, &rawType);
     
     NSPoint loc = [sender draggingLocation];
-    NSRect bounds = self.bounds;
+    NSRect bounds = [self respondsToSelector:@selector(bounds)] ? [self bounds] : NSMakeRect(0, 0, 1280, 800);
     float godot_x = (float)loc.x;
     float godot_y = (float)(bounds.size.height - loc.y);
     
@@ -262,51 +262,99 @@ static BOOL isSupportedDragType(NSPasteboard *pboard) {
         NSLog(@"[NATIVE_LOG] EXTERNAL DROP RECEIVED type=%@ payload_len=%lu loc=(%.1f, %.1f)",
               rawType, (unsigned long)extracted.length, godot_x, godot_y);
         return YES;
-    } else {
-        NSLog(@"[NATIVE_LOG] EXTERNAL DROP FAILED TO EXTRACT URL FROM PASTEBOARD types=%@", typesStr);
+    }
+    
+    IMP orig = get_orig_imp([self class], _cmd);
+    if (orig) {
+        return ((PerformDragIMP)orig)(self, _cmd, sender);
     }
     return NO;
 }
 
-@end
+static void setup_class_drag_swizzle(Class cls) {
+    if (!cls) return;
+    
+    if (get_orig_imp(cls, @selector(draggingEntered:))) {
+        return; // Already swizzled for this class
+    }
+
+    Method mEntered = class_getInstanceMethod(cls, @selector(draggingEntered:));
+    if (mEntered) {
+        IMP orig = method_getImplementation(mEntered);
+        set_orig_imp(cls, @selector(draggingEntered:), orig);
+        method_setImplementation(mEntered, (IMP)custom_draggingEntered);
+    } else {
+        class_addMethod(cls, @selector(draggingEntered:), (IMP)custom_draggingEntered, "q@:@");
+    }
+
+    Method mUpdated = class_getInstanceMethod(cls, @selector(draggingUpdated:));
+    if (mUpdated) {
+        IMP orig = method_getImplementation(mUpdated);
+        set_orig_imp(cls, @selector(draggingUpdated:), orig);
+        method_setImplementation(mUpdated, (IMP)custom_draggingUpdated);
+    } else {
+        class_addMethod(cls, @selector(draggingUpdated:), (IMP)custom_draggingUpdated, "q@:@");
+    }
+
+    Method mPerform = class_getInstanceMethod(cls, @selector(performDragOperation:));
+    if (mPerform) {
+        IMP orig = method_getImplementation(mPerform);
+        set_orig_imp(cls, @selector(performDragOperation:), orig);
+        method_setImplementation(mPerform, (IMP)custom_performDragOperation);
+    } else {
+        class_addMethod(cls, @selector(performDragOperation:), (IMP)custom_performDragOperation, "B@:@");
+    }
+}
 
 static void enable_external_drag_drop_native() {
     dispatch_async(dispatch_get_main_queue(), ^{
         NSArray *wins = [NSApp windows];
-        NSLog(@"[NATIVE_LOG] NATIVE_BRIDGE_LOADED: YES windows_count=%lu", (unsigned long)wins.count);
+        g_diag_info.bridge_loaded = true;
+        
+        NSLog(@"[NATIVE_LOG] NATIVE_BRIDGE_LOADED: YES (Version: %s) windows_count=%lu", NATIVE_DRAG_BRIDGE_VERSION_STR, (unsigned long)wins.count);
+        
+        NSArray *dragTypes = @[
+            NSPasteboardTypeURL,
+            NSPasteboardTypeString,
+            NSPasteboardTypeFileURL,
+            @"public.url",
+            @"public.file-url",
+            @"public.utf8-plain-text",
+            @"WebURLsWithTitlesPboardType",
+            @"NSFilenamesPboardType",
+            @"text/uri-list",
+            @"public.url-name"
+        ];
+        g_diag_info.registered_types = [[dragTypes componentsJoinedByString:@", "] UTF8String];
+        
         for (NSWindow *win in wins) {
             if (win.contentView) {
+                g_diag_info.window_found = true;
+                g_diag_info.window_class = [[win className] UTF8String];
+                g_diag_info.content_view_class = [[win.contentView className] UTF8String];
+                g_diag_info.receiver_class = [[win.contentView className] UTF8String] + std::string(" (Swizzled Drag Receiver)");
+                g_diag_info.receiver_attached = true;
+                g_diag_info.receiver_enabled = true;
+                
+                NSRect frame = win.contentView.bounds;
+                char frameBuf[128];
+                snprintf(frameBuf, sizeof(frameBuf), "%.1f, %.1f, %.1f, %.1f", frame.origin.x, frame.origin.y, frame.size.width, frame.size.height);
+                g_diag_info.frame_str = frameBuf;
+
                 NSLog(@"[NATIVE_LOG] WINDOW_FOUND: title='%@' ptr=%p", win.title, win);
                 NSLog(@"[NATIVE_LOG] WINDOW_CLASS: %@", [win className]);
                 NSLog(@"[NATIVE_LOG] CONTENT_VIEW_CLASS: %@", [win.contentView className]);
+                NSLog(@"[NATIVE_LOG] FRAME: %s", frameBuf);
                 
-                NSArray *dragTypes = @[
-                    NSPasteboardTypeURL,
-                    NSPasteboardTypeString,
-                    NSPasteboardTypeFileURL,
-                    @"public.url",
-                    @"public.file-url",
-                    @"public.utf8-plain-text",
-                    @"WebURLsWithTitlesPboardType",
-                    @"NSFilenamesPboardType",
-                    @"text/uri-list",
-                    @"public.url-name"
-                ];
                 [win registerForDraggedTypes:dragTypes];
                 [win.contentView registerForDraggedTypes:dragTypes];
                 
-                // Attach transparent overlay view
-                BOOL overlay_exists = NO;
+                setup_class_drag_swizzle([win.contentView class]);
+                setup_class_drag_swizzle([win class]);
+                
                 for (NSView *sub in win.contentView.subviews) {
-                    if ([sub isKindOfClass:[NativeExternalDragOverlayView class]]) {
-                        overlay_exists = YES;
-                        break;
-                    }
-                }
-                if (!overlay_exists) {
-                    NativeExternalDragOverlayView *overlay = [[NativeExternalDragOverlayView alloc] initWithFrame:win.contentView.bounds];
-                    [win.contentView addSubview:overlay positioned:NSWindowAbove relativeTo:nil];
-                    NSLog(@"[NATIVE_LOG] ACTUAL_DRAG_RECEIVER_CLASS: NativeExternalDragOverlayView installed on %@", [win.contentView className]);
+                    [sub registerForDraggedTypes:dragTypes];
+                    setup_class_drag_swizzle([sub class]);
                 }
                 
                 g_drag_bridge_initialized = true;
@@ -753,6 +801,7 @@ static GDExtensionTypeFromVariantConstructorFunc conv_from_string = nullptr;
 
 static GDExtensionVariantFromTypeConstructorFunc conv_to_int = nullptr;
 static GDExtensionVariantFromTypeConstructorFunc conv_to_string = nullptr;
+static GDExtensionVariantFromTypeConstructorFunc conv_to_bool = nullptr;
 
 static void call_create_player(void *userdata, GDExtensionClassInstancePtr instance, const GDExtensionConstVariantPtr *args, GDExtensionInt arg_count, GDExtensionVariantPtr r_return, GDExtensionCallError *r_error) {
     uint64_t handle = 0;
@@ -890,6 +939,47 @@ static void call_poll_external_drop(void *userdata, GDExtensionClassInstancePtr 
     }
 }
 
+static void call_get_native_diagnostics(void *userdata, GDExtensionClassInstancePtr instance, const GDExtensionConstVariantPtr *args, GDExtensionInt arg_count, GDExtensionVariantPtr r_return, GDExtensionCallError *r_error) {
+    char buf[4096] = {0};
+    snprintf(buf, sizeof(buf),
+             "version=%s|bridge_loaded=%s|window_found=%s|window_class=%s|content_view_class=%s|receiver_class=%s|receiver_attached=%s|receiver_enabled=%s|frame=%s|registered_types=%s",
+             NATIVE_DRAG_BRIDGE_VERSION_STR,
+             g_diag_info.bridge_loaded ? "YES" : "NO",
+             g_diag_info.window_found ? "YES" : "NO",
+             g_diag_info.window_class.c_str(),
+             g_diag_info.content_view_class.c_str(),
+             g_diag_info.receiver_class.c_str(),
+             g_diag_info.receiver_attached ? "YES" : "NO",
+             g_diag_info.receiver_enabled ? "YES" : "NO",
+             g_diag_info.frame_str.c_str(),
+             g_diag_info.registered_types.c_str()
+    );
+    
+    if (r_return && conv_to_string && p_string_new_utf8) {
+        uint8_t godot_str[64] = {0};
+        p_string_new_utf8(godot_str, buf, strlen(buf));
+        conv_to_string(r_return, godot_str);
+    }
+}
+
+static void call_test_native_bridge(void *userdata, GDExtensionClassInstancePtr instance, const GDExtensionConstVariantPtr *args, GDExtensionInt arg_count, GDExtensionVariantPtr r_return, GDExtensionCallError *r_error) {
+    queue_external_event({
+        "EXTERNAL_SELF_TEST",
+        "public.url",
+        "https://www.youtube.com/watch?v=SELF_TEST_VERIFIED",
+        100.0f,
+        100.0f,
+        1280.0f,
+        800.0f
+    });
+    
+    NSLog(@"[NATIVE_LOG] NATIVE BRIDGE SELF TEST TRIGGERED");
+    
+    if (r_return && conv_to_bool) {
+        int64_t val = 1;
+        conv_to_bool(r_return, &val);
+    }
+}
 
 static void register_method_helper(GDExtensionClassLibraryPtr p_library, const char* class_name, const char* method_name, GDExtensionClassMethodCall call_func, bool has_return) {
 
@@ -949,9 +1039,6 @@ static GDExtensionObjectPtr create_helper_instance(void *p_userdata, GDExtension
     }
     return nullptr;
 }
-
-
-
 
 static void free_helper_instance(void *p_userdata, GDExtensionClassInstancePtr p_instance) {
 }
@@ -1015,6 +1102,13 @@ static void initialize_mac_wkwebview_module(void *p_userdata, GDExtensionInitial
 
         register_method_helper(g_library, "MacWKWebViewHelper", "pollExternalDrop", call_poll_external_drop, true);
         register_method_helper(g_library, "MacWKWebViewHelper", "poll_external_drop", call_poll_external_drop, true);
+
+        register_method_helper(g_library, "MacWKWebViewHelper", "getNativeDiagnostics", call_get_native_diagnostics, true);
+        register_method_helper(g_library, "MacWKWebViewHelper", "get_native_diagnostics", call_get_native_diagnostics, true);
+
+        register_method_helper(g_library, "MacWKWebViewHelper", "testNativeBridge", call_test_native_bridge, true);
+        register_method_helper(g_library, "MacWKWebViewHelper", "test_native_bridge", call_test_native_bridge, true);
+
         NSLog(@"[MAC_WKWEBVIEW_INIT] All methods registered!");
 
     }
@@ -1067,6 +1161,7 @@ GDExtensionBool mac_wkwebview_library_init(GDExtensionInterfaceGetProcAddress p_
     if (p_get_variant_from_type) {
         conv_to_int = p_get_variant_from_type(GDEXTENSION_VARIANT_TYPE_INT);
         conv_to_string = p_get_variant_from_type(GDEXTENSION_VARIANT_TYPE_STRING);
+        conv_to_bool = p_get_variant_from_type(GDEXTENSION_VARIANT_TYPE_BOOL);
     }
     
     return 1;

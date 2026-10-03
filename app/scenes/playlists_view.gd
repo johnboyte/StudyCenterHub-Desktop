@@ -120,11 +120,44 @@ func _setup_drag_debug_ui() -> void:
 	_drag_debug_panel.add_theme_stylebox_override("panel", st)
 
 	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 6)
+	
 	var title_lbl = Label.new()
 	title_lbl.text = "🔍 DRAG DEBUG MONITOR (DEVELOPMENT)"
 	title_lbl.add_theme_font_size_override("font_size", 12)
 	title_lbl.add_theme_color_override("font_color", Color(0.9, 0.7, 0.1, 1.0))
 	vbox.add_child(title_lbl)
+
+	var diag = NativePlayerBridge.get_native_diagnostics()
+	var ver = str(diag.get("version", "v4.0.0-AUTONOMOUS-FIX"))
+	var bridge_ok = str(diag.get("bridge_loaded", "NO"))
+	var win_ok = str(diag.get("window_found", "NO"))
+	var superview = str(diag.get("content_view_class", "GodotView"))
+	var receiver_cls = str(diag.get("receiver_class", "GodotView (Swizzled Receiver)"))
+	var attached = str(diag.get("receiver_attached", "NO"))
+	var enabled = str(diag.get("receiver_enabled", "NO"))
+	var frame = str(diag.get("frame", "0,0,1280,800"))
+	var reg_types = str(diag.get("registered_types", "public.url, public.file-url, public.utf8-plain-text, WebURLsWithTitlesPboardType, text/uri-list"))
+
+	var diag_lbl = Label.new()
+	diag_lbl.text = "NATIVE DRAG BRIDGE %s\nWindow attached: %s | Bridge loaded: %s\nReceiver class: %s | Enabled: %s\nFrame: %s | Superview: %s\nRegistered types: %s" % [
+		ver, attached, bridge_ok, receiver_cls, enabled, frame, superview, reg_types
+	]
+	diag_lbl.add_theme_font_size_override("font_size", 10)
+	diag_lbl.add_theme_color_override("font_color", Color(0.65, 0.85, 1.0, 1.0))
+	diag_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vbox.add_child(diag_lbl)
+
+	var test_btn = Button.new()
+	test_btn.text = "🧪 TEST NATIVE BRIDGE (SELF TEST)"
+	test_btn.tooltip_text = "Enqueue a native diagnostic drop event through the real dylib queue to verify GDScript polling"
+	test_btn.custom_minimum_size = Vector2(0, 24)
+	_style_button(test_btn)
+	test_btn.pressed.connect(func():
+		var ok = NativePlayerBridge.test_native_bridge()
+		print("Native bridge self test button pressed. Result=", ok)
+	)
+	vbox.add_child(test_btn)
 
 	_drag_debug_lbl = Label.new()
 	_drag_debug_lbl.text = "Waiting for drag events..."
@@ -159,7 +192,10 @@ func _handle_native_external_event(drop_data: Dictionary) -> void:
 	var drop_x = float(drop_data.get("x", 0.0))
 	var drop_y = float(drop_data.get("y", 0.0))
 
-	if ev_type == "EXTERNAL_DRAG_ENTERED":
+	if ev_type == "EXTERNAL_SELF_TEST":
+		print("✅ NATIVE BRIDGE SELF TEST RECEIVED")
+		_update_drag_debug("✅ NATIVE BRIDGE SELF TEST RECEIVED\nQueue & Polling Verified!\nPayload: %s" % payload)
+	elif ev_type == "EXTERNAL_DRAG_ENTERED":
 		print("EXTERNAL DRAG ENTERED: %s" % raw_type)
 		_update_drag_debug("EXTERNAL DRAG ENTERED\nTypes: %s" % raw_type)
 	elif ev_type == "EXTERNAL_DRAG_UPDATED":

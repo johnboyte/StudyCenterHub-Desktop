@@ -109,9 +109,9 @@ static func poll_external_drop() -> Dictionary:
 			var res = helper.call("pollExternalDrop")
 			if res is String and res != "":
 				var parts = res.split("|", true, 6)
-				if parts.size() >= 7 and parts[0] == "EXTERNAL_DROP":
+				if parts.size() >= 7:
 					return {
-						"event": "EXTERNAL_DROP",
+						"event": parts[0],
 						"raw_type": parts[1],
 						"x": float(parts[2]),
 						"y": float(parts[3]),
@@ -120,6 +120,33 @@ static func poll_external_drop() -> Dictionary:
 						"payload": parts[6]
 					}
 	return {}
+
+static func get_native_diagnostics() -> Dictionary:
+	if OS.get_name() != "macOS" or DisplayServer.get_name() == "headless":
+		return {"bridge_loaded": "NO", "version": "Headless/Non-macOS Mock"}
+	if ClassDB.class_exists("MacWKWebViewHelper"):
+		var helper = ClassDB.instantiate("MacWKWebViewHelper")
+		if helper:
+			var res = helper.call("getNativeDiagnostics")
+			if res is String and res != "":
+				var dict = {}
+				var pairs = res.split("|")
+				for p in pairs:
+					var kv = p.split("=", true, 1)
+					if kv.size() == 2:
+						dict[kv[0]] = kv[1]
+				return dict
+	return {}
+
+static func test_native_bridge() -> bool:
+	if OS.get_name() != "macOS" or DisplayServer.get_name() == "headless":
+		return false
+	if ClassDB.class_exists("MacWKWebViewHelper"):
+		var helper = ClassDB.instantiate("MacWKWebViewHelper")
+		if helper:
+			helper.call("testNativeBridge")
+			return true
+	return false
 
 
 

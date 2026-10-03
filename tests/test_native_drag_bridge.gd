@@ -23,9 +23,17 @@ func _init() -> void:
 	NativePlayerBridgeScript.enable_external_drag()
 	print("✓ NativePlayerBridgeScript.enable_external_drag() executed cleanly.")
 
-	var drop_dict = NativePlayerBridgeScript.poll_external_drop()
-	assert(drop_dict is Dictionary, "poll_external_drop must return a Dictionary")
-	print("✓ NativePlayerBridgeScript.poll_external_drop() returned empty dictionary when no drop pending.")
+	var diag = NativePlayerBridgeScript.get_native_diagnostics()
+	assert(diag is Dictionary, "get_native_diagnostics must return a Dictionary")
+	print("✓ NativePlayerBridgeScript.get_native_diagnostics() returned: ", diag)
+
+	# Test GDExtension C++ methods directly
+	helper.call("testNativeBridge")
+	print("✓ helper.call('testNativeBridge') enqueued self-test event.")
+
+	var raw_drop = helper.call("pollExternalDrop")
+	assert(raw_drop is String and raw_drop.begins_with("EXTERNAL_SELF_TEST"), "Polled raw string must begin with EXTERNAL_SELF_TEST")
+	print("✓ helper.call('pollExternalDrop') successfully returned raw self-test string: ", raw_drop)
 
 	print("\n=======================================================")
 	print("  NATIVE DRAG BRIDGE VERIFICATION PASSED!  ")
