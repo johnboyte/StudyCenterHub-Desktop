@@ -72,7 +72,6 @@ func _ready() -> void:
 	_set_container_mouse_filters_pass()
 	_setup_header_actions()
 	_setup_sidebar_toggle()
-	_setup_drag_debug_ui()
 	_apply_input_and_button_rules()
 	_init_services()
 	_connect_signals()
@@ -95,12 +94,15 @@ func _ready() -> void:
 	if OS.get_name() == "macOS":
 		NativePlayerBridge.enable_external_drag()
 		NativePlayerBridge.set_drag_box_visible(true)
-		_update_drag_debug("EXTERNAL DRAG INITIALIZED (Native Child Panel Active)")
 
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	mouse_default_cursor_shape = Control.CURSOR_CAN_DROP
 
 	load_playlists()
+
+func _exit_tree() -> void:
+	if OS.get_name() == "macOS":
+		NativePlayerBridge.set_drag_box_visible(false)
 
 func _setup_drag_debug_ui() -> void:
 	if _drag_debug_panel and is_instance_valid(_drag_debug_panel):
@@ -218,52 +220,57 @@ func _handle_native_external_event(drop_data: Dictionary) -> void:
 func _handle_native_external_drop(drop_data: Dictionary) -> void:
 	var raw_type = str(drop_data.get("raw_type", "unknown"))
 	var payload = str(drop_data.get("payload", ""))
-	var drop_x = float(drop_data.get("x", 0.0))
-	var drop_y = float(drop_data.get("y", 0.0))
 	
-	print("EXTERNAL DROP CALLBACK RECEIVED")
-	print("EXTERNAL PAYLOAD TYPE: %s" % raw_type)
-	if payload != "":
-		print("EXTERNAL URL RECEIVED: %s" % payload)
-	
-	_update_drag_debug("EXTERNAL DROP CALLBACK RECEIVED\nPayload Type: %s\nPayload: %s\nDrop Loc: (%.1f, %.1f)" % [raw_type, payload, drop_x, drop_y])
-	
-	var drop_pos = Vector2(drop_x, drop_y)
-	var target_pl_id = current_playlist_id
-	if target_pl_id.is_empty() and playlists_list.size() > 0:
-		target_pl_id = str(playlists_list[0].get("id", ""))
-		
-	var target_idx = -1
-	
-	if sidebar_panel and playlists_vbox:
-		var sb_rect = sidebar_panel.get_global_rect() if sidebar_panel else Rect2()
+	print("EXTERNAL DROP CALLBACK RECEIVED: payload_type=%s payload=%s" % [raw_type, payload])
 
-		if sb_rect.has_point(drop_pos):
-			for child in playlists_vbox.get_children():
-				if child is PlaylistCardControl and child.get_global_rect().has_point(drop_pos):
-					target_pl_id = child.playlist_id
-					target_idx = -1
-					break
-	
-	if items_vbox:
-		for child in items_vbox.get_children():
-			if child is SongDropSlotControl and child.get_global_rect().has_point(drop_pos):
-				target_idx = child.slot_index
-				break
-			elif child is Control and not (child is SongDropSlotControl) and child.get_global_rect().has_point(drop_pos):
-				var crect = child.get_global_rect()
-				var child_idx = child.get_index()
-				var slot_calc = int(child_idx / 2)
-				if drop_pos.y > crect.position.y + (crect.size.y / 2.0):
-					target_idx = slot_calc + 1
-				else:
-					target_idx = slot_calc
-				break
+	if current_playlist_id.is_empty():
+		print("EXTERNAL DROP REJECTED: NO PLAYLIST SELECTED")
+		NativePlayerBridge.update_drop_status("NO PLAYLIST SELECTED", "error")
+		_reset_drop_status_delayed(3.5)
+		return
 
-	print("EXTERNAL DROP TARGET SLOT: %d" % target_idx)
-	print("EXTERNAL ADD REQUESTED")
-	_update_drag_debug("EXTERNAL DROP TARGET SLOT: %d\nEXTERNAL ADD REQUESTED for: %s" % [target_idx, payload])
-	_process_dropped_url_or_file(payload, target_pl_id, target_idx)
+	if not playlists_svc:
+		NativePlayerBridge.update_drop_status("COULD NOT ADD — Service Error", "error")
+		_reset_drop_status_delayed(3.5)
+		return
+
+	var val = playlists_svc.validate_and_extract_url(payload)
+	if not val.get("is_valid", false):
+		print("EXTERNAL DROP REJECTED: INVALID URL")
+		NativePlayerBridge.update_drop_status("COULD NOT ADD — Invalid URL", "error")
+		_show_invalid_url_notification("No valid YouTube or media URL found in dropped item.")
+		_reset_drop_status_delayed(3.5)
+		return
+
+	var canonical_url = str(val.get("canonical_url", payload))
+	var default_title = str(val.get("title", "Dropped Media"))
+	if default_title == "": default_title = "Dropped Media"
+
+	if playlists_svc.check_duplicate_in_playlist(current_playlist_id, canonical_url, default_title):
+		print("EXTERNAL DROP REJECTED: DUPLICATE VIDEO IN PLAYLIST")
+		NativePlayerBridge.update_drop_status("ALREADY IN PLAYLIST", "duplicate")
+		_show_toast_notification("⚠️ ALREADY IN PLAYLIST: Song is already in this playlist")
+		_reset_drop_status_delayed(3.5)
+		return
+
+	# Add to the end of the currently selected playlist
+	print("EXTERNAL ADD REQUESTED TO END OF PLAYLIST: %s" % current_playlist_id)
+	NativePlayerBridge.update_drop_status("ADDING…", "adding")
+	_process_dropped_url_or_file(payload, current_playlist_id, -1)
+
+func _reset_drop_status_delayed(seconds: float = 3.5) -> void:
+	var t = get_tree()
+	if t:
+		t.create_timer(seconds).timeout.connect(func():
+			if current_playlist_id.is_empty():
+				NativePlayerBridge.update_target_playlist("")
+				NativePlayerBridge.update_drop_status("NO PLAYLIST SELECTED", "error")
+			else:
+				var pl = playlists_svc.get_playlist_by_id(current_playlist_id) if playlists_svc else {}
+				var pl_name = str(pl.get("name", ""))
+				NativePlayerBridge.update_target_playlist(pl_name)
+				NativePlayerBridge.update_drop_status("READY — Drop YouTube song here", "ready")
+		)
 
 
 func _set_container_mouse_filters_pass() -> void:
@@ -825,7 +832,15 @@ func _render_library_search_results(query: String) -> void:
 func select_playlist(playlist_id: String) -> void:
 	current_playlist_id = playlist_id
 	selected_song_item_id = ""
-	var pl = playlists_svc.get_playlist_by_id(playlist_id)
+	var pl = playlists_svc.get_playlist_by_id(playlist_id) if playlists_svc else {}
+	var pl_name = str(pl.get("name", ""))
+
+	if OS.get_name() == "macOS":
+		NativePlayerBridge.update_target_playlist(pl_name)
+		if playlist_id.is_empty():
+			NativePlayerBridge.update_drop_status("NO PLAYLIST SELECTED", "error")
+		else:
+			NativePlayerBridge.update_drop_status("READY — Drop YouTube song here", "ready")
 
 	_render_playlists_list()
 	_render_selected_playlist_header(pl)
@@ -1224,10 +1239,14 @@ func _execute_insert_and_fetch(
 					playlists_svc.update_playlist_item(temp_item_id, fetched_title, fetched_artist, "youtube", canonical_url, "", 0, fetched_thumb)
 					if target_playlist_id == current_playlist_id:
 						load_playlist_items()
+					NativePlayerBridge.update_drop_status("ADDED: " + fetched_title, "added")
+					_reset_drop_status_delayed(3.5)
 				else:
 					playlists_svc.update_playlist_item(temp_item_id, "YouTube Video (" + vid_id + ")", "", "youtube", canonical_url, "", 0, str(meta.get("thumbnail_url", "")))
 					if target_playlist_id == current_playlist_id:
 						load_playlist_items()
+					NativePlayerBridge.update_drop_status("ADDED: YouTube Video (" + vid_id + ")", "added")
+					_reset_drop_status_delayed(3.5)
 				_trigger_auto_sync(target_playlist_id)
 			)
 	else:
@@ -1244,6 +1263,8 @@ func _execute_insert_and_fetch(
 		)
 		if target_playlist_id == current_playlist_id:
 			load_playlist_items()
+		NativePlayerBridge.update_drop_status("ADDED: " + default_title, "added")
+		_reset_drop_status_delayed(3.5)
 		_trigger_auto_sync(target_playlist_id)
 
 func _show_remove_song_confirmation(item_id: String, item_data: Dictionary, playlist_name: String) -> void:

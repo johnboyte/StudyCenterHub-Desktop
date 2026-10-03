@@ -17,7 +17,7 @@
 // MACOS NATIVE BROWSER URL DRAG & DROP BRIDGE
 // ==============================================================================
 
-#define NATIVE_DRAG_BRIDGE_VERSION_STR "v5.3.0-INDEPENDENT-WINDOW-TEST"
+#define NATIVE_DRAG_BRIDGE_VERSION_STR "v5.4.0-COMPACT-INDEPENDENT-DROP-SURFACE"
 
 struct NativeDiagnosticsInfo {
     bool bridge_loaded;
@@ -195,12 +195,17 @@ static void runOnMainThread(dispatch_block_t block);
 @class NativePlaylistDropBoxView;
 static NSWindow *g_independentWindow = nil;
 static NativePlaylistDropBoxView *g_independentDropBoxView = nil;
+static bool g_dropWindowShouldBeVisible = false;
 
-// Dedicated Visible Native AppKit Drop Box View
+// Dedicated Compact Native AppKit Drop Companion View
 @interface NativePlaylistDropBoxView : NSView <NSDraggingDestination>
-@property (nonatomic, strong) NSTextField *titleLabel;
+@property (nonatomic, strong) NSTextField *headerLabel;
+@property (nonatomic, strong) NSTextField *playlistLabel;
+@property (nonatomic, strong) NSView *statusBadgeView;
 @property (nonatomic, strong) NSTextField *statusLabel;
-@property (nonatomic, strong) NSTextView *logTextView;
+
+- (void)setTargetPlaylistName:(NSString *)name;
+- (void)setStatusText:(NSString *)text statusType:(NSString *)type;
 @end
 
 @implementation NativePlaylistDropBoxView
@@ -223,78 +228,96 @@ static NativePlaylistDropBoxView *g_independentDropBoxView = nil;
         [self registerForDraggedTypes:dragTypes];
         
         [self setWantsLayer:YES];
-        [self.layer setBackgroundColor:[NSColor colorWithCalibratedRed:0.07 green:0.10 blue:0.18 alpha:0.95].CGColor];
-        [self.layer setBorderColor:[NSColor colorWithCalibratedRed:0.0 green:0.8 blue:0.9 alpha:1.0].CGColor];
-        [self.layer setBorderWidth:2.5];
-        [self.layer setCornerRadius:8.0];
+        self.layer.backgroundColor = [NSColor colorWithCalibratedRed:0.06 green:0.09 blue:0.16 alpha:0.96].CGColor;
+        self.layer.borderColor = [NSColor colorWithCalibratedRed:0.22 green:0.74 blue:0.97 alpha:0.85].CGColor;
+        self.layer.borderWidth = 2.0;
+        self.layer.cornerRadius = 10.0;
         
-        _titleLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(10, frameRect.size.height - 30, frameRect.size.width - 20, 22)];
-        [_titleLabel setEditable:NO];
-        [_titleLabel setSelectable:NO];
-        [_titleLabel setBezeled:NO];
-        [_titleLabel setDrawsBackground:NO];
-        [_titleLabel setTextColor:[NSColor colorWithCalibratedRed:0.0 green:0.9 blue:1.0 alpha:1.0]];
-        [_titleLabel setFont:[NSFont boldSystemFontOfSize:12]];
-        [_titleLabel setAlignment:NSTextAlignmentCenter];
-        [_titleLabel setStringValue:@"🧪 INDEPENDENT NATIVE WINDOW YOUTUBE DROP TEST"];
-        [self addSubview:_titleLabel];
+        // 1. Drop YouTube Song Here
+        _headerLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(12, frameRect.size.height - 32, frameRect.size.width - 24, 22)];
+        [_headerLabel setEditable:NO];
+        [_headerLabel setSelectable:NO];
+        [_headerLabel setBezeled:NO];
+        [_headerLabel setDrawsBackground:NO];
+        [_headerLabel setTextColor:[NSColor colorWithCalibratedRed:0.95 green:0.97 blue:1.0 alpha:1.0]];
+        [_headerLabel setFont:[NSFont boldSystemFontOfSize:14]];
+        [_headerLabel setAlignment:NSTextAlignmentCenter];
+        [_headerLabel setStringValue:@"Drop YouTube Song Here"];
+        [self addSubview:_headerLabel];
         
-        _statusLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(10, frameRect.size.height - 65, frameRect.size.width - 20, 30)];
+        // 2. Adds to: <Playlist Name>
+        _playlistLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(12, frameRect.size.height - 56, frameRect.size.width - 24, 20)];
+        [_playlistLabel setEditable:NO];
+        [_playlistLabel setSelectable:NO];
+        [_playlistLabel setBezeled:NO];
+        [_playlistLabel setDrawsBackground:NO];
+        [_playlistLabel setTextColor:[NSColor colorWithCalibratedRed:0.58 green:0.64 blue:0.72 alpha:1.0]];
+        [_playlistLabel setFont:[NSFont systemFontOfSize:12 weight:NSFontWeightMedium]];
+        [_playlistLabel setAlignment:NSTextAlignmentCenter];
+        [_playlistLabel setStringValue:@"Adds to: Select a Playlist"];
+        [self addSubview:_playlistLabel];
+        
+        // 3. Status Badge Container View
+        _statusBadgeView = [[NSView alloc] initWithFrame:NSMakeRect(16, 12, frameRect.size.width - 32, 42)];
+        [_statusBadgeView setWantsLayer:YES];
+        _statusBadgeView.layer.backgroundColor = [NSColor colorWithCalibratedRed:0.12 green:0.16 blue:0.25 alpha:1.0].CGColor;
+        _statusBadgeView.layer.cornerRadius = 6.0;
+        [self addSubview:_statusBadgeView];
+        
+        // Status Text Label inside status badge
+        _statusLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(6, 8, frameRect.size.width - 44, 26)];
         [_statusLabel setEditable:NO];
         [_statusLabel setSelectable:NO];
         [_statusLabel setBezeled:NO];
-        [_statusLabel setDrawsBackground:YES];
-        [_statusLabel setBackgroundColor:[NSColor colorWithCalibratedRed:0.12 green:0.15 blue:0.25 alpha:1.0]];
-        [_statusLabel setTextColor:[NSColor colorWithCalibratedRed:0.3 green:0.9 blue:0.5 alpha:1.0]];
+        [_statusLabel setDrawsBackground:NO];
+        [_statusLabel setTextColor:[NSColor colorWithCalibratedRed:0.22 green:0.74 blue:0.97 alpha:1.0]];
         [_statusLabel setFont:[NSFont boldSystemFontOfSize:12]];
         [_statusLabel setAlignment:NSTextAlignmentCenter];
-        [_statusLabel setStringValue:@"WINDOW CREATED | RECEIVER REGISTERED | WAITING FOR PHYSICAL DRAG"];
-        [self addSubview:_statusLabel];
-        
-        NSScrollView *scrollView = [[NSScrollView alloc] initWithFrame:NSMakeRect(10, 10, frameRect.size.width - 20, frameRect.size.height - 80)];
-        [scrollView setHasVerticalScroller:YES];
-        [scrollView setHasHorizontalScroller:NO];
-        
-        _logTextView = [[NSTextView alloc] initWithFrame:scrollView.contentView.bounds];
-        [_logTextView setEditable:NO];
-        [_logTextView setSelectable:YES];
-        [_logTextView setFont:[NSFont userFixedPitchFontOfSize:11]];
-        [_logTextView setBackgroundColor:[NSColor colorWithCalibratedRed:0.04 green:0.06 blue:0.10 alpha:1.0]];
-        [_logTextView setTextColor:[NSColor colorWithCalibratedRed:0.85 green:0.85 blue:0.9 alpha:1.0]];
-        [scrollView setDocumentView:_logTextView];
-        [self addSubview:scrollView];
-        
-        [self appendLog:@"[INDEPENDENT NATIVE WINDOW READY]"];
-        [self appendLog:@"Parent Window: NIL (Completely Independent NSWindow)"];
-        [self appendLog:@"Drag Safari / Chrome YouTube link directly into this window."];
+        [_statusLabel setStringValue:@"READY — Drop YouTube song here"];
+        [_statusBadgeView addSubview:_statusLabel];
     }
     return self;
 }
 
-- (void)appendLog:(NSString *)msg {
-    NSString *line = [NSString stringWithFormat:@"%@\n", msg];
+- (void)setTargetPlaylistName:(NSString *)name {
     dispatch_async(dispatch_get_main_queue(), ^{
-        [self->_logTextView setString:[self->_logTextView.string stringByAppendingString:line]];
-        [self->_logTextView scrollRangeToVisible:NSMakeRange(self->_logTextView.string.length, 0)];
-        NSLog(@"[INDEPENDENT_WIN_LOG] %@", msg);
+        if (!name || name.length == 0) {
+            [self->_playlistLabel setStringValue:@"NO PLAYLIST SELECTED"];
+            [self->_playlistLabel setTextColor:[NSColor colorWithCalibratedRed:0.95 green:0.4 blue:0.4 alpha:1.0]];
+        } else {
+            [self->_playlistLabel setStringValue:[NSString stringWithFormat:@"Adds to: %@", name]];
+            [self->_playlistLabel setTextColor:[NSColor colorWithCalibratedRed:0.58 green:0.64 blue:0.72 alpha:1.0]];
+        }
+    });
+}
+
+- (void)setStatusText:(NSString *)text statusType:(NSString *)type {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self->_statusLabel setStringValue:text ?: @"READY — Drop YouTube song here"];
+        if ([type isEqualToString:@"drag_entered"]) {
+            self->_statusBadgeView.layer.backgroundColor = [NSColor colorWithCalibratedRed:0.08 green:0.45 blue:0.22 alpha:1.0].CGColor;
+            [self->_statusLabel setTextColor:[NSColor whiteColor]];
+        } else if ([type isEqualToString:@"adding"]) {
+            self->_statusBadgeView.layer.backgroundColor = [NSColor colorWithCalibratedRed:0.70 green:0.38 blue:0.05 alpha:1.0].CGColor;
+            [self->_statusLabel setTextColor:[NSColor whiteColor]];
+        } else if ([type isEqualToString:@"added"]) {
+            self->_statusBadgeView.layer.backgroundColor = [NSColor colorWithCalibratedRed:0.09 green:0.52 blue:0.24 alpha:1.0].CGColor;
+            [self->_statusLabel setTextColor:[NSColor whiteColor]];
+        } else if ([type isEqualToString:@"duplicate"]) {
+            self->_statusBadgeView.layer.backgroundColor = [NSColor colorWithCalibratedRed:0.76 green:0.26 blue:0.05 alpha:1.0].CGColor;
+            [self->_statusLabel setTextColor:[NSColor whiteColor]];
+        } else if ([type isEqualToString:@"error"]) {
+            self->_statusBadgeView.layer.backgroundColor = [NSColor colorWithCalibratedRed:0.72 green:0.11 blue:0.11 alpha:1.0].CGColor;
+            [self->_statusLabel setTextColor:[NSColor whiteColor]];
+        } else { // "ready" or default
+            self->_statusBadgeView.layer.backgroundColor = [NSColor colorWithCalibratedRed:0.12 green:0.16 blue:0.25 alpha:1.0].CGColor;
+            [self->_statusLabel setTextColor:[NSColor colorWithCalibratedRed:0.22 green:0.74 blue:0.97 alpha:1.0]];
+        }
     });
 }
 
 - (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)sender {
-    NSPasteboard *pboard = [sender draggingPasteboard];
-    NSArray *types = [pboard types];
-    
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [self->_statusLabel setStringValue:@"🟢 DRAG ENTERED INDEPENDENT WINDOW!"];
-        [self->_statusLabel setBackgroundColor:[NSColor colorWithCalibratedRed:0.0 green:0.5 blue:0.2 alpha:1.0]];
-    });
-    
-    [self appendLog:@"\n----------------------------------------"];
-    [self appendLog:[NSString stringWithFormat:@"[EVENT] draggingEntered (%lu types):", (unsigned long)types.count]];
-    for (NSString *t in types) {
-        [self appendLog:[NSString stringWithFormat:@"  • %@", t]];
-    }
-    
+    [self setStatusText:@"DRAG ENTERED" statusType:@"drag_entered"];
     return NSDragOperationCopy;
 }
 
@@ -303,11 +326,7 @@ static NativePlaylistDropBoxView *g_independentDropBoxView = nil;
 }
 
 - (void)draggingExited:(id<NSDraggingInfo>)sender {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [self->_statusLabel setStringValue:@"WAITING FOR PHYSICAL DRAG"];
-        [self->_statusLabel setBackgroundColor:[NSColor colorWithCalibratedRed:0.12 green:0.15 blue:0.25 alpha:1.0]];
-    });
-    [self appendLog:@"[EVENT] draggingExited"];
+    [self setStatusText:@"READY — Drop YouTube song here" statusType:@"ready"];
 }
 
 - (BOOL)performDragOperation:(id<NSDraggingInfo>)sender {
@@ -321,16 +340,7 @@ static NativePlaylistDropBoxView *g_independentDropBoxView = nil;
     float godot_y = (float)(bounds.size.height - loc.y);
     
     if (extracted && extracted.length > 0) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [self->_statusLabel setStringValue:@"🎉 DROP RECEIVED NATIVE BOX!"];
-            [self->_statusLabel setBackgroundColor:[NSColor colorWithCalibratedRed:0.1 green:0.5 blue:0.95 alpha:1.0]];
-        });
-        
-        [self appendLog:@"\n========================================"];
-        [self appendLog:[NSString stringWithFormat:@"[EVENT] performDragOperation SUCCESS!"]];
-        [self appendLog:[NSString stringWithFormat:@"Type: %@", rawType]];
-        [self appendLog:[NSString stringWithFormat:@"URL:  %@", extracted]];
-        [self appendLog:@"========================================\n"];
+        [self setStatusText:@"ADDING…" statusType:@"adding"];
         
         queue_external_event({
             "EXTERNAL_DROP",
@@ -343,6 +353,7 @@ static NativePlaylistDropBoxView *g_independentDropBoxView = nil;
         });
         return YES;
     }
+    [self setStatusText:@"COULD NOT ADD — Invalid URL" statusType:@"error"];
     return NO;
 }
 
@@ -743,6 +754,55 @@ static void setup_class_drag_swizzle(Class cls) {
     }
 }
 
+@interface DropWindowObserver : NSObject
+@end
+
+static DropWindowObserver *g_dropObserver = nil;
+
+static void updateIndependentWindowPosition() {
+    if (!g_independentWindow) return;
+    
+    NSWindow *mainWin = [NSApp mainWindow];
+    if (!mainWin) {
+        NSArray *wins = [NSApp windows];
+        for (NSWindow *w in wins) {
+            if ([w isVisible] && w.contentView && w != g_independentWindow) {
+                mainWin = w;
+                break;
+            }
+        }
+    }
+    if (!mainWin) return;
+
+    NSRect mainFrame = mainWin.frame;
+    CGFloat dropW = 440.0;
+    CGFloat dropH = 130.0;
+    CGFloat x = mainFrame.origin.x + mainFrame.size.width - dropW - 24.0;
+    CGFloat y = mainFrame.origin.y + mainFrame.size.height - dropH - 54.0;
+
+    NSRect newFrame = NSMakeRect(x, y, dropW, dropH);
+    [g_independentWindow setFrame:newFrame display:YES animate:NO];
+}
+
+@implementation DropWindowObserver
+- (void)windowDidMoveOrResize:(NSNotification *)note {
+    NSWindow *win = note.object;
+    if (win && win != g_independentWindow) {
+        updateIndependentWindowPosition();
+    }
+}
+- (void)appDidHide:(NSNotification *)note {
+    if (g_independentWindow) {
+        [g_independentWindow orderOut:nil];
+    }
+}
+- (void)appDidUnhide:(NSNotification *)note {
+    if (g_independentWindow && g_dropWindowShouldBeVisible) {
+        [g_independentWindow orderFrontRegardless];
+    }
+}
+@end
+
 static void ensure_external_drag_receiver() {
     g_diag_info.bridge_loaded = true;
     
@@ -791,20 +851,19 @@ static void ensure_external_drag_receiver() {
 
     if (!g_independentWindow) {
         NSRect winFrame = mainWin ? mainWin.frame : NSMakeRect(100, 100, 1000, 700);
-        NSRect indFrame = NSMakeRect(
-            winFrame.origin.x + winFrame.size.width - 700,
-            winFrame.origin.y + winFrame.size.height - 480,
-            680,
-            420
-        );
+        CGFloat dropW = 440.0;
+        CGFloat dropH = 130.0;
+        CGFloat x = winFrame.origin.x + winFrame.size.width - dropW - 24.0;
+        CGFloat y = winFrame.origin.y + winFrame.size.height - dropH - 54.0;
+        NSRect indFrame = NSMakeRect(x, y, dropW, dropH);
 
-        NSUInteger styleMask = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable;
+        NSUInteger styleMask = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable;
         g_independentWindow = [[NSWindow alloc] initWithContentRect:indFrame
                                                            styleMask:styleMask
                                                              backing:NSBackingStoreBuffered
                                                                defer:NO];
-        [g_independentWindow setTitle:@"INDEPENDENT NATIVE WINDOW YOUTUBE DROP TEST"];
-        [g_independentWindow setLevel:NSNormalWindowLevel];
+        [g_independentWindow setTitle:@"Drop YouTube Song Here"];
+        [g_independentWindow setLevel:NSFloatingWindowLevel];
         [g_independentWindow setHidesOnDeactivate:NO];
         [g_independentWindow setHasShadow:YES];
         [g_independentWindow setReleasedWhenClosed:NO];
@@ -816,11 +875,22 @@ static void ensure_external_drag_receiver() {
         [g_independentWindow.contentView addSubview:g_independentDropBoxView];
         [g_independentWindow registerForDraggedTypes:dragTypes];
 
+        if (!g_dropObserver) {
+            g_dropObserver = [[DropWindowObserver alloc] init];
+            NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
+            [nc addObserver:g_dropObserver selector:@selector(windowDidMoveOrResize:) name:NSWindowDidMoveNotification object:nil];
+            [nc addObserver:g_dropObserver selector:@selector(windowDidMoveOrResize:) name:NSWindowDidResizeNotification object:nil];
+            [nc addObserver:g_dropObserver selector:@selector(appDidHide:) name:NSApplicationDidHideNotification object:nil];
+            [nc addObserver:g_dropObserver selector:@selector(appDidUnhide:) name:NSApplicationDidUnhideNotification object:nil];
+        }
+
         [g_independentWindow makeKeyAndOrderFront:nil];
         [g_independentWindow orderFrontRegardless];
-        NSLog(@"[NATIVE_LOG] Created completely independent native NSWindow (%p) with parentWindow=NIL", g_independentWindow);
+        g_dropWindowShouldBeVisible = true;
+        NSLog(@"[NATIVE_LOG] Created compact production independent NSWindow (%p) with parentWindow=NIL", g_independentWindow);
     } else {
         [g_independentWindow orderFrontRegardless];
+        g_dropWindowShouldBeVisible = true;
     }
 
     g_diag_info.independent_window_ptr = [NSString stringWithFormat:@"%p", g_independentWindow].UTF8String;
@@ -852,9 +922,11 @@ static void ensure_external_drag_receiver() {
 
 static void mac_wkwebview_set_drag_box_visible(bool visible) {
     runOnMainThread(^{
+        g_dropWindowShouldBeVisible = visible;
         if (visible) {
             ensure_external_drag_receiver();
             if (g_independentWindow) {
+                updateIndependentWindowPosition();
                 [g_independentWindow orderFrontRegardless];
             }
         } else {
@@ -1447,6 +1519,34 @@ static void call_poll_external_drop(void *userdata, GDExtensionClassInstancePtr 
     }
 }
 
+static void call_update_target_playlist(void *userdata, GDExtensionClassInstancePtr instance, const GDExtensionConstVariantPtr *args, GDExtensionInt arg_count, GDExtensionVariantPtr r_return, GDExtensionCallError *r_error) {
+    char name_buf[512] = {0};
+    if (arg_count > 0 && args[0]) {
+        extract_utf8_from_variant(args[0], name_buf, sizeof(name_buf));
+    }
+    NSString *nsName = [NSString stringWithUTF8String:name_buf];
+    runOnMainThread(^{
+        if (g_independentDropBoxView) {
+            [g_independentDropBoxView setTargetPlaylistName:nsName];
+        }
+    });
+}
+
+static void call_update_drop_status(void *userdata, GDExtensionClassInstancePtr instance, const GDExtensionConstVariantPtr *args, GDExtensionInt arg_count, GDExtensionVariantPtr r_return, GDExtensionCallError *r_error) {
+    char text_buf[512] = {0};
+    char type_buf[64] = {0};
+    if (arg_count > 0 && args[0]) extract_utf8_from_variant(args[0], text_buf, sizeof(text_buf));
+    if (arg_count > 1 && args[1]) extract_utf8_from_variant(args[1], type_buf, sizeof(type_buf));
+    
+    NSString *nsText = [NSString stringWithUTF8String:text_buf];
+    NSString *nsType = [NSString stringWithUTF8String:type_buf];
+    runOnMainThread(^{
+        if (g_independentDropBoxView) {
+            [g_independentDropBoxView setStatusText:nsText statusType:nsType];
+        }
+    });
+}
+
 static void call_set_drag_box_visible(void *userdata, GDExtensionClassInstancePtr instance, const GDExtensionConstVariantPtr *args, GDExtensionInt arg_count, GDExtensionVariantPtr r_return, GDExtensionCallError *r_error) {
     uint8_t vis = 1;
     if (arg_count > 0 && args[0] && conv_from_bool) conv_from_bool(&vis, (GDExtensionVariantPtr)args[0]);
@@ -1629,6 +1729,12 @@ static void initialize_mac_wkwebview_module(void *p_userdata, GDExtensionInitial
 
         register_method_helper(g_library, "MacWKWebViewHelper", "setDragBoxVisible", call_set_drag_box_visible, false);
         register_method_helper(g_library, "MacWKWebViewHelper", "set_drag_box_visible", call_set_drag_box_visible, false);
+
+        register_method_helper(g_library, "MacWKWebViewHelper", "updateTargetPlaylist", call_update_target_playlist, false);
+        register_method_helper(g_library, "MacWKWebViewHelper", "update_target_playlist", call_update_target_playlist, false);
+
+        register_method_helper(g_library, "MacWKWebViewHelper", "updateDropStatus", call_update_drop_status, false);
+        register_method_helper(g_library, "MacWKWebViewHelper", "update_drop_status", call_update_drop_status, false);
 
         register_method_helper(g_library, "MacWKWebViewHelper", "pollExternalDrop", call_poll_external_drop, true);
         register_method_helper(g_library, "MacWKWebViewHelper", "poll_external_drop", call_poll_external_drop, true);

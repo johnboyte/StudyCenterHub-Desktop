@@ -111,6 +111,28 @@ static func set_drag_box_visible(visible: bool) -> void:
 			elif helper.has_method("set_drag_box_visible"):
 				helper.call("set_drag_box_visible", visible)
 
+static func update_target_playlist(playlist_name: String) -> void:
+	if OS.get_name() != "macOS" or DisplayServer.get_name() == "headless":
+		return
+	if ClassDB.class_exists("MacWKWebViewHelper"):
+		var helper = ClassDB.instantiate("MacWKWebViewHelper")
+		if helper:
+			if helper.has_method("updateTargetPlaylist"):
+				helper.call("updateTargetPlaylist", playlist_name)
+			elif helper.has_method("update_target_playlist"):
+				helper.call("update_target_playlist", playlist_name)
+
+static func update_drop_status(status_text: String, status_type: String = "ready") -> void:
+	if OS.get_name() != "macOS" or DisplayServer.get_name() == "headless":
+		return
+	if ClassDB.class_exists("MacWKWebViewHelper"):
+		var helper = ClassDB.instantiate("MacWKWebViewHelper")
+		if helper:
+			if helper.has_method("updateDropStatus"):
+				helper.call("updateDropStatus", status_text, status_type)
+			elif helper.has_method("update_drop_status"):
+				helper.call("update_drop_status", status_text, status_type)
+
 static func poll_external_drop() -> Dictionary:
 	if OS.get_name() != "macOS" or DisplayServer.get_name() == "headless":
 		return {}
