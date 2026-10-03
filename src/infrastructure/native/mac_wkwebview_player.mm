@@ -372,6 +372,34 @@ static bool run_native_receiver_test_impl(char *out_buf, size_t out_size) {
     return dropOk;
 }
 
+typedef void (*RegisterForDraggedTypesIMP)(id, SEL, NSArray<NSPasteboardType>*);
+
+static void custom_registerForDraggedTypes(id self, SEL _cmd, NSArray<NSPasteboardType> *types) {
+    NSMutableArray *merged = [NSMutableArray arrayWithArray:types ?: @[]];
+    NSArray *ourTypes = @[
+        NSPasteboardTypeURL,
+        NSPasteboardTypeString,
+        NSPasteboardTypeFileURL,
+        @"public.url",
+        @"public.file-url",
+        @"public.utf8-plain-text",
+        @"WebURLsWithTitlesPboardType",
+        @"NSFilenamesPboardType",
+        @"text/uri-list",
+        @"public.url-name"
+    ];
+    for (NSString *t in ourTypes) {
+        if (![merged containsObject:t]) {
+            [merged addObject:t];
+        }
+    }
+    
+    IMP orig = get_orig_imp([self class], _cmd);
+    if (orig) {
+        ((RegisterForDraggedTypesIMP)orig)(self, _cmd, merged);
+    }
+}
+
 static NSDragOperation custom_draggingEntered(id self, SEL _cmd, id<NSDraggingInfo> sender) {
     NSPasteboard *pboard = [sender draggingPasteboard];
     NSPoint loc = [sender draggingLocation];
@@ -473,6 +501,13 @@ static void setup_class_drag_swizzle(Class cls) {
         return; // Already swizzled for this class
     }
 
+    Method mRegister = class_getInstanceMethod(cls, @selector(registerForDraggedTypes:));
+    if (mRegister) {
+        IMP orig = method_getImplementation(mRegister);
+        set_orig_imp(cls, @selector(registerForDraggedTypes:), orig);
+        method_setImplementation(mRegister, (IMP)custom_registerForDraggedTypes);
+    }
+
     Method mEntered = class_getInstanceMethod(cls, @selector(draggingEntered:));
     if (mEntered) {
         IMP orig = method_getImplementation(mEntered);
@@ -522,6 +557,9 @@ static void enable_external_drag_drop_native() {
         ];
         g_diag_info.registered_types = [[dragTypes componentsJoinedByString:@", "] UTF8String];
         
+        setup_class_drag_swizzle([NSView class]);
+        setup_class_drag_swizzle([NSWindow class]);
+
         for (NSWindow *win in wins) {
             if (win.contentView) {
                 g_diag_info.window_found = true;
@@ -542,6 +580,7 @@ static void enable_external_drag_drop_native() {
                     targetReceiver = [[NativeDragDestinationView alloc] initWithFrame:win.contentView.bounds];
                     [win.contentView addSubview:targetReceiver positioned:NSWindowAbove relativeTo:nil];
                 }
+                [targetReceiver registerForDraggedTypes:dragTypes];
                 
                 g_diag_info.receiver_class = [[targetReceiver className] UTF8String];
                 g_diag_info.receiver_attached = true;
