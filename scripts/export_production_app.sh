@@ -70,15 +70,15 @@ mkdir -p "$BUILD_APP/Contents/Resources/bin"
 # Install native dylib binaries into bundle Frameworks and MacOS directories for GDExtension dlopen resolution
 if [ -f "$PROJECT_DIR/bin/libmac_wkwebview.dylib" ]; then
     cp -f "$PROJECT_DIR/bin/libmac_wkwebview.dylib" "$TARGET_APP/Contents/Frameworks/libmac_wkwebview.dylib"
-    cp -f "$PROJECT_DIR/bin/libmac_wkwebview.dylib" "$TARGET_APP/Contents/MacOS/libmac_wkwebview.dylib"
-    cp -f "$PROJECT_DIR/bin/libmac_wkwebview.dylib" "$TARGET_APP/Contents/MacOS/bin/libmac_wkwebview.dylib"
-    cp -f "$PROJECT_DIR/bin/libmac_wkwebview.dylib" "$TARGET_APP/Contents/Resources/bin/libmac_wkwebview.dylib"
+    rm -f "$TARGET_APP/Contents/MacOS/libmac_wkwebview.dylib"
+    rm -f "$TARGET_APP/Contents/MacOS/bin/libmac_wkwebview.dylib"
+    rm -f "$TARGET_APP/Contents/Resources/bin/libmac_wkwebview.dylib"
 
     cp -f "$PROJECT_DIR/bin/libmac_wkwebview.dylib" "$BUILD_APP/Contents/Frameworks/libmac_wkwebview.dylib"
-    cp -f "$PROJECT_DIR/bin/libmac_wkwebview.dylib" "$BUILD_APP/Contents/MacOS/libmac_wkwebview.dylib"
-    cp -f "$PROJECT_DIR/bin/libmac_wkwebview.dylib" "$BUILD_APP/Contents/MacOS/bin/libmac_wkwebview.dylib"
-    cp -f "$PROJECT_DIR/bin/libmac_wkwebview.dylib" "$BUILD_APP/Contents/Resources/bin/libmac_wkwebview.dylib"
-    echo "✅ Native GDExtension Dylib Packaged into Standalone App Bundle"
+    rm -f "$BUILD_APP/Contents/MacOS/libmac_wkwebview.dylib"
+    rm -f "$BUILD_APP/Contents/MacOS/bin/libmac_wkwebview.dylib"
+    rm -f "$BUILD_APP/Contents/Resources/bin/libmac_wkwebview.dylib"
+    echo "✅ Authoritative Native Dylib (Single Copy) Packaged at Contents/Frameworks/libmac_wkwebview.dylib"
 fi
 
 # Install native runner binary directly into bundle MacOS directory

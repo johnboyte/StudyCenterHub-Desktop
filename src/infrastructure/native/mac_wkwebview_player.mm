@@ -17,7 +17,7 @@
 // MACOS NATIVE BROWSER URL DRAG & DROP BRIDGE
 // ==============================================================================
 
-#define NATIVE_DRAG_BRIDGE_VERSION_STR "v5.0.0-AUTONOMOUS-APPKIT"
+#define NATIVE_DRAG_BRIDGE_VERSION_STR "v5.2.0-NATIVE-CHILD-PANEL"
 
 struct NativeDiagnosticsInfo {
     bool bridge_loaded;
@@ -29,10 +29,15 @@ struct NativeDiagnosticsInfo {
     bool receiver_enabled;
     std::string frame_str;
     std::string registered_types;
+    std::string main_window_ptr;
+    std::string child_window_ptr;
+    std::string child_parent_ptr;
+    bool child_is_visible;
+    std::string receiver_window_ptr;
 };
 
 static NativeDiagnosticsInfo g_diag_info = {
-    false, false, "Unknown", "Unknown", "Unknown", false, false, "0,0,0,0", ""
+    false, false, "Unknown", "Unknown", "Unknown", false, false, "0,0,0,0", "", "nil", "nil", "nil", false, "nil"
 };
 
 struct ExternalDropEvent {
@@ -177,6 +182,20 @@ static BOOL isSupportedDragType(NSPasteboard *pboard) {
     }
     return NO;
 }
+
+static void runOnMainThread(dispatch_block_t block);
+
+@class NativePlaylistDropBoxView;
+@interface NativeDropPanel : NSPanel
+@end
+
+@implementation NativeDropPanel
+- (BOOL)canBecomeKeyWindow { return YES; }
+- (BOOL)canBecomeMainWindow { return NO; }
+@end
+
+static NativeDropPanel *g_childDropPanel = nil;
+static NativePlaylistDropBoxView *g_childDropBoxView = nil;
 
 // Dedicated Visible Native AppKit Drop Box View
 @interface NativePlaylistDropBoxView : NSView <NSDraggingDestination>
@@ -536,20 +555,10 @@ static bool run_native_receiver_test_impl(char *out_buf, size_t out_size) {
         
         ensure_external_drag_receiver();
         
-        NativeDragDestinationView *targetReceiver = nil;
-        for (NSWindow *win in [NSApp windows]) {
-            if (win.contentView) {
-                for (NSView *sub in win.contentView.subviews) {
-                    if ([sub isKindOfClass:[NativeDragDestinationView class]]) {
-                        targetReceiver = (NativeDragDestinationView *)sub;
-                        break;
-                    }
-                }
-            }
-        }
+        NativePlaylistDropBoxView *targetReceiver = g_childDropBoxView;
         
-        if (!targetReceiver) {
-            snprintf(out_buf, out_size, "success=false|cycle=%d|error=NativeDragDestinationView not found", cycle);
+        if (!targetReceiver || !g_childDropPanel) {
+            snprintf(out_buf, out_size, "success=false|cycle=%d|error=NativePlaylistDropBoxView not found in child panel", cycle);
             return false;
         }
         
@@ -565,7 +574,7 @@ static bool run_native_receiver_test_impl(char *out_buf, size_t out_size) {
         }
     }
     
-    snprintf(out_buf, out_size, "success=true|pass_count=%d/%d|receiver_class=NativeDragDestinationView|topmost_reasserted=true",
+    snprintf(out_buf, out_size, "success=true|pass_count=%d/%d|receiver_class=NativePlaylistDropBoxView|child_panel=attached",
              passCount, targetCycles);
     return passCount == targetCycles;
 }
@@ -735,7 +744,6 @@ static void setup_class_drag_swizzle(Class cls) {
 }
 
 static void ensure_external_drag_receiver() {
-    NSArray *wins = [NSApp windows];
     g_diag_info.bridge_loaded = true;
     
     NSArray *dragTypes = @[
@@ -755,72 +763,125 @@ static void ensure_external_drag_receiver() {
     setup_class_drag_swizzle([NSView class]);
     setup_class_drag_swizzle([NSWindow class]);
 
-    for (NSWindow *win in wins) {
-        if (win.contentView) {
-            g_diag_info.window_found = true;
-            g_diag_info.window_class = [[win className] UTF8String];
-            g_diag_info.content_view_class = [[win.contentView className] UTF8String];
-            
-            [win registerForDraggedTypes:dragTypes];
-            [win.contentView registerForDraggedTypes:dragTypes];
-            
-            NativeDragDestinationView *targetReceiver = nil;
-            for (NSView *sub in win.contentView.subviews) {
-                if ([sub isKindOfClass:[NativeDragDestinationView class]]) {
-                    targetReceiver = (NativeDragDestinationView *)sub;
-                    break;
-                }
+    NSWindow *mainWin = [NSApp mainWindow];
+    if (!mainWin) {
+        NSArray *wins = [NSApp windows];
+        for (NSWindow *w in wins) {
+            if ([w isVisible] && w.contentView && ![w isKindOfClass:[NSPanel class]]) {
+                mainWin = w;
+                break;
             }
-            if (!targetReceiver) {
-                targetReceiver = [[NativeDragDestinationView alloc] initWithFrame:win.contentView.bounds];
-                [win.contentView addSubview:targetReceiver positioned:NSWindowAbove relativeTo:nil];
-                NSLog(@"[NATIVE_LOG] Created NativeDragDestinationView on window '%@'", win.title);
-            } else {
-                if (!NSEqualRects(targetReceiver.frame, win.contentView.bounds)) {
-                    [targetReceiver setFrame:win.contentView.bounds];
-                }
-                if (win.contentView.subviews.lastObject != targetReceiver) {
-                    [win.contentView addSubview:targetReceiver positioned:NSWindowAbove relativeTo:nil];
-                }
-            }
-            [targetReceiver registerForDraggedTypes:dragTypes];
-            
-            // Instantiating visible AppKit Native Drop Box View (480x200 anchored at top-center/right)
-            NativePlaylistDropBoxView *dropBox = nil;
-            for (NSView *sub in win.contentView.subviews) {
-                if ([sub isKindOfClass:[NativePlaylistDropBoxView class]]) {
-                    dropBox = (NativePlaylistDropBoxView *)sub;
-                    break;
-                }
-            }
-            NSRect winBounds = win.contentView.bounds;
-            NSRect boxFrame = NSMakeRect(winBounds.size.width - 500, winBounds.size.height - 220, 480, 200);
-            if (!dropBox) {
-                dropBox = [[NativePlaylistDropBoxView alloc] initWithFrame:boxFrame];
-                [win.contentView addSubview:dropBox positioned:NSWindowAbove relativeTo:nil];
-                NSLog(@"[NATIVE_LOG] Created visible NativePlaylistDropBoxView at (%.1f, %.1f, 480, 200)", boxFrame.origin.x, boxFrame.origin.y);
-            } else {
-                [dropBox setFrame:boxFrame];
-                [win.contentView addSubview:dropBox positioned:NSWindowAbove relativeTo:nil];
-            }
-            [dropBox registerForDraggedTypes:dragTypes];
-            
-            g_diag_info.receiver_class = [[targetReceiver className] UTF8String];
-            g_diag_info.receiver_attached = true;
-            g_diag_info.receiver_enabled = true;
-            
-            NSRect frame = targetReceiver.frame;
-            char frameBuf[128];
-            snprintf(frameBuf, sizeof(frameBuf), "%.1f, %.1f, %.1f, %.1f", frame.origin.x, frame.origin.y, frame.size.width, frame.size.height);
-            g_diag_info.frame_str = frameBuf;
-
-            setup_class_drag_swizzle([win.contentView class]);
-            setup_class_drag_swizzle([win class]);
-            
-            g_drag_bridge_initialized = true;
-            break;
+        }
+        if (!mainWin && wins.count > 0) {
+            mainWin = wins[0];
         }
     }
+
+    if (!mainWin) {
+        g_diag_info.window_found = false;
+        g_diag_info.window_class = "None";
+        g_diag_info.content_view_class = "None";
+        g_diag_info.receiver_class = "None";
+        g_diag_info.receiver_attached = false;
+        g_diag_info.receiver_enabled = false;
+        g_diag_info.main_window_ptr = "nil";
+        g_diag_info.child_window_ptr = "nil";
+        g_diag_info.child_parent_ptr = "nil";
+        g_diag_info.child_is_visible = false;
+        g_diag_info.receiver_window_ptr = "nil";
+        g_diag_info.frame_str = "0,0,0,0";
+        NSLog(@"[NATIVE_LOG] ensure_external_drag_receiver: No main NSWindow available.");
+        return;
+    }
+
+    g_diag_info.window_found = true;
+    g_diag_info.window_class = [[mainWin className] UTF8String];
+    g_diag_info.content_view_class = mainWin.contentView ? [[mainWin.contentView className] UTF8String] : "None";
+    g_diag_info.main_window_ptr = [NSString stringWithFormat:@"%p", mainWin].UTF8String;
+    
+    [mainWin registerForDraggedTypes:dragTypes];
+    if (mainWin.contentView) {
+        [mainWin.contentView registerForDraggedTypes:dragTypes];
+    }
+
+    NSRect winFrame = mainWin.frame;
+    NSRect panelFrame = NSMakeRect(
+        winFrame.origin.x + winFrame.size.width - 500,
+        winFrame.origin.y + winFrame.size.height - 240,
+        480,
+        200
+    );
+
+    if (!g_childDropPanel) {
+        NSUInteger styleMask = NSWindowStyleMaskTitled | NSWindowStyleMaskUtilityWindow | NSWindowStyleMaskNonactivatingPanel;
+        g_childDropPanel = [[NativeDropPanel alloc] initWithContentRect:panelFrame
+                                                              styleMask:styleMask
+                                                                backing:NSBackingStoreBuffered
+                                                                  defer:NO];
+        [g_childDropPanel setTitle:@"NATIVE YOUTUBE DROP TEST"];
+        [g_childDropPanel setLevel:NSFloatingWindowLevel];
+        [g_childDropPanel setHidesOnDeactivate:YES];
+        [g_childDropPanel setHasShadow:YES];
+        [g_childDropPanel setMovableByWindowBackground:NO];
+        [g_childDropPanel setReleasedWhenClosed:NO];
+
+        g_childDropBoxView = [[NativePlaylistDropBoxView alloc] initWithFrame:NSMakeRect(0, 0, 480, 200)];
+        [g_childDropBoxView registerForDraggedTypes:dragTypes];
+        [g_childDropPanel setContentView:g_childDropBoxView];
+        [g_childDropPanel registerForDraggedTypes:dragTypes];
+
+        [mainWin addChildWindow:g_childDropPanel ordered:NSWindowAbove];
+        [g_childDropPanel orderFrontRegardless];
+        NSLog(@"[NATIVE_LOG] Created native child NSPanel (%p) attached to main NSWindow (%p)", g_childDropPanel, mainWin);
+    } else {
+        [g_childDropPanel setFrame:panelFrame display:YES];
+        if (g_childDropPanel.parentWindow != mainWin) {
+            if (g_childDropPanel.parentWindow) {
+                [g_childDropPanel.parentWindow removeChildWindow:g_childDropPanel];
+            }
+            [mainWin addChildWindow:g_childDropPanel ordered:NSWindowAbove];
+        }
+        [g_childDropPanel orderFrontRegardless];
+    }
+
+    g_diag_info.child_window_ptr = [NSString stringWithFormat:@"%p", g_childDropPanel].UTF8String;
+    g_diag_info.child_parent_ptr = [NSString stringWithFormat:@"%p", g_childDropPanel.parentWindow].UTF8String;
+    g_diag_info.child_is_visible = [g_childDropPanel isVisible];
+    g_diag_info.receiver_window_ptr = [NSString stringWithFormat:@"%p", g_childDropBoxView.window].UTF8String;
+    g_diag_info.receiver_class = [[g_childDropBoxView className] UTF8String];
+
+    bool isAttached = (g_childDropPanel.parentWindow == mainWin);
+    bool isReceiverInChild = (g_childDropBoxView.window == g_childDropPanel);
+    bool isVisible = [g_childDropPanel isVisible];
+
+    g_diag_info.receiver_attached = isAttached && isReceiverInChild;
+    g_diag_info.receiver_enabled = isAttached && isReceiverInChild && isVisible;
+
+    char frameBuf[128];
+    snprintf(frameBuf, sizeof(frameBuf), "%.1f, %.1f, 480, 200", panelFrame.origin.x, panelFrame.origin.y);
+    g_diag_info.frame_str = frameBuf;
+
+    setup_class_drag_swizzle([mainWin class]);
+    if (mainWin.contentView) {
+        setup_class_drag_swizzle([mainWin.contentView class]);
+    }
+    
+    g_drag_bridge_initialized = true;
+}
+
+static void mac_wkwebview_set_drag_box_visible(bool visible) {
+    runOnMainThread(^{
+        if (visible) {
+            ensure_external_drag_receiver();
+            if (g_childDropPanel) {
+                [g_childDropPanel orderFrontRegardless];
+            }
+        } else {
+            if (g_childDropPanel) {
+                [g_childDropPanel orderOut:nil];
+            }
+        }
+    });
 }
 
 static void enable_external_drag_drop_native() {
@@ -1405,10 +1466,17 @@ static void call_poll_external_drop(void *userdata, GDExtensionClassInstancePtr 
     }
 }
 
+static void call_set_drag_box_visible(void *userdata, GDExtensionClassInstancePtr instance, const GDExtensionConstVariantPtr *args, GDExtensionInt arg_count, GDExtensionVariantPtr r_return, GDExtensionCallError *r_error) {
+    uint8_t vis = 1;
+    if (arg_count > 0 && args[0] && conv_from_bool) conv_from_bool(&vis, (GDExtensionVariantPtr)args[0]);
+    mac_wkwebview_set_drag_box_visible(vis != 0);
+}
+
 static void call_get_native_diagnostics(void *userdata, GDExtensionClassInstancePtr instance, const GDExtensionConstVariantPtr *args, GDExtensionInt arg_count, GDExtensionVariantPtr r_return, GDExtensionCallError *r_error) {
+    ensure_external_drag_receiver();
     char buf[4096] = {0};
     snprintf(buf, sizeof(buf),
-             "version=%s|bridge_loaded=%s|window_found=%s|window_class=%s|content_view_class=%s|receiver_class=%s|receiver_attached=%s|receiver_enabled=%s|frame=%s|registered_types=%s",
+             "version=%s|bridge_loaded=%s|window_found=%s|window_class=%s|content_view_class=%s|receiver_class=%s|receiver_attached=%s|receiver_enabled=%s|frame=%s|registered_types=%s|main_window_ptr=%s|child_window_ptr=%s|child_parent_ptr=%s|child_is_visible=%s|receiver_window_ptr=%s",
              NATIVE_DRAG_BRIDGE_VERSION_STR,
              g_diag_info.bridge_loaded ? "YES" : "NO",
              g_diag_info.window_found ? "YES" : "NO",
@@ -1418,7 +1486,12 @@ static void call_get_native_diagnostics(void *userdata, GDExtensionClassInstance
              g_diag_info.receiver_attached ? "YES" : "NO",
              g_diag_info.receiver_enabled ? "YES" : "NO",
              g_diag_info.frame_str.c_str(),
-             g_diag_info.registered_types.c_str()
+             g_diag_info.registered_types.c_str(),
+             g_diag_info.main_window_ptr.c_str(),
+             g_diag_info.child_window_ptr.c_str(),
+             g_diag_info.child_parent_ptr.c_str(),
+             g_diag_info.child_is_visible ? "YES" : "NO",
+             g_diag_info.receiver_window_ptr.c_str()
     );
     
     if (r_return && conv_to_string && p_string_new_utf8) {
@@ -1565,6 +1638,9 @@ static void initialize_mac_wkwebview_module(void *p_userdata, GDExtensionInitial
 
         register_method_helper(g_library, "MacWKWebViewHelper", "enableExternalDrag", call_enable_external_drag, false);
         register_method_helper(g_library, "MacWKWebViewHelper", "enable_external_drag", call_enable_external_drag, false);
+
+        register_method_helper(g_library, "MacWKWebViewHelper", "setDragBoxVisible", call_set_drag_box_visible, false);
+        register_method_helper(g_library, "MacWKWebViewHelper", "set_drag_box_visible", call_set_drag_box_visible, false);
 
         register_method_helper(g_library, "MacWKWebViewHelper", "pollExternalDrop", call_poll_external_drop, true);
         register_method_helper(g_library, "MacWKWebViewHelper", "poll_external_drop", call_poll_external_drop, true);

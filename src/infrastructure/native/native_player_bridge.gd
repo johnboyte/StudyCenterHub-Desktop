@@ -100,6 +100,17 @@ static func enable_external_drag() -> void:
 		if helper:
 			helper.call("enableExternalDrag")
 
+static func set_drag_box_visible(visible: bool) -> void:
+	if OS.get_name() != "macOS" or DisplayServer.get_name() == "headless":
+		return
+	if ClassDB.class_exists("MacWKWebViewHelper"):
+		var helper = ClassDB.instantiate("MacWKWebViewHelper")
+		if helper:
+			if helper.has_method("setDragBoxVisible"):
+				helper.call("setDragBoxVisible", visible)
+			elif helper.has_method("set_drag_box_visible"):
+				helper.call("set_drag_box_visible", visible)
+
 static func poll_external_drop() -> Dictionary:
 	if OS.get_name() != "macOS" or DisplayServer.get_name() == "headless":
 		return {}

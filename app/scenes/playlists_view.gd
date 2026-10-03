@@ -94,7 +94,8 @@ func _ready() -> void:
 
 	if OS.get_name() == "macOS":
 		NativePlayerBridge.enable_external_drag()
-		_update_drag_debug("EXTERNAL DRAG ENTERED / INITIALIZED (Native Bridge Active)")
+		NativePlayerBridge.set_drag_box_visible(true)
+		_update_drag_debug("EXTERNAL DRAG INITIALIZED (Native Child Panel Active)")
 
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	mouse_default_cursor_shape = Control.CURSOR_CAN_DROP
@@ -129,19 +130,29 @@ func _setup_drag_debug_ui() -> void:
 	vbox.add_child(title_lbl)
 
 	var diag = NativePlayerBridge.get_native_diagnostics()
-	var ver = str(diag.get("version", "v4.0.0-AUTONOMOUS-FIX"))
+	var ver = str(diag.get("version", "v5.2.0-NATIVE-CHILD-PANEL"))
 	var bridge_ok = str(diag.get("bridge_loaded", "NO"))
 	var win_ok = str(diag.get("window_found", "NO"))
-	var superview = str(diag.get("content_view_class", "GodotView"))
-	var receiver_cls = str(diag.get("receiver_class", "GodotView (Swizzled Receiver)"))
+	var receiver_cls = str(diag.get("receiver_class", "None"))
 	var attached = str(diag.get("receiver_attached", "NO"))
 	var enabled = str(diag.get("receiver_enabled", "NO"))
-	var frame = str(diag.get("frame", "0,0,1280,800"))
-	var reg_types = str(diag.get("registered_types", "public.url, public.file-url, public.utf8-plain-text, WebURLsWithTitlesPboardType, text/uri-list"))
+	var frame = str(diag.get("frame", "0,0,0,0"))
+	var reg_types = str(diag.get("registered_types", ""))
+	var main_ptr = str(diag.get("main_window_ptr", "nil"))
+	var child_ptr = str(diag.get("child_window_ptr", "nil"))
+	var parent_ptr = str(diag.get("child_parent_ptr", "nil"))
+	var child_vis = str(diag.get("child_is_visible", "NO"))
+	var rec_win_ptr = str(diag.get("receiver_window_ptr", "nil"))
+
+	var status_text = "🔴 UNATTACHED"
+	if attached == "YES" and enabled == "YES":
+		status_text = "🟢 ATTACHED & ENABLED (Native Child Panel)"
+	elif attached == "YES":
+		status_text = "🟡 ATTACHED BUT HIDDEN"
 
 	var diag_lbl = Label.new()
-	diag_lbl.text = "NATIVE DRAG BRIDGE %s\nWindow attached: %s | Bridge loaded: %s\nReceiver class: %s | Enabled: %s\nFrame: %s | Superview: %s\nRegistered types: %s" % [
-		ver, attached, bridge_ok, receiver_cls, enabled, frame, superview, reg_types
+	diag_lbl.text = "NATIVE DRAG BRIDGE %s [%s]\nMain Win: %s (%s) | Child Panel: %s (Parent: %s | Vis: %s)\nReceiver: %s in Window %s | Enabled: %s\nFrame: %s | Registered types: %s" % [
+		ver, status_text, main_ptr, win_ok, child_ptr, parent_ptr, child_vis, receiver_cls, rec_win_ptr, enabled, frame, reg_types
 	]
 	diag_lbl.add_theme_font_size_override("font_size", 10)
 	diag_lbl.add_theme_color_override("font_color", Color(0.65, 0.85, 1.0, 1.0))
