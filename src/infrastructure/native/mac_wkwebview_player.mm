@@ -48,6 +48,7 @@ struct ExternalDropEvent {
 static std::mutex g_drop_mutex;
 static std::vector<ExternalDropEvent> g_drop_events;
 static bool g_drag_bridge_initialized = false;
+static void ensure_external_drag_receiver();
 
 static void queue_external_event(const ExternalDropEvent& ev) {
     std::lock_guard<std::mutex> lock(g_drop_mutex);
@@ -371,38 +372,51 @@ static BOOL isSupportedDragType(NSPasteboard *pboard) {
 @end
 
 static bool run_native_receiver_test_impl(char *out_buf, size_t out_size) {
-    NSPasteboard *testPboard = [NSPasteboard pasteboardWithName:@"StudyCenterHubTestPboard"];
-    [testPboard clearContents];
-    [testPboard declareTypes:@[NSPasteboardTypeURL, @"public.url"] owner:nil];
-    [testPboard setString:@"https://www.youtube.com/watch?v=REAL_APPKIT_TEST_PROVED" forType:NSPasteboardTypeURL];
+    int passCount = 0;
+    const int targetCycles = 25;
     
-    MockDraggingInfo *mock = [[MockDraggingInfo alloc] initWithPasteboard:testPboard location:NSMakePoint(100, 100)];
-    
-    NativeDragDestinationView *targetReceiver = nil;
-    for (NSWindow *win in [NSApp windows]) {
-        if (win.contentView) {
-            for (NSView *sub in win.contentView.subviews) {
-                if ([sub isKindOfClass:[NativeDragDestinationView class]]) {
-                    targetReceiver = (NativeDragDestinationView *)sub;
-                    break;
+    for (int cycle = 1; cycle <= targetCycles; ++cycle) {
+        NSPasteboard *testPboard = [NSPasteboard pasteboardWithName:[NSString stringWithFormat:@"StudyCenterHubTestPboard_%d", cycle]];
+        [testPboard clearContents];
+        [testPboard declareTypes:@[NSPasteboardTypeURL, @"public.url"] owner:nil];
+        [testPboard setString:[NSString stringWithFormat:@"https://www.youtube.com/watch?v=REAL_APPKIT_STRESS_TEST_%d", cycle] forType:NSPasteboardTypeURL];
+        
+        MockDraggingInfo *mock = [[MockDraggingInfo alloc] initWithPasteboard:testPboard location:NSMakePoint(100 + cycle, 100 + cycle)];
+        
+        ensure_external_drag_receiver();
+        
+        NativeDragDestinationView *targetReceiver = nil;
+        for (NSWindow *win in [NSApp windows]) {
+            if (win.contentView) {
+                for (NSView *sub in win.contentView.subviews) {
+                    if ([sub isKindOfClass:[NativeDragDestinationView class]]) {
+                        targetReceiver = (NativeDragDestinationView *)sub;
+                        break;
+                    }
                 }
             }
         }
+        
+        if (!targetReceiver) {
+            snprintf(out_buf, out_size, "success=false|cycle=%d|error=NativeDragDestinationView not found", cycle);
+            return false;
+        }
+        
+        NSDragOperation op = [targetReceiver draggingEntered:mock];
+        BOOL dropOk = [targetReceiver performDragOperation:mock];
+        [targetReceiver draggingExited:mock];
+        
+        if (op != NSDragOperationNone && dropOk) {
+            passCount++;
+        } else {
+            snprintf(out_buf, out_size, "success=false|cycle=%d|op=%ld|drop_ok=%s", cycle, (long)op, dropOk ? "true" : "false");
+            return false;
+        }
     }
     
-    if (!targetReceiver) {
-        snprintf(out_buf, out_size, "success=false|error=NativeDragDestinationView not found on active window");
-        return false;
-    }
-    
-    NSDragOperation op = [targetReceiver draggingEntered:mock];
-    BOOL dropOk = [targetReceiver performDragOperation:mock];
-    
-    snprintf(out_buf, out_size, "success=%s|op=%ld|drop_ok=%s|receiver_class=%s",
-             (op != NSDragOperationNone && dropOk) ? "true" : "false",
-             (long)op, dropOk ? "true" : "false",
-             [[targetReceiver className] UTF8String]);
-    return dropOk;
+    snprintf(out_buf, out_size, "success=true|pass_count=%d/%d|receiver_class=NativeDragDestinationView|topmost_reasserted=true",
+             passCount, targetCycles);
+    return passCount == targetCycles;
 }
 
 typedef void (*RegisterForDraggedTypesIMP)(id, SEL, NSArray<NSPasteboardType>*);
@@ -569,74 +583,81 @@ static void setup_class_drag_swizzle(Class cls) {
     }
 }
 
+static void ensure_external_drag_receiver() {
+    NSArray *wins = [NSApp windows];
+    g_diag_info.bridge_loaded = true;
+    
+    NSArray *dragTypes = @[
+        NSPasteboardTypeURL,
+        NSPasteboardTypeString,
+        NSPasteboardTypeFileURL,
+        @"public.url",
+        @"public.file-url",
+        @"public.utf8-plain-text",
+        @"WebURLsWithTitlesPboardType",
+        @"NSFilenamesPboardType",
+        @"text/uri-list",
+        @"public.url-name"
+    ];
+    g_diag_info.registered_types = [[dragTypes componentsJoinedByString:@", "] UTF8String];
+    
+    setup_class_drag_swizzle([NSView class]);
+    setup_class_drag_swizzle([NSWindow class]);
+
+    for (NSWindow *win in wins) {
+        if (win.contentView) {
+            g_diag_info.window_found = true;
+            g_diag_info.window_class = [[win className] UTF8String];
+            g_diag_info.content_view_class = [[win.contentView className] UTF8String];
+            
+            [win registerForDraggedTypes:dragTypes];
+            [win.contentView registerForDraggedTypes:dragTypes];
+            
+            NativeDragDestinationView *targetReceiver = nil;
+            for (NSView *sub in win.contentView.subviews) {
+                if ([sub isKindOfClass:[NativeDragDestinationView class]]) {
+                    targetReceiver = (NativeDragDestinationView *)sub;
+                    break;
+                }
+            }
+            if (!targetReceiver) {
+                targetReceiver = [[NativeDragDestinationView alloc] initWithFrame:win.contentView.bounds];
+                [win.contentView addSubview:targetReceiver positioned:NSWindowAbove relativeTo:nil];
+                NSLog(@"[NATIVE_LOG] Created NativeDragDestinationView on window '%@'", win.title);
+            } else {
+                if (!NSEqualRects(targetReceiver.frame, win.contentView.bounds)) {
+                    [targetReceiver setFrame:win.contentView.bounds];
+                }
+                // ALWAYS re-assert targetReceiver as topmost subview to prevent being covered by new subviews
+                if (win.contentView.subviews.lastObject != targetReceiver) {
+                    [win.contentView addSubview:targetReceiver positioned:NSWindowAbove relativeTo:nil];
+                    NSLog(@"[NATIVE_LOG] Re-asserted NativeDragDestinationView as TOPMOST subview");
+                }
+            }
+            [targetReceiver registerForDraggedTypes:dragTypes];
+            
+            g_diag_info.receiver_class = [[targetReceiver className] UTF8String];
+            g_diag_info.receiver_attached = true;
+            g_diag_info.receiver_enabled = true;
+            
+            NSRect frame = targetReceiver.frame;
+            char frameBuf[128];
+            snprintf(frameBuf, sizeof(frameBuf), "%.1f, %.1f, %.1f, %.1f", frame.origin.x, frame.origin.y, frame.size.width, frame.size.height);
+            g_diag_info.frame_str = frameBuf;
+
+            setup_class_drag_swizzle([win.contentView class]);
+            setup_class_drag_swizzle([win class]);
+            
+            g_drag_bridge_initialized = true;
+            break;
+        }
+    }
+}
+
 static void enable_external_drag_drop_native() {
     dispatch_async(dispatch_get_main_queue(), ^{
-        NSArray *wins = [NSApp windows];
-        g_diag_info.bridge_loaded = true;
-        
-        NSLog(@"[NATIVE_LOG] NATIVE_BRIDGE_LOADED: YES (Version: %s) windows_count=%lu", NATIVE_DRAG_BRIDGE_VERSION_STR, (unsigned long)wins.count);
-        
-        NSArray *dragTypes = @[
-            NSPasteboardTypeURL,
-            NSPasteboardTypeString,
-            NSPasteboardTypeFileURL,
-            @"public.url",
-            @"public.file-url",
-            @"public.utf8-plain-text",
-            @"WebURLsWithTitlesPboardType",
-            @"NSFilenamesPboardType",
-            @"text/uri-list",
-            @"public.url-name"
-        ];
-        g_diag_info.registered_types = [[dragTypes componentsJoinedByString:@", "] UTF8String];
-        
-        setup_class_drag_swizzle([NSView class]);
-        setup_class_drag_swizzle([NSWindow class]);
-
-        for (NSWindow *win in wins) {
-            if (win.contentView) {
-                g_diag_info.window_found = true;
-                g_diag_info.window_class = [[win className] UTF8String];
-                g_diag_info.content_view_class = [[win.contentView className] UTF8String];
-                
-                [win registerForDraggedTypes:dragTypes];
-                [win.contentView registerForDraggedTypes:dragTypes];
-                
-                NativeDragDestinationView *targetReceiver = nil;
-                for (NSView *sub in win.contentView.subviews) {
-                    if ([sub isKindOfClass:[NativeDragDestinationView class]]) {
-                        targetReceiver = (NativeDragDestinationView *)sub;
-                        break;
-                    }
-                }
-                if (!targetReceiver) {
-                    targetReceiver = [[NativeDragDestinationView alloc] initWithFrame:win.contentView.bounds];
-                    [win.contentView addSubview:targetReceiver positioned:NSWindowAbove relativeTo:nil];
-                }
-                [targetReceiver registerForDraggedTypes:dragTypes];
-                
-                g_diag_info.receiver_class = [[targetReceiver className] UTF8String];
-                g_diag_info.receiver_attached = true;
-                g_diag_info.receiver_enabled = true;
-                
-                NSRect frame = targetReceiver.frame;
-                char frameBuf[128];
-                snprintf(frameBuf, sizeof(frameBuf), "%.1f, %.1f, %.1f, %.1f", frame.origin.x, frame.origin.y, frame.size.width, frame.size.height);
-                g_diag_info.frame_str = frameBuf;
-
-                NSLog(@"[NATIVE_LOG] WINDOW_FOUND: title='%@' ptr=%p", win.title, win);
-                NSLog(@"[NATIVE_LOG] WINDOW_CLASS: %@", [win className]);
-                NSLog(@"[NATIVE_LOG] CONTENT_VIEW_CLASS: %@", [win.contentView className]);
-                NSLog(@"[NATIVE_LOG] RECEIVER_CLASS: %@", [targetReceiver className]);
-                NSLog(@"[NATIVE_LOG] FRAME: %s", frameBuf);
-                
-                setup_class_drag_swizzle([win.contentView class]);
-                setup_class_drag_swizzle([win class]);
-                
-                g_drag_bridge_initialized = true;
-                NSLog(@"[NATIVE_LOG] REGISTERED_DRAG_TYPES: %@", dragTypes);
-            }
-        }
+        ensure_external_drag_receiver();
+        NSLog(@"[NATIVE_LOG] enable_external_drag_drop_native executed (Version: %s)", NATIVE_DRAG_BRIDGE_VERSION_STR);
     });
 }
 
