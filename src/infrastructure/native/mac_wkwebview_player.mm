@@ -17,7 +17,7 @@
 // MACOS NATIVE BROWSER URL DRAG & DROP BRIDGE
 // ==============================================================================
 
-#define NATIVE_DRAG_BRIDGE_VERSION_STR "v4.0.0-AUTONOMOUS-FIX"
+#define NATIVE_DRAG_BRIDGE_VERSION_STR "v5.0.0-AUTONOMOUS-APPKIT"
 
 struct NativeDiagnosticsInfo {
     bool bridge_loaded;
@@ -177,6 +177,201 @@ static BOOL isSupportedDragType(NSPasteboard *pboard) {
     return NO;
 }
 
+// Dedicated Native Drag Destination Receiver View
+@interface NativeDragDestinationView : NSView <NSDraggingDestination>
+@end
+
+@implementation NativeDragDestinationView
+
+- (instancetype)initWithFrame:(NSRect)frame {
+    self = [super initWithFrame:frame];
+    if (self) {
+        NSArray *dragTypes = @[
+            NSPasteboardTypeURL,
+            NSPasteboardTypeString,
+            NSPasteboardTypeFileURL,
+            @"public.url",
+            @"public.file-url",
+            @"public.utf8-plain-text",
+            @"WebURLsWithTitlesPboardType",
+            @"NSFilenamesPboardType",
+            @"text/uri-list",
+            @"public.url-name"
+        ];
+        [self registerForDraggedTypes:dragTypes];
+        self.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+        NSLog(@"[NATIVE_LOG] NativeDragDestinationView initialized with frame (%.1f, %.1f, %.1f, %.1f)", frame.origin.x, frame.origin.y, frame.size.width, frame.size.height);
+    }
+    return self;
+}
+
+// FORWARD ALL ORDINARY MOUSE & KEYBOARD INPUTS STRAIGHT TO SUPERVIEW (GodotView)!
+- (BOOL)acceptsFirstMouse:(NSEvent *)event { return YES; }
+- (void)mouseDown:(NSEvent *)event { [self.superview mouseDown:event]; }
+- (void)mouseUp:(NSEvent *)event { [self.superview mouseUp:event]; }
+- (void)mouseDragged:(NSEvent *)event { [self.superview mouseDragged:event]; }
+- (void)mouseMoved:(NSEvent *)event { [self.superview mouseMoved:event]; }
+- (void)rightMouseDown:(NSEvent *)event { [self.superview rightMouseDown:event]; }
+- (void)rightMouseUp:(NSEvent *)event { [self.superview rightMouseUp:event]; }
+- (void)otherMouseDown:(NSEvent *)event { [self.superview otherMouseDown:event]; }
+- (void)otherMouseUp:(NSEvent *)event { [self.superview otherMouseUp:event]; }
+- (void)scrollWheel:(NSEvent *)event { [self.superview scrollWheel:event]; }
+- (void)keyDown:(NSEvent *)event { [self.superview keyDown:event]; }
+- (void)keyUp:(NSEvent *)event { [self.superview keyUp:event]; }
+
+// APPCOCOA DRAG DESTINATION CALLBACKS
+- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)sender {
+    NSPasteboard *pboard = [sender draggingPasteboard];
+    NSPoint loc = [sender draggingLocation];
+    NSRect bounds = self.bounds;
+    float godot_x = (float)loc.x;
+    float godot_y = (float)(bounds.size.height - loc.y);
+    
+    NSString *typesStr = [[pboard types] componentsJoinedByString:@", "];
+    NSLog(@"[NATIVE_LOG] EXTERNAL DRAG ENTERED (NativeDragDestinationView) types=%@", typesStr);
+    
+    if (isSupportedDragType(pboard)) {
+        queue_external_event({
+            "EXTERNAL_DRAG_ENTERED",
+            [typesStr UTF8String] ?: "",
+            "",
+            godot_x,
+            godot_y,
+            (float)bounds.size.width,
+            (float)bounds.size.height
+        });
+        return NSDragOperationCopy;
+    }
+    return NSDragOperationNone;
+}
+
+- (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)sender {
+    NSPasteboard *pboard = [sender draggingPasteboard];
+    if (isSupportedDragType(pboard)) {
+        NSPoint loc = [sender draggingLocation];
+        NSRect bounds = self.bounds;
+        float godot_x = (float)loc.x;
+        float godot_y = (float)(bounds.size.height - loc.y);
+        
+        queue_external_event({
+            "EXTERNAL_DRAG_UPDATED",
+            "",
+            "",
+            godot_x,
+            godot_y,
+            (float)bounds.size.width,
+            (float)bounds.size.height
+        });
+        return NSDragOperationCopy;
+    }
+    return NSDragOperationNone;
+}
+
+- (BOOL)performDragOperation:(id<NSDraggingInfo>)sender {
+    NSPasteboard *pboard = [sender draggingPasteboard];
+    NSString *typesStr = [[pboard types] componentsJoinedByString:@", "];
+    NSLog(@"[NATIVE_LOG] EXTERNAL DROP CALLBACK RECEIVED (NativeDragDestinationView) types=%@", typesStr);
+    
+    NSString *rawType = @"unknown";
+    NSString *extracted = extractURLFromPasteboard(pboard, &rawType);
+    
+    NSPoint loc = [sender draggingLocation];
+    NSRect bounds = self.bounds;
+    float godot_x = (float)loc.x;
+    float godot_y = (float)(bounds.size.height - loc.y);
+    
+    if (extracted && extracted.length > 0) {
+        queue_external_event({
+            "EXTERNAL_DROP",
+            [rawType UTF8String] ?: "unknown",
+            [extracted UTF8String] ?: "",
+            godot_x,
+            godot_y,
+            (float)bounds.size.width,
+            (float)bounds.size.height
+        });
+        
+        NSLog(@"[NATIVE_LOG] EXTERNAL PAYLOAD TYPE: %@ payload=%@", rawType, extracted);
+        NSLog(@"[NATIVE_LOG] EXTERNAL DROP RECEIVED type=%@ payload_len=%lu loc=(%.1f, %.1f)",
+              rawType, (unsigned long)extracted.length, godot_x, godot_y);
+        return YES;
+    }
+    return NO;
+}
+
+@end
+
+// Native Integration Test Harness: Mock object conforming to NSDraggingInfo
+@interface MockDraggingInfo : NSObject <NSDraggingInfo>
+@property (nonatomic, strong) NSPasteboard *pasteboard;
+@property (nonatomic, assign) NSPoint location;
+@end
+
+@implementation MockDraggingInfo
+
+- (instancetype)initWithPasteboard:(NSPasteboard *)pboard location:(NSPoint)loc {
+    self = [super init];
+    if (self) {
+        _pasteboard = pboard;
+        _location = loc;
+    }
+    return self;
+}
+
+- (NSWindow *)draggingDestinationWindow { return nil; }
+- (NSDragOperation)draggingSourceOperationMask { return NSDragOperationCopy; }
+- (NSPoint)draggingLocation { return _location; }
+- (NSPoint)draggedImageLocation { return _location; }
+- (NSImage *)draggedImage { return nil; }
+- (NSPasteboard *)draggingPasteboard { return _pasteboard; }
+- (id)draggingSource { return nil; }
+- (NSInteger)draggingSequenceNumber { return 1; }
+- (void)slideDraggedImageTo:(NSPoint)screenPoint {}
+- (NSArray *)namesOfPromisedFilesDroppedAtDestination:(NSURL *)dropDestination { return nil; }
+- (NSInteger)numberOfValidItemsForDrop { return 1; }
+- (void)setNumberOfValidItemsForDrop:(NSInteger)number {}
+- (BOOL)animatesToDestination { return NO; }
+- (void)setAnimatesToDestination:(BOOL)flag {}
+- (NSDraggingFormation)draggingFormation { return NSDraggingFormationDefault; }
+- (void)setDraggingFormation:(NSDraggingFormation)formation {}
+
+@end
+
+static bool run_native_receiver_test_impl(char *out_buf, size_t out_size) {
+    NSPasteboard *testPboard = [NSPasteboard pasteboardWithName:@"StudyCenterHubTestPboard"];
+    [testPboard clearContents];
+    [testPboard declareTypes:@[NSPasteboardTypeURL, @"public.url"] owner:nil];
+    [testPboard setString:@"https://www.youtube.com/watch?v=REAL_APPKIT_TEST_PROVED" forType:NSPasteboardTypeURL];
+    
+    MockDraggingInfo *mock = [[MockDraggingInfo alloc] initWithPasteboard:testPboard location:NSMakePoint(100, 100)];
+    
+    NativeDragDestinationView *targetReceiver = nil;
+    for (NSWindow *win in [NSApp windows]) {
+        if (win.contentView) {
+            for (NSView *sub in win.contentView.subviews) {
+                if ([sub isKindOfClass:[NativeDragDestinationView class]]) {
+                    targetReceiver = (NativeDragDestinationView *)sub;
+                    break;
+                }
+            }
+        }
+    }
+    
+    if (!targetReceiver) {
+        snprintf(out_buf, out_size, "success=false|error=NativeDragDestinationView not found on active window");
+        return false;
+    }
+    
+    NSDragOperation op = [targetReceiver draggingEntered:mock];
+    BOOL dropOk = [targetReceiver performDragOperation:mock];
+    
+    snprintf(out_buf, out_size, "success=%s|op=%ld|drop_ok=%s|receiver_class=%s",
+             (op != NSDragOperationNone && dropOk) ? "true" : "false",
+             (long)op, dropOk ? "true" : "false",
+             [[targetReceiver className] UTF8String]);
+    return dropOk;
+}
+
 static NSDragOperation custom_draggingEntered(id self, SEL _cmd, id<NSDraggingInfo> sender) {
     NSPasteboard *pboard = [sender draggingPasteboard];
     NSPoint loc = [sender draggingLocation];
@@ -332,11 +527,27 @@ static void enable_external_drag_drop_native() {
                 g_diag_info.window_found = true;
                 g_diag_info.window_class = [[win className] UTF8String];
                 g_diag_info.content_view_class = [[win.contentView className] UTF8String];
-                g_diag_info.receiver_class = [[win.contentView className] UTF8String] + std::string(" (Swizzled Drag Receiver)");
+                
+                [win registerForDraggedTypes:dragTypes];
+                [win.contentView registerForDraggedTypes:dragTypes];
+                
+                NativeDragDestinationView *targetReceiver = nil;
+                for (NSView *sub in win.contentView.subviews) {
+                    if ([sub isKindOfClass:[NativeDragDestinationView class]]) {
+                        targetReceiver = (NativeDragDestinationView *)sub;
+                        break;
+                    }
+                }
+                if (!targetReceiver) {
+                    targetReceiver = [[NativeDragDestinationView alloc] initWithFrame:win.contentView.bounds];
+                    [win.contentView addSubview:targetReceiver positioned:NSWindowAbove relativeTo:nil];
+                }
+                
+                g_diag_info.receiver_class = [[targetReceiver className] UTF8String];
                 g_diag_info.receiver_attached = true;
                 g_diag_info.receiver_enabled = true;
                 
-                NSRect frame = win.contentView.bounds;
+                NSRect frame = targetReceiver.frame;
                 char frameBuf[128];
                 snprintf(frameBuf, sizeof(frameBuf), "%.1f, %.1f, %.1f, %.1f", frame.origin.x, frame.origin.y, frame.size.width, frame.size.height);
                 g_diag_info.frame_str = frameBuf;
@@ -344,18 +555,11 @@ static void enable_external_drag_drop_native() {
                 NSLog(@"[NATIVE_LOG] WINDOW_FOUND: title='%@' ptr=%p", win.title, win);
                 NSLog(@"[NATIVE_LOG] WINDOW_CLASS: %@", [win className]);
                 NSLog(@"[NATIVE_LOG] CONTENT_VIEW_CLASS: %@", [win.contentView className]);
+                NSLog(@"[NATIVE_LOG] RECEIVER_CLASS: %@", [targetReceiver className]);
                 NSLog(@"[NATIVE_LOG] FRAME: %s", frameBuf);
-                
-                [win registerForDraggedTypes:dragTypes];
-                [win.contentView registerForDraggedTypes:dragTypes];
                 
                 setup_class_drag_swizzle([win.contentView class]);
                 setup_class_drag_swizzle([win class]);
-                
-                for (NSView *sub in win.contentView.subviews) {
-                    [sub registerForDraggedTypes:dragTypes];
-                    setup_class_drag_swizzle([sub class]);
-                }
                 
                 g_drag_bridge_initialized = true;
                 NSLog(@"[NATIVE_LOG] REGISTERED_DRAG_TYPES: %@", dragTypes);
