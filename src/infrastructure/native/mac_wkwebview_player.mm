@@ -13,9 +13,14 @@
 // MACOS NATIVE BROWSER URL DRAG & DROP BRIDGE
 // ==============================================================================
 
+// ==============================================================================
+// MACOS NATIVE BROWSER URL DRAG & DROP BRIDGE
+// ==============================================================================
+
 struct ExternalDropEvent {
-    std::string payload;
+    std::string event;
     std::string raw_type;
+    std::string payload;
     float x;
     float y;
     float window_w;
@@ -26,13 +31,13 @@ static std::mutex g_drop_mutex;
 static std::vector<ExternalDropEvent> g_drop_events;
 static bool g_drag_bridge_initialized = false;
 
-typedef NSDragOperation (*OriginalDragEnteredIMP)(id, SEL, id<NSDraggingInfo>);
-typedef NSDragOperation (*OriginalDragUpdatedIMP)(id, SEL, id<NSDraggingInfo>);
-typedef BOOL (*OriginalPerformDragIMP)(id, SEL, id<NSDraggingInfo>);
-
-static OriginalDragEnteredIMP orig_draggingEntered = nullptr;
-static OriginalDragUpdatedIMP orig_draggingUpdated = nullptr;
-static OriginalPerformDragIMP orig_performDragOperation = nullptr;
+static void queue_external_event(const ExternalDropEvent& ev) {
+    std::lock_guard<std::mutex> lock(g_drop_mutex);
+    if (g_drop_events.size() > 50) {
+        g_drop_events.erase(g_drop_events.begin());
+    }
+    g_drop_events.push_back(ev);
+}
 
 static NSString* extractURLFromPasteboard(NSPasteboard *pboard, NSString **outType) {
     if (!pboard) return nil;
@@ -72,8 +77,27 @@ static NSString* extractURLFromPasteboard(NSPasteboard *pboard, NSString **outTy
         return str;
     }
 
-    // 5. File URLs / filenames (e.g. .webloc)
-    NSArray *files = [pboard propertyListForType:NSFilenamesPboardType];
+    // 5. text/uri-list
+    NSString *uriList = [pboard stringForType:@"text/uri-list"];
+    if (uriList && uriList.length > 0) {
+        NSArray *lines = [uriList componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+        for (NSString *line in lines) {
+            NSString *trimmed = [line stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+            if (trimmed.length > 0 && ![trimmed hasPrefix:@"#"]) {
+                if (outType) *outType = @"text/uri-list";
+                return trimmed;
+            }
+        }
+    }
+
+    // 6. File URLs / filenames (e.g. .webloc or audio/media files)
+    NSArray *files = [pboard propertyListForType:NSPasteboardTypeFileURL];
+    if (!files || files.count == 0) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        files = [pboard propertyListForType:NSFilenamesPboardType];
+#pragma clang diagnostic pop
+    }
     if (files && [files isKindOfClass:[NSArray class]] && files.count > 0) {
         NSString *filePath = files[0];
         if ([filePath hasSuffix:@".webloc"]) {
@@ -84,7 +108,7 @@ static NSString* extractURLFromPasteboard(NSPasteboard *pboard, NSString **outTy
                 return weblocUrl;
             }
         }
-        if (outType) *outType = @"NSFilenamesPboardType";
+        if (outType) *outType = @"public.file-url";
         return filePath;
     }
 
@@ -105,7 +129,8 @@ static BOOL isSupportedDragType(NSPasteboard *pboard) {
         @"public.utf8-plain-text",
         @"WebURLsWithTitlesPboardType",
         @"NSFilenamesPboardType",
-        @"text/uri-list"
+        @"text/uri-list",
+        @"public.url-name"
     ];
     
     for (NSString *t in supported) {
@@ -116,138 +141,145 @@ static BOOL isSupportedDragType(NSPasteboard *pboard) {
     return NO;
 }
 
-static NSDragOperation custom_draggingEntered(id self, SEL _cmd, id<NSDraggingInfo> sender) {
-    NSPasteboard *pboard = [sender draggingPasteboard];
-    NSLog(@"[NATIVE_LOG] EXTERNAL DRAG ENTERED types=%@", [pboard types]);
-    if (isSupportedDragType(pboard)) {
-        return NSDragOperationCopy;
+// Transparent Native Drag Overlay View
+@interface NativeExternalDragOverlayView : NSView
+@end
+
+@implementation NativeExternalDragOverlayView
+
+- (instancetype)initWithFrame:(NSRect)frame {
+    self = [super initWithFrame:frame];
+    if (self) {
+        NSArray *dragTypes = @[
+            NSPasteboardTypeURL,
+            NSPasteboardTypeString,
+            NSPasteboardTypeFileURL,
+            @"public.url",
+            @"public.file-url",
+            @"public.utf8-plain-text",
+            @"WebURLsWithTitlesPboardType",
+            @"NSFilenamesPboardType",
+            @"text/uri-list",
+            @"public.url-name"
+        ];
+        [self registerForDraggedTypes:dragTypes];
+        self.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+        NSLog(@"[NATIVE_LOG] NativeExternalDragOverlayView initialized with frame (%.1f, %.1f)", frame.size.width, frame.size.height);
     }
-    if (orig_draggingEntered) {
-        return orig_draggingEntered(self, _cmd, sender);
-    }
-    return NSDragOperationNone;
+    return self;
 }
 
-static NSDragOperation custom_draggingUpdated(id self, SEL _cmd, id<NSDraggingInfo> sender) {
-    NSPasteboard *pboard = [sender draggingPasteboard];
-    if (isSupportedDragType(pboard)) {
-        return NSDragOperationCopy;
+- (NSView *)hitTest:(NSPoint)point {
+    // Return nil for ordinary mouse clicks, drags, moves, scroll events so Godot UI receives them completely!
+    NSEvent *currentEvent = [NSApp currentEvent];
+    if (currentEvent) {
+        NSEventType type = [currentEvent type];
+        if (type == NSEventTypeLeftMouseDown || type == NSEventTypeLeftMouseUp ||
+            type == NSEventTypeRightMouseDown || type == NSEventTypeRightMouseUp ||
+            type == NSEventTypeOtherMouseDown || type == NSEventTypeOtherMouseUp ||
+            type == NSEventTypeLeftMouseDragged || type == NSEventTypeRightMouseDragged ||
+            type == NSEventTypeOtherMouseDragged || type == NSEventTypeMouseMoved ||
+            type == NSEventTypeScrollWheel || type == NSEventTypeKeyDown || type == NSEventTypeKeyUp) {
+            return nil;
+        }
     }
-    if (orig_draggingUpdated) {
-        return orig_draggingUpdated(self, _cmd, sender);
-    }
-    return NSDragOperationNone;
+    // Return self so Cocoa drag & drop manager delivers draggingEntered:, draggingUpdated:, performDragOperation:
+    return self;
 }
 
-static BOOL custom_performDragOperation(id self, SEL _cmd, id<NSDraggingInfo> sender) {
+- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)sender {
     NSPasteboard *pboard = [sender draggingPasteboard];
-    NSLog(@"[NATIVE_LOG] EXTERNAL DROP CALLBACK RECEIVED types=%@", [pboard types]);
-    NSString *rawType = @"unknown";
-    NSString *extracted = extractURLFromPasteboard(pboard, &rawType);
+    NSPoint loc = [sender draggingLocation];
+    NSRect bounds = self.bounds;
+    float godot_x = (float)loc.x;
+    float godot_y = (float)(bounds.size.height - loc.y);
     
-    if (extracted && extracted.length > 0) {
+    NSString *typesStr = [[pboard types] componentsJoinedByString:@", "];
+    NSLog(@"[NATIVE_LOG] EXTERNAL DRAG ENTERED (Overlay) types=%@", typesStr);
+    
+    if (isSupportedDragType(pboard)) {
+        queue_external_event({
+            "EXTERNAL_DRAG_ENTERED",
+            [typesStr UTF8String] ?: "",
+            "",
+            godot_x,
+            godot_y,
+            (float)bounds.size.width,
+            (float)bounds.size.height
+        });
+        return NSDragOperationCopy;
+    }
+    return NSDragOperationNone;
+}
+
+- (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)sender {
+    NSPasteboard *pboard = [sender draggingPasteboard];
+    if (isSupportedDragType(pboard)) {
         NSPoint loc = [sender draggingLocation];
-        NSView *view = (NSView *)self;
-        NSRect bounds = view.bounds;
-        
+        NSRect bounds = self.bounds;
         float godot_x = (float)loc.x;
         float godot_y = (float)(bounds.size.height - loc.y);
         
-        {
-            std::lock_guard<std::mutex> lock(g_drop_mutex);
-            g_drop_events.push_back({
-                [extracted UTF8String],
-                [rawType UTF8String],
-                godot_x,
-                godot_y,
-                (float)bounds.size.width,
-                (float)bounds.size.height
-            });
-        }
+        queue_external_event({
+            "EXTERNAL_DRAG_UPDATED",
+            "",
+            "",
+            godot_x,
+            godot_y,
+            (float)bounds.size.width,
+            (float)bounds.size.height
+        });
+        return NSDragOperationCopy;
+    }
+    return NSDragOperationNone;
+}
+
+- (BOOL)performDragOperation:(id<NSDraggingInfo>)sender {
+    NSPasteboard *pboard = [sender draggingPasteboard];
+    NSString *typesStr = [[pboard types] componentsJoinedByString:@", "];
+    NSLog(@"[NATIVE_LOG] EXTERNAL DROP CALLBACK RECEIVED (Overlay) types=%@", typesStr);
+    
+    NSString *rawType = @"unknown";
+    NSString *extracted = extractURLFromPasteboard(pboard, &rawType);
+    
+    NSPoint loc = [sender draggingLocation];
+    NSRect bounds = self.bounds;
+    float godot_x = (float)loc.x;
+    float godot_y = (float)(bounds.size.height - loc.y);
+    
+    if (extracted && extracted.length > 0) {
+        queue_external_event({
+            "EXTERNAL_DROP",
+            [rawType UTF8String] ?: "unknown",
+            [extracted UTF8String] ?: "",
+            godot_x,
+            godot_y,
+            (float)bounds.size.width,
+            (float)bounds.size.height
+        });
         
         NSLog(@"[NATIVE_LOG] EXTERNAL PAYLOAD TYPE: %@ payload=%@", rawType, extracted);
         NSLog(@"[NATIVE_LOG] EXTERNAL DROP RECEIVED type=%@ payload_len=%lu loc=(%.1f, %.1f)",
               rawType, (unsigned long)extracted.length, godot_x, godot_y);
-        
         return YES;
     } else {
-        NSLog(@"[NATIVE_LOG] EXTERNAL DROP FAILED TO EXTRACT URL FROM PASTEBOARD types=%@", [pboard types]);
-    }
-    
-    if (orig_performDragOperation) {
-        return orig_performDragOperation(self, _cmd, sender);
+        NSLog(@"[NATIVE_LOG] EXTERNAL DROP FAILED TO EXTRACT URL FROM PASTEBOARD types=%@", typesStr);
     }
     return NO;
 }
 
-typedef void (*OriginalRegisterDragTypesIMP)(id, SEL, NSArray*);
-static OriginalRegisterDragTypesIMP orig_registerForDraggedTypes = nullptr;
-
-static void custom_registerForDraggedTypes(id self, SEL _cmd, NSArray *pboardTypes) {
-    NSMutableArray *merged = [NSMutableArray arrayWithArray:pboardTypes ?: @[]];
-    NSArray *browserTypes = @[
-        NSPasteboardTypeURL,
-        NSPasteboardTypeString,
-        NSPasteboardTypeFileURL,
-        @"public.url",
-        @"public.file-url",
-        @"public.utf8-plain-text",
-        @"WebURLsWithTitlesPboardType",
-        @"NSFilenamesPboardType",
-        @"text/uri-list"
-    ];
-    for (NSString *t in browserTypes) {
-        if (![merged containsObject:t]) {
-            [merged addObject:t];
-        }
-    }
-    if (orig_registerForDraggedTypes) {
-        orig_registerForDraggedTypes(self, _cmd, merged);
-    }
-}
-
-static void setup_drag_swizzle(Class cls) {
-    if (!cls) return;
-    static bool swizzled = false;
-    if (swizzled) return;
-    swizzled = true;
-
-    Method mRegister = class_getInstanceMethod(cls, @selector(registerForDraggedTypes:));
-    if (mRegister) {
-        orig_registerForDraggedTypes = (OriginalRegisterDragTypesIMP)method_getImplementation(mRegister);
-        method_setImplementation(mRegister, (IMP)custom_registerForDraggedTypes);
-    }
-
-    Method mEntered = class_getInstanceMethod(cls, @selector(draggingEntered:));
-    if (mEntered) {
-        orig_draggingEntered = (OriginalDragEnteredIMP)method_getImplementation(mEntered);
-        method_setImplementation(mEntered, (IMP)custom_draggingEntered);
-    } else {
-        class_addMethod(cls, @selector(draggingEntered:), (IMP)custom_draggingEntered, "q@:@");
-    }
-
-    Method mUpdated = class_getInstanceMethod(cls, @selector(draggingUpdated:));
-    if (mUpdated) {
-        orig_draggingUpdated = (OriginalDragUpdatedIMP)method_getImplementation(mUpdated);
-        method_setImplementation(mUpdated, (IMP)custom_draggingUpdated);
-    } else {
-        class_addMethod(cls, @selector(draggingUpdated:), (IMP)custom_draggingUpdated, "q@:@");
-    }
-
-    Method mPerform = class_getInstanceMethod(cls, @selector(performDragOperation:));
-    if (mPerform) {
-        orig_performDragOperation = (OriginalPerformDragIMP)method_getImplementation(mPerform);
-        method_setImplementation(mPerform, (IMP)custom_performDragOperation);
-    } else {
-        class_addMethod(cls, @selector(performDragOperation:), (IMP)custom_performDragOperation, "B@:@");
-    }
-}
+@end
 
 static void enable_external_drag_drop_native() {
     dispatch_async(dispatch_get_main_queue(), ^{
         NSArray *wins = [NSApp windows];
+        NSLog(@"[NATIVE_LOG] NATIVE_BRIDGE_LOADED: YES windows_count=%lu", (unsigned long)wins.count);
         for (NSWindow *win in wins) {
             if (win.contentView) {
+                NSLog(@"[NATIVE_LOG] WINDOW_FOUND: title='%@' ptr=%p", win.title, win);
+                NSLog(@"[NATIVE_LOG] WINDOW_CLASS: %@", [win className]);
+                NSLog(@"[NATIVE_LOG] CONTENT_VIEW_CLASS: %@", [win.contentView className]);
+                
                 NSArray *dragTypes = @[
                     NSPasteboardTypeURL,
                     NSPasteboardTypeString,
@@ -257,12 +289,28 @@ static void enable_external_drag_drop_native() {
                     @"public.utf8-plain-text",
                     @"WebURLsWithTitlesPboardType",
                     @"NSFilenamesPboardType",
-                    @"text/uri-list"
+                    @"text/uri-list",
+                    @"public.url-name"
                 ];
                 [win registerForDraggedTypes:dragTypes];
                 [win.contentView registerForDraggedTypes:dragTypes];
-                setup_drag_swizzle([win.contentView class]);
+                
+                // Attach transparent overlay view
+                BOOL overlay_exists = NO;
+                for (NSView *sub in win.contentView.subviews) {
+                    if ([sub isKindOfClass:[NativeExternalDragOverlayView class]]) {
+                        overlay_exists = YES;
+                        break;
+                    }
+                }
+                if (!overlay_exists) {
+                    NativeExternalDragOverlayView *overlay = [[NativeExternalDragOverlayView alloc] initWithFrame:win.contentView.bounds];
+                    [win.contentView addSubview:overlay positioned:NSWindowAbove relativeTo:nil];
+                    NSLog(@"[NATIVE_LOG] ACTUAL_DRAG_RECEIVER_CLASS: NativeExternalDragOverlayView installed on %@", [win.contentView className]);
+                }
+                
                 g_drag_bridge_initialized = true;
+                NSLog(@"[NATIVE_LOG] REGISTERED_DRAG_TYPES: %@", dragTypes);
             }
         }
     });
@@ -829,8 +877,8 @@ static void call_poll_external_drop(void *userdata, GDExtensionClassInstancePtr 
             g_drop_events.erase(g_drop_events.begin());
             
             char buf[4096] = {0};
-            snprintf(buf, sizeof(buf), "EXTERNAL_DROP|%s|%.1f|%.1f|%.1f|%.1f|%s",
-                     ev.raw_type.c_str(), ev.x, ev.y, ev.window_w, ev.window_h, ev.payload.c_str());
+            snprintf(buf, sizeof(buf), "%s|%s|%.1f|%.1f|%.1f|%.1f|%s",
+                     ev.event.c_str(), ev.raw_type.c_str(), ev.x, ev.y, ev.window_w, ev.window_h, ev.payload.c_str());
             result_str = buf;
         }
     }

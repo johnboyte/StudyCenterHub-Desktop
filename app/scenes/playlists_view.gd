@@ -150,7 +150,22 @@ func _process(_delta: float) -> void:
 	if OS.get_name() == "macOS":
 		var drop_data = NativePlayerBridge.poll_external_drop()
 		if not drop_data.is_empty():
-			_handle_native_external_drop(drop_data)
+			_handle_native_external_event(drop_data)
+
+func _handle_native_external_event(drop_data: Dictionary) -> void:
+	var ev_type = str(drop_data.get("event", "EXTERNAL_DROP"))
+	var raw_type = str(drop_data.get("raw_type", "unknown"))
+	var payload = str(drop_data.get("payload", ""))
+	var drop_x = float(drop_data.get("x", 0.0))
+	var drop_y = float(drop_data.get("y", 0.0))
+
+	if ev_type == "EXTERNAL_DRAG_ENTERED":
+		print("EXTERNAL DRAG ENTERED: %s" % raw_type)
+		_update_drag_debug("EXTERNAL DRAG ENTERED\nTypes: %s" % raw_type)
+	elif ev_type == "EXTERNAL_DRAG_UPDATED":
+		_update_drag_debug("EXTERNAL DRAG UPDATED\nLoc: (%.1f, %.1f)" % [drop_x, drop_y])
+	elif ev_type == "EXTERNAL_DROP":
+		_handle_native_external_drop(drop_data)
 
 func _handle_native_external_drop(drop_data: Dictionary) -> void:
 	var raw_type = str(drop_data.get("raw_type", "unknown"))
