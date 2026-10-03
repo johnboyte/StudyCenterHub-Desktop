@@ -178,7 +178,158 @@ static BOOL isSupportedDragType(NSPasteboard *pboard) {
     return NO;
 }
 
-// Dedicated Native Drag Destination Receiver View
+// Dedicated Visible Native AppKit Drop Box View
+@interface NativePlaylistDropBoxView : NSView <NSDraggingDestination>
+@property (nonatomic, strong) NSTextField *titleLabel;
+@property (nonatomic, strong) NSTextField *statusLabel;
+@property (nonatomic, strong) NSTextView *logTextView;
+@end
+
+@implementation NativePlaylistDropBoxView
+
+- (instancetype)initWithFrame:(NSRect)frameRect {
+    self = [super initWithFrame:frameRect];
+    if (self) {
+        NSArray *dragTypes = @[
+            NSPasteboardTypeURL,
+            NSPasteboardTypeString,
+            NSPasteboardTypeFileURL,
+            @"public.url",
+            @"public.file-url",
+            @"public.utf8-plain-text",
+            @"WebURLsWithTitlesPboardType",
+            @"text/uri-list",
+            @"NSURLPboardType",
+            @"NSFilenamesPboardType"
+        ];
+        [self registerForDraggedTypes:dragTypes];
+        
+        [self setWantsLayer:YES];
+        [self.layer setBackgroundColor:[NSColor colorWithCalibratedRed:0.07 green:0.10 blue:0.18 alpha:0.95].CGColor];
+        [self.layer setBorderColor:[NSColor colorWithCalibratedRed:0.0 green:0.8 blue:0.9 alpha:1.0].CGColor];
+        [self.layer setBorderWidth:2.5];
+        [self.layer setCornerRadius:8.0];
+        
+        _titleLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(10, frameRect.size.height - 30, frameRect.size.width - 20, 22)];
+        [_titleLabel setEditable:NO];
+        [_titleLabel setSelectable:NO];
+        [_titleLabel setBezeled:NO];
+        [_titleLabel setDrawsBackground:NO];
+        [_titleLabel setTextColor:[NSColor colorWithCalibratedRed:0.0 green:0.9 blue:1.0 alpha:1.0]];
+        [_titleLabel setFont:[NSFont boldSystemFontOfSize:12]];
+        [_titleLabel setAlignment:NSTextAlignmentCenter];
+        [_titleLabel setStringValue:@"🧪 NATIVE APPKIT YOUTUBE DROP BOX"];
+        [self addSubview:_titleLabel];
+        
+        _statusLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(10, frameRect.size.height - 65, frameRect.size.width - 20, 30)];
+        [_statusLabel setEditable:NO];
+        [_statusLabel setSelectable:NO];
+        [_statusLabel setBezeled:NO];
+        [_statusLabel setDrawsBackground:YES];
+        [_statusLabel setBackgroundColor:[NSColor colorWithCalibratedRed:0.12 green:0.15 blue:0.25 alpha:1.0]];
+        [_statusLabel setTextColor:[NSColor colorWithCalibratedRed:0.3 green:0.9 blue:0.5 alpha:1.0]];
+        [_statusLabel setFont:[NSFont boldSystemFontOfSize:13]];
+        [_statusLabel setAlignment:NSTextAlignmentCenter];
+        [_statusLabel setStringValue:@"READY FOR DRAG (Drop YouTube Link Here)"];
+        [self addSubview:_statusLabel];
+        
+        NSScrollView *scrollView = [[NSScrollView alloc] initWithFrame:NSMakeRect(10, 10, frameRect.size.width - 20, frameRect.size.height - 80)];
+        [scrollView setHasVerticalScroller:YES];
+        [scrollView setHasHorizontalScroller:NO];
+        
+        _logTextView = [[NSTextView alloc] initWithFrame:scrollView.contentView.bounds];
+        [_logTextView setEditable:NO];
+        [_logTextView setSelectable:YES];
+        [_logTextView setFont:[NSFont userFixedPitchFontOfSize:11]];
+        [_logTextView setBackgroundColor:[NSColor colorWithCalibratedRed:0.04 green:0.06 blue:0.10 alpha:1.0]];
+        [_logTextView setTextColor:[NSColor colorWithCalibratedRed:0.85 green:0.85 blue:0.9 alpha:1.0]];
+        [scrollView setDocumentView:_logTextView];
+        [self addSubview:scrollView];
+        
+        [self appendLog:@"[APPKIT NATIVE BOX READY]"];
+        [self appendLog:@"Drag Safari / Chrome YouTube link directly into this box."];
+    }
+    return self;
+}
+
+- (void)appendLog:(NSString *)msg {
+    NSString *line = [NSString stringWithFormat:@"%@\n", msg];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self->_logTextView setString:[self->_logTextView.string stringByAppendingString:line]];
+        [self->_logTextView scrollRangeToVisible:NSMakeRange(self->_logTextView.string.length, 0)];
+        NSLog(@"[NATIVE_BOX_LOG] %@", msg);
+    });
+}
+
+- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)sender {
+    NSPasteboard *pboard = [sender draggingPasteboard];
+    NSArray *types = [pboard types];
+    
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self->_statusLabel setStringValue:@"🟢 DRAG ENTERED NATIVE DROP BOX!"];
+        [self->_statusLabel setBackgroundColor:[NSColor colorWithCalibratedRed:0.0 green:0.5 blue:0.2 alpha:1.0]];
+    });
+    
+    [self appendLog:@"\n----------------------------------------"];
+    [self appendLog:[NSString stringWithFormat:@"[EVENT] draggingEntered (%lu types):", (unsigned long)types.count]];
+    for (NSString *t in types) {
+        [self appendLog:[NSString stringWithFormat:@"  • %@", t]];
+    }
+    
+    return NSDragOperationCopy;
+}
+
+- (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)sender {
+    return NSDragOperationCopy;
+}
+
+- (void)draggingExited:(id<NSDraggingInfo>)sender {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self->_statusLabel setStringValue:@"READY FOR DRAG (Drop YouTube Link Here)"];
+        [self->_statusLabel setBackgroundColor:[NSColor colorWithCalibratedRed:0.12 green:0.15 blue:0.25 alpha:1.0]];
+    });
+    [self appendLog:@"[EVENT] draggingExited"];
+}
+
+- (BOOL)performDragOperation:(id<NSDraggingInfo>)sender {
+    NSPasteboard *pboard = [sender draggingPasteboard];
+    NSString *rawType = @"unknown";
+    NSString *extracted = extractURLFromPasteboard(pboard, &rawType);
+    
+    NSPoint loc = [sender draggingLocation];
+    NSRect bounds = self.bounds;
+    float godot_x = (float)loc.x;
+    float godot_y = (float)(bounds.size.height - loc.y);
+    
+    if (extracted && extracted.length > 0) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self->_statusLabel setStringValue:@"🎉 DROP RECEIVED NATIVE BOX!"];
+            [self->_statusLabel setBackgroundColor:[NSColor colorWithCalibratedRed:0.1 green:0.5 blue:0.95 alpha:1.0]];
+        });
+        
+        [self appendLog:@"\n========================================"];
+        [self appendLog:[NSString stringWithFormat:@"[EVENT] performDragOperation SUCCESS!"]];
+        [self appendLog:[NSString stringWithFormat:@"Type: %@", rawType]];
+        [self appendLog:[NSString stringWithFormat:@"URL:  %@", extracted]];
+        [self appendLog:@"========================================\n"];
+        
+        queue_external_event({
+            "EXTERNAL_DROP",
+            [rawType UTF8String] ?: "unknown",
+            [extracted UTF8String] ?: "",
+            godot_x,
+            godot_y,
+            (float)bounds.size.width,
+            (float)bounds.size.height
+        });
+        return YES;
+    }
+    return NO;
+}
+
+@end
+
+// Dedicated Full-Window Native Drag Destination Overlay
 @interface NativeDragDestinationView : NSView <NSDraggingDestination>
 @property (nonatomic, strong) NSTextField *debugBadge;
 @end
@@ -628,13 +779,31 @@ static void ensure_external_drag_receiver() {
                 if (!NSEqualRects(targetReceiver.frame, win.contentView.bounds)) {
                     [targetReceiver setFrame:win.contentView.bounds];
                 }
-                // ALWAYS re-assert targetReceiver as topmost subview to prevent being covered by new subviews
                 if (win.contentView.subviews.lastObject != targetReceiver) {
                     [win.contentView addSubview:targetReceiver positioned:NSWindowAbove relativeTo:nil];
-                    NSLog(@"[NATIVE_LOG] Re-asserted NativeDragDestinationView as TOPMOST subview");
                 }
             }
             [targetReceiver registerForDraggedTypes:dragTypes];
+            
+            // Instantiating visible AppKit Native Drop Box View (480x200 anchored at top-center/right)
+            NativePlaylistDropBoxView *dropBox = nil;
+            for (NSView *sub in win.contentView.subviews) {
+                if ([sub isKindOfClass:[NativePlaylistDropBoxView class]]) {
+                    dropBox = (NativePlaylistDropBoxView *)sub;
+                    break;
+                }
+            }
+            NSRect winBounds = win.contentView.bounds;
+            NSRect boxFrame = NSMakeRect(winBounds.size.width - 500, winBounds.size.height - 220, 480, 200);
+            if (!dropBox) {
+                dropBox = [[NativePlaylistDropBoxView alloc] initWithFrame:boxFrame];
+                [win.contentView addSubview:dropBox positioned:NSWindowAbove relativeTo:nil];
+                NSLog(@"[NATIVE_LOG] Created visible NativePlaylistDropBoxView at (%.1f, %.1f, 480, 200)", boxFrame.origin.x, boxFrame.origin.y);
+            } else {
+                [dropBox setFrame:boxFrame];
+                [win.contentView addSubview:dropBox positioned:NSWindowAbove relativeTo:nil];
+            }
+            [dropBox registerForDraggedTypes:dragTypes];
             
             g_diag_info.receiver_class = [[targetReceiver className] UTF8String];
             g_diag_info.receiver_attached = true;
