@@ -754,6 +754,24 @@ static void setup_class_drag_swizzle(Class cls) {
     }
 }
 
+static NSWindow *getGodotMainWindow() {
+    NSArray *wins = [NSApp windows];
+    for (NSWindow *w in wins) {
+        if ([w isVisible] && w.contentView && w != g_independentWindow) {
+            NSString *clsName = [w className];
+            if (![clsName isEqualToString:@"NSPanel"] && ![clsName isEqualToString:@"NativePlaylistDropBoxView"]) {
+                return w;
+            }
+        }
+    }
+    for (NSWindow *w in wins) {
+        if (w.contentView && w != g_independentWindow) {
+            return w;
+        }
+    }
+    return nil;
+}
+
 @interface DropWindowObserver : NSObject
 @end
 
@@ -762,16 +780,7 @@ static DropWindowObserver *g_dropObserver = nil;
 static void updateIndependentWindowPosition() {
     if (!g_independentWindow) return;
     
-    NSWindow *mainWin = [NSApp mainWindow];
-    if (!mainWin) {
-        NSArray *wins = [NSApp windows];
-        for (NSWindow *w in wins) {
-            if ([w isVisible] && w.contentView && w != g_independentWindow) {
-                mainWin = w;
-                break;
-            }
-        }
-    }
+    NSWindow *mainWin = getGodotMainWindow();
     if (!mainWin) return;
 
     NSRect mainFrame = mainWin.frame;
@@ -820,19 +829,7 @@ static void ensure_external_drag_receiver() {
     ];
     g_diag_info.registered_types = [[dragTypes componentsJoinedByString:@", "] UTF8String];
 
-    NSWindow *mainWin = [NSApp mainWindow];
-    if (!mainWin) {
-        NSArray *wins = [NSApp windows];
-        for (NSWindow *w in wins) {
-            if ([w isVisible] && w.contentView && w != g_independentWindow) {
-                mainWin = w;
-                break;
-            }
-        }
-        if (!mainWin && wins.count > 0) {
-            mainWin = wins[0];
-        }
-    }
+    NSWindow *mainWin = getGodotMainWindow();
 
     g_diag_info.app_ptr = [NSString stringWithFormat:@"%p", NSApp].UTF8String;
     g_diag_info.app_activation_policy = (int)[NSApp activationPolicy];
@@ -857,7 +854,7 @@ static void ensure_external_drag_receiver() {
         CGFloat y = winFrame.origin.y + winFrame.size.height - dropH - 54.0;
         NSRect indFrame = NSMakeRect(x, y, dropW, dropH);
 
-        NSUInteger styleMask = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable;
+        NSUInteger styleMask = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable;
         g_independentWindow = [[NSWindow alloc] initWithContentRect:indFrame
                                                            styleMask:styleMask
                                                              backing:NSBackingStoreBuffered

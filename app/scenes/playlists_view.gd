@@ -835,16 +835,16 @@ func select_playlist(playlist_id: String) -> void:
 	var pl = playlists_svc.get_playlist_by_id(playlist_id) if playlists_svc else {}
 	var pl_name = str(pl.get("name", ""))
 
+	_render_playlists_list()
+	_render_selected_playlist_header(pl)
+	load_playlist_items()
+
 	if OS.get_name() == "macOS":
 		NativePlayerBridge.update_target_playlist(pl_name)
 		if playlist_id.is_empty():
 			NativePlayerBridge.update_drop_status("NO PLAYLIST SELECTED", "error")
 		else:
 			NativePlayerBridge.update_drop_status("READY — Drop YouTube song here", "ready")
-
-	_render_playlists_list()
-	_render_selected_playlist_header(pl)
-	load_playlist_items()
 
 func reorder_playlist_to_index(playlist_id: String, target_index: int) -> void:
 	if not playlists_svc: return
