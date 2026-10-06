@@ -1579,31 +1579,39 @@ static void call_set_drag_box_visible(void *userdata, GDExtensionClassInstancePt
 }
 
 static void call_get_native_diagnostics(void *userdata, GDExtensionClassInstancePtr instance, const GDExtensionConstVariantPtr *args, GDExtensionInt arg_count, GDExtensionVariantPtr r_return, GDExtensionCallError *r_error) {
-    ensure_external_drag_receiver();
+    NSWindow *mainWin = getGodotMainWindow();
+    NSWindow *keyWin = [NSApp keyWindow];
+    
+    NSString *keyClass = keyWin ? [keyWin className] : @"nil";
+    NSString *keyPtr = keyWin ? [NSString stringWithFormat:@"%p", keyWin] : @"nil";
+    NSString *mainClass = mainWin ? [mainWin className] : @"nil";
+    NSString *mainPtr = mainWin ? [NSString stringWithFormat:@"%p", mainWin] : @"nil";
+    
+    BOOL indCreated = (g_independentWindow != nil);
+    BOOL indVisible = indCreated ? [g_independentWindow isVisible] : NO;
+    BOOL indIsKey = indCreated ? [g_independentWindow isKeyWindow] : NO;
+    BOOL indIsMain = indCreated ? [g_independentWindow isMainWindow] : NO;
+    NSString *indClass = indCreated ? [g_independentWindow className] : @"None";
+    NSString *indPtr = indCreated ? [NSString stringWithFormat:@"%p", g_independentWindow] : @"nil";
+
     char buf[4096] = {0};
     snprintf(buf, sizeof(buf),
-             "version=%s|bridge_loaded=%s|window_found=%s|app_ptr=%s|app_activation_policy=%d|app_is_active=%s|main_window_ptr=%s|key_window_ptr=%s|independent_window_ptr=%s|independent_parent_ptr=%s|independent_window_class=%s|independent_window_level=%ld|independent_style_mask=%lu|independent_is_visible=%s|independent_ignores_mouse=%s|independent_content_view_class=%s|receiver_window_ptr=%s|receiver_class=%s|receiver_attached=%s|receiver_enabled=%s|frame=%s|registered_types=%s",
+             "version=%s|bridge_loaded=YES|window_found=%s|app_ptr=%p|app_activation_policy=%d|app_is_active=%s|main_window_ptr=%s|main_window_class=%s|key_window_ptr=%s|key_window_class=%s|independent_window_ptr=%s|independent_window_class=%s|independent_is_created=%s|independent_is_visible=%s|independent_is_key=%s|independent_is_main=%s|registered_types=%s",
              NATIVE_DRAG_BRIDGE_VERSION_STR,
-             g_diag_info.bridge_loaded ? "YES" : "NO",
-             g_diag_info.window_found ? "YES" : "NO",
-             g_diag_info.app_ptr.c_str(),
-             g_diag_info.app_activation_policy,
-             g_diag_info.app_is_active ? "YES" : "NO",
-             g_diag_info.main_window_ptr.c_str(),
-             g_diag_info.key_window_ptr.c_str(),
-             g_diag_info.independent_window_ptr.c_str(),
-             g_diag_info.independent_parent_ptr.c_str(),
-             g_diag_info.independent_window_class.c_str(),
-             g_diag_info.independent_window_level,
-             g_diag_info.independent_style_mask,
-             g_diag_info.independent_is_visible ? "YES" : "NO",
-             g_diag_info.independent_ignores_mouse ? "YES" : "NO",
-             g_diag_info.independent_content_view_class.c_str(),
-             g_diag_info.receiver_window_ptr.c_str(),
-             g_diag_info.receiver_class.c_str(),
-             g_diag_info.receiver_attached ? "YES" : "NO",
-             g_diag_info.receiver_enabled ? "YES" : "NO",
-             g_diag_info.frame_str.c_str(),
+             mainWin ? "YES" : "NO",
+             NSApp,
+             (int)[NSApp activationPolicy],
+             [NSApp isActive] ? "YES" : "NO",
+             [mainPtr UTF8String],
+             [mainClass UTF8String],
+             [keyPtr UTF8String],
+             [keyClass UTF8String],
+             [indPtr UTF8String],
+             [indClass UTF8String],
+             indCreated ? "YES" : "NO",
+             indVisible ? "YES" : "NO",
+             indIsKey ? "YES" : "NO",
+             indIsMain ? "YES" : "NO",
              g_diag_info.registered_types.c_str()
     );
     

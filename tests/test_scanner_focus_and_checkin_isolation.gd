@@ -15,17 +15,25 @@ func _init() -> void:
 	print("==============================================================================")
 	
 	# 1. VERIFY NATIVE WINDOW ISOLATION DIAGNOSTICS (IF ON MACOS)
-	if OS.get_name() == "macOS":
-		NativePlayerBridgeScript.enable_external_drag()
-		NativePlayerBridgeScript.set_drag_box_visible(false)
-		
-		if ClassDB.class_exists("MacWKWebViewHelper"):
-			var helper = ClassDB.instantiate("MacWKWebViewHelper")
-			if helper and helper.has_method("getNativeDiagnostics"):
+	if OS.get_name() == "macOS" and ClassDB.class_exists("MacWKWebViewHelper"):
+		var helper = ClassDB.instantiate("MacWKWebViewHelper")
+		if helper:
+			if helper.has_method("setDragBoxVisible"):
+				helper.call("setDragBoxVisible", true)
+			if helper.has_method("getNativeDiagnostics"):
 				var diag_str: String = helper.call("getNativeDiagnostics")
-				print("[NATIVE DIAGNOSTICS] ", diag_str)
-				assert(diag_str.contains("independent_window_class=NativeDropWindow"), "FAIL: Independent window must use NativeDropWindow class to prevent stealing key window status")
-				print("✅ Native Window Focus Isolation Verified: independent window uses NativeDropWindow (canBecomeKeyWindow = NO).")
+				print("[NATIVE DIAGNOSTICS VISIBLE] ", diag_str)
+				assert(diag_str.contains("independent_window_class=NativeDropWindow"), "FAIL: Independent window must use NativeDropWindow class")
+				assert(diag_str.contains("independent_is_key=NO"), "FAIL: Independent window must never be key window")
+				assert(diag_str.contains("independent_is_main=NO"), "FAIL: Independent window must never be main window")
+				
+				if helper.has_method("setDragBoxVisible"):
+					helper.call("setDragBoxVisible", false)
+				var diag_str_hidden: String = helper.call("getNativeDiagnostics")
+				print("[NATIVE DIAGNOSTICS HIDDEN] ", diag_str_hidden)
+				assert(diag_str_hidden.contains("independent_is_visible=NO"), "FAIL: Independent window must be hidden on set_drag_box_visible(false)")
+				assert(diag_str_hidden.contains("independent_is_key=NO"), "FAIL: Independent window must not be key when hidden")
+				print("✅ Native Window Focus Isolation Verified: independent window uses NativeDropWindow (canBecomeKeyWindow = NO) and hides properly.")
 
 	# 2. VERIFY CHECK-IN SCANNER MEMBER LOOKUP & ATOMIC ATTENDANCE WRITE IN ISOLATED TEST DB
 	var db_path = ProjectSettings.globalize_path("user://studycenterhub_test_scanner_isolation.db")
