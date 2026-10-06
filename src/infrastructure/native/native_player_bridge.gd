@@ -171,6 +171,17 @@ static func get_native_diagnostics() -> Dictionary:
 				return dict
 	return {}
 
+static func cleanup_native() -> void:
+	if OS.get_name() != "macOS" or DisplayServer.get_name() == "headless":
+		return
+	if ClassDB.class_exists("MacWKWebViewHelper"):
+		var helper = ClassDB.instantiate("MacWKWebViewHelper")
+		if helper:
+			if helper.has_method("cleanupNative"):
+				helper.call("cleanupNative")
+			elif helper.has_method("cleanup_native"):
+				helper.call("cleanup_native")
+
 static func test_native_bridge() -> bool:
 	if OS.get_name() != "macOS" or DisplayServer.get_name() == "headless":
 		return false

@@ -81,6 +81,12 @@ var _sync_svc: RefCounted = null
 var _twilio_config_cached: bool = false
 var _view_scene_cache: Dictionary = {}
 
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_PREDELETE or what == NOTIFICATION_EXIT_TREE:
+		if OS.get_name() == "macOS":
+			NativePlayerBridgeScript.set_drag_box_visible(false)
+			NativePlayerBridgeScript.cleanup_native()
+
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	add_to_group("app_shell")

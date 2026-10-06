@@ -14,7 +14,7 @@ func _init() -> void:
 	print("STARTING SCANNER INPUT & NATIVE WINDOW FOCUS ISOLATION REGRESSION SUITE")
 	print("==============================================================================")
 	
-	# 1. VERIFY NATIVE WINDOW ISOLATION DIAGNOSTICS (IF ON MACOS)
+	# 1. VERIFY NATIVE WINDOW ISOLATION DIAGNOSTICS & CLEANUP (IF ON MACOS)
 	if OS.get_name() == "macOS" and ClassDB.class_exists("MacWKWebViewHelper"):
 		var helper = ClassDB.instantiate("MacWKWebViewHelper")
 		if helper:
@@ -33,7 +33,13 @@ func _init() -> void:
 				print("[NATIVE DIAGNOSTICS HIDDEN] ", diag_str_hidden)
 				assert(diag_str_hidden.contains("independent_is_visible=NO"), "FAIL: Independent window must be hidden on set_drag_box_visible(false)")
 				assert(diag_str_hidden.contains("independent_is_key=NO"), "FAIL: Independent window must not be key when hidden")
-				print("✅ Native Window Focus Isolation Verified: independent window uses NativeDropWindow (canBecomeKeyWindow = NO) and hides properly.")
+				
+				if helper.has_method("cleanupNative"):
+					helper.call("cleanupNative")
+				var diag_str_clean: String = helper.call("getNativeDiagnostics")
+				print("[NATIVE DIAGNOSTICS CLEANED] ", diag_str_clean)
+				assert(diag_str_clean.contains("independent_is_created=NO"), "FAIL: Independent window must be destroyed after cleanupNative")
+				print("✅ Native Window Focus Isolation & Cleanup Verified: independent window uses NativeDropWindow (canBecomeKeyWindow = NO), hides, and cleans up cleanly on exit.")
 
 	# 2. VERIFY CHECK-IN SCANNER MEMBER LOOKUP & ATOMIC ATTENDANCE WRITE IN ISOLATED TEST DB
 	var db_path = ProjectSettings.globalize_path("user://studycenterhub_test_scanner_isolation.db")

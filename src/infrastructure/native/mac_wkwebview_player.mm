@@ -805,6 +805,8 @@ static void updateIndependentWindowPosition() {
     [g_independentWindow setFrame:newFrame display:YES animate:NO];
 }
 
+static void mac_wkwebview_cleanup_native();
+
 @implementation DropWindowObserver
 - (void)windowDidMoveOrResize:(NSNotification *)note {
     NSWindow *win = note.object;
@@ -820,6 +822,15 @@ static void updateIndependentWindowPosition() {
 - (void)appDidUnhide:(NSNotification *)note {
     if (g_independentWindow && g_dropWindowShouldBeVisible) {
         [g_independentWindow orderFrontRegardless];
+    }
+}
+- (void)appWillTerminate:(NSNotification *)note {
+    mac_wkwebview_cleanup_native();
+}
+- (void)windowWillClose:(NSNotification *)note {
+    NSWindow *win = note.object;
+    if (win && win != g_independentWindow) {
+        mac_wkwebview_cleanup_native();
     }
 }
 @end
@@ -843,6 +854,25 @@ static void setup_passive_native_key_monitor() {
         }
         return event; // PASSIVE ONLY — NEVER MODIFY OR CONSUME EVENTS
     }];
+}
+
+static void mac_wkwebview_cleanup_native() {
+    g_dropWindowShouldBeVisible = false;
+    if (g_macos_key_monitor) {
+        [NSEvent removeMonitor:g_macos_key_monitor];
+        g_macos_key_monitor = nil;
+    }
+    if (g_dropObserver) {
+        [[NSNotificationCenter defaultCenter] removeObserver:g_dropObserver];
+        g_dropObserver = nil;
+    }
+    if (g_independentWindow) {
+        [g_independentWindow orderOut:nil];
+        [g_independentWindow close];
+        g_independentWindow = nil;
+    }
+    g_independentDropBoxView = nil;
+    NSLog(@"[NATIVE_LOG] mac_wkwebview_cleanup_native executed cleanly.");
 }
 
 static void ensure_external_drag_receiver() {
@@ -900,7 +930,7 @@ static void ensure_external_drag_receiver() {
                                                                       defer:NO];
         [g_independentWindow setTitle:@"Drop YouTube Song Here"];
         [g_independentWindow setLevel:NSFloatingWindowLevel];
-        [g_independentWindow setHidesOnDeactivate:NO];
+        [g_independentWindow setHidesOnDeactivate:YES];
         [g_independentWindow setHasShadow:YES];
         [g_independentWindow setReleasedWhenClosed:NO];
 
@@ -918,6 +948,10 @@ static void ensure_external_drag_receiver() {
             [nc addObserver:g_dropObserver selector:@selector(windowDidMoveOrResize:) name:NSWindowDidResizeNotification object:nil];
             [nc addObserver:g_dropObserver selector:@selector(appDidHide:) name:NSApplicationDidHideNotification object:nil];
             [nc addObserver:g_dropObserver selector:@selector(appDidUnhide:) name:NSApplicationDidUnhideNotification object:nil];
+            [nc addObserver:g_dropObserver selector:@selector(appWillTerminate:) name:NSApplicationWillTerminateNotification object:nil];
+            if (mainWin) {
+                [nc addObserver:g_dropObserver selector:@selector(windowWillClose:) name:NSWindowWillCloseNotification object:mainWin];
+            }
         }
 
         if (g_dropWindowShouldBeVisible) {
@@ -1660,6 +1694,12 @@ static void call_get_native_diagnostics(void *userdata, GDExtensionClassInstance
     }
 }
 
+static void call_cleanup_native(void *userdata, GDExtensionClassInstancePtr instance, const GDExtensionConstVariantPtr *args, GDExtensionInt arg_count, GDExtensionVariantPtr r_return, GDExtensionCallError *r_error) {
+    runOnMainThread(^{
+        mac_wkwebview_cleanup_native();
+    });
+}
+
 static void call_test_native_bridge(void *userdata, GDExtensionClassInstancePtr instance, const GDExtensionConstVariantPtr *args, GDExtensionInt arg_count, GDExtensionVariantPtr r_return, GDExtensionCallError *r_error) {
     queue_external_event({
         "EXTERNAL_SELF_TEST",
@@ -1800,6 +1840,9 @@ static void initialize_mac_wkwebview_module(void *p_userdata, GDExtensionInitial
 
         register_method_helper(g_library, "MacWKWebViewHelper", "setDragBoxVisible", call_set_drag_box_visible, false);
         register_method_helper(g_library, "MacWKWebViewHelper", "set_drag_box_visible", call_set_drag_box_visible, false);
+
+        register_method_helper(g_library, "MacWKWebViewHelper", "cleanupNative", call_cleanup_native, false);
+        register_method_helper(g_library, "MacWKWebViewHelper", "cleanup_native", call_cleanup_native, false);
 
         register_method_helper(g_library, "MacWKWebViewHelper", "updateTargetPlaylist", call_update_target_playlist, false);
         register_method_helper(g_library, "MacWKWebViewHelper", "update_target_playlist", call_update_target_playlist, false);
