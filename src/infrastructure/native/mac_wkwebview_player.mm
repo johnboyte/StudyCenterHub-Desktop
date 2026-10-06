@@ -192,6 +192,15 @@ static BOOL isSupportedDragType(NSPasteboard *pboard) {
 
 static void runOnMainThread(dispatch_block_t block);
 
+@interface NativeDropWindow : NSWindow
+@end
+
+@implementation NativeDropWindow
+- (BOOL)canBecomeKeyWindow { return NO; }
+- (BOOL)canBecomeMainWindow { return NO; }
+- (BOOL)acceptsFirstResponder { return NO; }
+@end
+
 @class NativePlaylistDropBoxView;
 static NSWindow *g_independentWindow = nil;
 static NativePlaylistDropBoxView *g_independentDropBoxView = nil;
@@ -863,10 +872,10 @@ static void ensure_external_drag_receiver() {
         NSRect indFrame = NSMakeRect(x, y, dropW, dropH);
 
         NSUInteger styleMask = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable;
-        g_independentWindow = [[NSWindow alloc] initWithContentRect:indFrame
-                                                           styleMask:styleMask
-                                                             backing:NSBackingStoreBuffered
-                                                               defer:NO];
+        g_independentWindow = [[NativeDropWindow alloc] initWithContentRect:indFrame
+                                                                  styleMask:styleMask
+                                                                    backing:NSBackingStoreBuffered
+                                                                      defer:NO];
         [g_independentWindow setTitle:@"Drop YouTube Song Here"];
         [g_independentWindow setLevel:NSFloatingWindowLevel];
         [g_independentWindow setHidesOnDeactivate:NO];
@@ -889,13 +898,20 @@ static void ensure_external_drag_receiver() {
             [nc addObserver:g_dropObserver selector:@selector(appDidUnhide:) name:NSApplicationDidUnhideNotification object:nil];
         }
 
-        [g_independentWindow makeKeyAndOrderFront:nil];
         [g_independentWindow orderFrontRegardless];
         g_dropWindowShouldBeVisible = true;
-        NSLog(@"[NATIVE_LOG] Created compact production independent NSWindow (%p) with parentWindow=NIL", g_independentWindow);
+        
+        // Always ensure Godot's main window retains key window status
+        if (mainWin) {
+            [mainWin makeKeyAndOrderFront:nil];
+        }
+        NSLog(@"[NATIVE_LOG] Created compact production independent NativeDropWindow (%p) with parentWindow=NIL", g_independentWindow);
     } else {
         [g_independentWindow orderFrontRegardless];
         g_dropWindowShouldBeVisible = true;
+        if (mainWin) {
+            [mainWin makeKeyAndOrderFront:nil];
+        }
     }
 
     g_diag_info.independent_window_ptr = [NSString stringWithFormat:@"%p", g_independentWindow].UTF8String;
@@ -938,6 +954,10 @@ static void mac_wkwebview_set_drag_box_visible(bool visible) {
             if (g_independentWindow) {
                 [g_independentWindow orderOut:nil];
             }
+        }
+        NSWindow *mainWin = getGodotMainWindow();
+        if (mainWin) {
+            [mainWin makeKeyAndOrderFront:nil];
         }
     });
 }

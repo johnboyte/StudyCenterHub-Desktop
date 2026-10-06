@@ -66,6 +66,7 @@ const PlaybackSessionServiceScript = preload("res://src/domain/playlists/playbac
 const NowPlayingBarScript = preload("res://app/scenes/components/now_playing_bar.gd")
 const YouTubeOAuthServiceScript = preload("res://src/domain/playlists/youtube_oauth_service.gd")
 const YouTubePlaylistSyncServiceScript = preload("res://src/domain/playlists/youtube_playlist_sync_service.gd")
+const NativePlayerBridgeScript = preload("res://src/infrastructure/native/native_player_bridge.gd")
 
 var playback_svc: RefCounted
 var oauth_svc: Node
@@ -687,6 +688,9 @@ func switch_view(view_name: String, params: Dictionary = {}) -> bool:
 		return false
 
 	current_view_name = view_name
+
+	if view_name != "playlists":
+		NativePlayerBridgeScript.set_drag_box_visible(false)
 
 	if view_name == "kiosk":
 		if sidebar_panel: sidebar_panel.visible = false

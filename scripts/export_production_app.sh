@@ -36,6 +36,7 @@ echo "==========================================================================
 "$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_email_digital_member_pass.gd"
 "$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_sms_digital_member_pass.gd"
 "$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_sms_schedule_send.gd"
+"$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_scanner_focus_and_checkin_isolation.gd"
 "$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/verify_production_deployment.gd"
 echo "✅ All regression test suites passed 100% cleanly."
 

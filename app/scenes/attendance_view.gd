@@ -339,6 +339,10 @@ func _populate_dropdowns() -> void:
 	else:
 		session_dropdown.add_item("— Choose a session —", 0)
 
+func grab_search_focus() -> void:
+	if search_line_edit and is_instance_valid(search_line_edit):
+		search_line_edit.grab_focus()
+
 func _update_person_dropdown_list(list: Array) -> void:
 	person_dropdown.clear()
 	for i in range(list.size()):
