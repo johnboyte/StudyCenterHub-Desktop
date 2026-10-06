@@ -464,9 +464,16 @@ func _update_scanner_diagnostic_ui() -> void:
 	var key_win_ptr = str(native_diag.get("key_window_ptr", "unknown"))
 	var main_win_class = str(native_diag.get("main_window_class", "unknown"))
 	var main_win_ptr = str(native_diag.get("main_window_ptr", "unknown"))
+	var godot_is_key = str(native_diag.get("godot_is_key", "unknown"))
+	var godot_is_main = str(native_diag.get("godot_is_main", "unknown"))
 	var ind_vis = str(native_diag.get("independent_is_visible", "NO"))
 	var ind_key = str(native_diag.get("independent_is_key", "NO"))
 	var ind_main = str(native_diag.get("independent_is_main", "NO"))
+	
+	var macos_keydown_count = int(native_diag.get("macos_keydown_count", "0"))
+	var macos_last_keycode = int(native_diag.get("macos_last_keycode", "-1"))
+	var macos_last_char_count = int(native_diag.get("macos_last_char_count", "0"))
+	var event_win_class = str(native_diag.get("event_window_class", "nil"))
 	
 	var diag_text = """SCANNER DIAGNOSTIC
 Godot window focused: %s
@@ -488,9 +495,15 @@ PIPELINE STAGES STATUS:
 7. CHECK-IN REQUEST: %s
 
 --------------------------------------------------------
-MACOS NATIVE WINDOW STATE:
-- NSApp keyWindow: %s (Ptr: %s)
-- Godot main window: %s (Ptr: %s)
+MACOS APPKIT PASSIVE KEYBOARD DIAGNOSTIC:
+- MACOS KEYDOWN COUNT: %d
+- LAST MACOS KEYCODE: %d
+- MACOS CHARACTER COUNT: %d
+- EVENT WINDOW CLASS: %s
+- KEY WINDOW CLASS: %s (Ptr: %s)
+- GODOT MAIN WINDOW CLASS: %s (Ptr: %s)
+- GODOT WINDOW IS KEY: %s
+- GODOT WINDOW IS MAIN: %s
 - Playlist drop window visible: %s
 - Playlist drop window key: %s
 - Playlist drop window main: %s""" % [
@@ -508,10 +521,16 @@ MACOS NATIVE WINDOW STATE:
 		_diag_stage_parser,
 		_diag_stage_lookup,
 		_diag_stage_checkin,
+		macos_keydown_count,
+		macos_last_keycode,
+		macos_last_char_count,
+		event_win_class,
 		key_win_class,
 		key_win_ptr,
 		main_win_class,
 		main_win_ptr,
+		godot_is_key,
+		godot_is_main,
 		ind_vis,
 		ind_key,
 		ind_main
