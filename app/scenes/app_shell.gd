@@ -833,6 +833,8 @@ func switch_view(view_name: String, params: Dictionary = {}) -> bool:
 
 		if current_view_node.has_method("receive_navigation_context"):
 			current_view_node.call("receive_navigation_context", params.duplicate(true))
+		if current_view_node.has_method("grab_search_focus"):
+			current_view_node.call_deferred("grab_search_focus")
 		return true
 
 	return false
