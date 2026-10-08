@@ -1,30 +1,38 @@
 extends SceneTree
 
 func _init() -> void:
-	print("--- INSPECTING ALL FILES IN INSTALLED PRODUCTION PCK ---")
+	print("==========================================================")
+	print("INSPECTING CANDIDATE PCK FILE LIST & SCRIPTS")
+	print("==========================================================")
 	
-	# Open directory inside PCK when loaded via main-pack
-	var target_scripts = [
-		"res://app/scenes/administration_view.gd",
-		"res://app/scenes/administration_view.gdc",
-		"res://app/scenes/app_shell.gd",
-		"res://app/scenes/app_shell.gdc",
-		"res://app/scenes/home_view.gd",
-		"res://app/scenes/home_view.gdc",
-		"res://src/domain/communications/communications_service.gd",
-		"res://src/domain/communications/communications_service.gdc",
-		"res://src/domain/sync/gateway_sync_service.gd",
-		"res://src/domain/sync/gateway_sync_service.gdc"
-	]
+	var pck_path = "/Users/johnboyte/Development/StudyCenterHub-Desktop/builds/StudyCenterHub-Desktop-Candidate.pck"
+	var success = ProjectSettings.load_resource_pack(pck_path, true)
+	print("Resource Pack Load Success: ", success)
 	
-	for s_path in target_scripts:
-		var exists = FileAccess.file_exists(s_path)
-		print(s_path, " -> EXISTS: ", exists)
-		if exists and s_path.ends_with(".gd"):
-			var content = FileAccess.get_file_as_string(s_path)
-			print("  [Content len]: ", content.length(), " bytes")
-			if s_path.contains("administration_view"):
-				print("  [Contains selected_ivr_day]: ", content.contains("selected_ivr_day"))
-				print("  [Contains _create_selectable_label]: ", content.contains("_create_selectable_label"))
-	
+	# Try reading res://app/scenes/directory_view.gd or directory_view.gdc
+	if FileAccess.file_exists("res://app/scenes/directory_view.gd"):
+		var f = FileAccess.open("res://app/scenes/directory_view.gd", FileAccess.READ)
+		if f:
+			var txt = f.get_as_text()
+			print("res://app/scenes/directory_view.gd exists in PCK! Length: ", txt.length())
+			if "Save Current as Original" in txt or "Save as Original" in txt:
+				print("❌ FOUND OLD TEXT IN PCK: 'Save Current as Original' / 'Save as Original'")
+			else:
+				print("✅ CLEAN: 'Save Current as Original' is NOT in res://app/scenes/directory_view.gd inside PCK")
+	else:
+		print("res://app/scenes/directory_view.gd NOT FOUND as raw text in PCK")
+
+	if FileAccess.file_exists("res://app/scenes/directory_view.gdc"):
+		print("res://app/scenes/directory_view.gdc (compiled bytecode) EXISTS in PCK!")
+		var f = FileAccess.open("res://app/scenes/directory_view.gdc", FileAccess.READ)
+		if f:
+			var buf = f.get_buffer(f.get_length())
+			var ascii = buf.get_string_from_ascii()
+			var utf8 = buf.get_string_from_utf8()
+			if "Save Current as Original" in ascii or "Save as Original" in ascii or "Save Current as Original" in utf8 or "Save as Original" in utf8:
+				print("❌ FOUND OLD TEXT IN BYTECODE (.gdc): 'Save Current as Original'")
+			else:
+				print("✅ CLEAN: 'Save Current as Original' NOT found in compiled bytecode (.gdc)")
+
+	print("==========================================================")
 	quit(0)

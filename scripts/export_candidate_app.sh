@@ -26,7 +26,7 @@ echo "Current Commit: $CURRENT_COMMIT"
 echo "=============================================================================="
 echo "2. EXPORTING CANDIDATE PCK PACKAGE"
 echo "=============================================================================="
-"$GODOT_BIN" --headless --path "$PROJECT_DIR" --export-pack "macOS" "$TARGET_PCK"
+"$GODOT_BIN" --headless --path "$PROJECT_DIR" -s scripts/pack_candidate_pck.gd
 
 echo "=============================================================================="
 echo "3. CONSTRUCTING STANDALONE MAC OS APP BUNDLE"
