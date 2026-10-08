@@ -6034,21 +6034,21 @@ func _open_native_camera_dialog(on_capture_callback: Callable) -> void:
 	texture_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
 	sub_viewport.add_child(texture_rect)
 
-	var is_ycbcr = false
-	var datatype = active_feed.get_datatype()
-	if datatype == 2 or datatype == 3 or OS.get_name() == "macOS":
-		is_ycbcr = true
+	var created_textures: Array = []
+	var is_ycbcr_sep = (active_feed.get_datatype() == 2) # FEED_YCBCR_SEP only
 
-	if is_ycbcr:
+	if is_ycbcr_sep:
 		var y_tex = CameraTexture.new()
 		y_tex.camera_feed_id = active_feed.get_id()
 		y_tex.which_feed = 0
 		y_tex.camera_is_active = true
+		created_textures.append(y_tex)
 
 		var uv_tex = CameraTexture.new()
 		uv_tex.camera_feed_id = active_feed.get_id()
 		uv_tex.which_feed = 1
 		uv_tex.camera_is_active = true
+		created_textures.append(uv_tex)
 
 		var shader = Shader.new()
 		shader.code = """shader_type canvas_item;
@@ -6074,7 +6074,9 @@ func _open_native_camera_dialog(on_capture_callback: Callable) -> void:
 		var cam_tex = CameraTexture.new()
 		cam_tex.camera_feed_id = active_feed.get_id()
 		cam_tex.camera_is_active = true
+		created_textures.append(cam_tex)
 		texture_rect.texture = cam_tex
+		texture_rect.material = null
 
 	var instr_lbl = Label.new()
 	instr_lbl.text = "Center yourself in the camera feed above."
@@ -6108,11 +6110,23 @@ func _open_native_camera_dialog(on_capture_callback: Callable) -> void:
 	capture_btn.add_theme_stylebox_override("normal", capture_st)
 	capture_btn.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
 
+	var is_cleaned_up = false
 	var cleanup_camera = func():
-		active_feed.set_active(false)
-		cam_dialog.queue_free()
+		if is_cleaned_up: return
+		is_cleaned_up = true
+		for tex in created_textures:
+			if tex is CameraTexture:
+				tex.camera_is_active = false
+		if is_instance_valid(texture_rect):
+			texture_rect.texture = null
+		if is_instance_valid(active_feed):
+			active_feed.set_active(false)
+		CameraServer.set_monitoring_feeds(false)
+		if is_instance_valid(cam_dialog):
+			cam_dialog.queue_free()
 
 	cam_dialog.close_requested.connect(cleanup_camera)
+	cam_dialog.tree_exited.connect(cleanup_camera)
 	cancel_btn.pressed.connect(cleanup_camera)
 
 	capture_btn.pressed.connect(func():
