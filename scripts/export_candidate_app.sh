@@ -76,6 +76,8 @@ cat <<EOF > "$INFO_PLIST"
 	<string>10.13.0</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>StudyCenterHub uses the camera to capture profile photos during registration and check-in.</string>
 </dict>
 </plist>
 EOF
