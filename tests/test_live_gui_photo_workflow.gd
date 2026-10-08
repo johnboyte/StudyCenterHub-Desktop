@@ -96,22 +96,22 @@ func _init() -> void:
 	assert(cur_after_crop == new_crop_b64, "Current photo must update to new crop")
 	assert(orig_after_crop == raw_src_b64, "Protected Original MUST remain 100% byte-for-byte unchanged!")
 
-	# STEP 3: SIMULATE "SAVE CURRENT AS ORIGINAL"
-	# Executing the Save Current as Original action
-	db.execute("UPDATE people SET original_profile_photo = profile_photo WHERE person_uuid = ?;", [test_uuid])
-	dir_scene._invalidate_photo_cache(test_uuid)
-	dir_scene.refresh_view()
-	dir_scene.select_person_by_uuid(test_uuid)
+	# STEP 3: VERIFY STAFF EDIT DOES NOT MODIFY ORIGINAL
+	# Executing additional staff crop/edit action
+	var staff_crop_img = Image.create(55, 55, false, Image.FORMAT_RGBA8)
+	staff_crop_img.fill(Color(0.9, 0.9, 0.1, 1.0)) # Yellow crop
+	var staff_crop_b64 = "data:image/png;base64," + Marshalls.raw_to_base64(staff_crop_img.save_png_to_buffer())
+	dir_scene._active_photo_callback.call(staff_crop_b64)
 
-	var db_after_save_orig = db.execute("SELECT profile_photo, original_profile_photo FROM people WHERE person_uuid = ? LIMIT 1;", [test_uuid])["data"][0]
-	var cur_after_save_orig = str(db_after_save_orig.get("profile_photo", ""))
-	var orig_after_save_orig = str(db_after_save_orig.get("original_profile_photo", ""))
-	print("\n--- 3. AFTER SAVE CURRENT AS ORIGINAL ---")
-	print("CURRENT:  len=", cur_after_save_orig.length(), " sha256=", _get_b64_hash(cur_after_save_orig))
-	print("ORIGINAL: len=", orig_after_save_orig.length(), " sha256=", _get_b64_hash(orig_after_save_orig))
-	print("CURRENT == ORIGINAL: ", (cur_after_save_orig == orig_after_save_orig))
-	assert(orig_after_save_orig == new_crop_b64, "Original must now match current photo after Save Current as Original")
-	assert(cur_after_save_orig == orig_after_save_orig, "Current and Original hashes MUST match after Save Current as Original")
+	var db_after_staff_edit = db.execute("SELECT profile_photo, original_profile_photo FROM people WHERE person_uuid = ? LIMIT 1;", [test_uuid])["data"][0]
+	var cur_after_staff = str(db_after_staff_edit.get("profile_photo", ""))
+	var orig_after_staff = str(db_after_staff_edit.get("original_profile_photo", ""))
+	print("\n--- 3. AFTER ADDITIONAL STAFF EDIT ---")
+	print("CURRENT:  len=", cur_after_staff.length(), " sha256=", _get_b64_hash(cur_after_staff))
+	print("ORIGINAL: len=", orig_after_staff.length(), " sha256=", _get_b64_hash(orig_after_staff))
+	print("CURRENT == ORIGINAL: ", (cur_after_staff == orig_after_staff))
+	assert(cur_after_staff == staff_crop_b64, "Current photo must update to staff edit")
+	assert(orig_after_staff == raw_src_b64, "Protected Original MUST remain 100% byte-for-byte unchanged!")
 
 	# STEP 4: SIMULATE "RESTORE ORIGINAL"
 	# Now set a new raw source image (Orange 180x180) and test Restore Original workflow

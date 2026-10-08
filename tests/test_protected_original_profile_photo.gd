@@ -94,17 +94,15 @@ func _init() -> void:
 		assert(p_row_e["original_profile_photo"] == raw_source_b64, "E. Protected Original MUST remain byte-for-byte unchanged on edit iteration " + str(i))
 	print("✅ Test E Passed: Repeated edits leave Protected Original byte-for-byte unchanged.")
 
-	# F. Test Save Current as Original (Replaces protected original with confirmation/intent)
-	var new_master_img = Image.create(80, 80, false, Image.FORMAT_RGBA8)
-	new_master_img.fill(Color(1.0, 1.0, 0.0, 1.0)) # Yellow image
-	var new_master_b64 = "data:image/png;base64," + Marshalls.raw_to_base64(new_master_img.save_png_to_buffer())
-	db.execute("UPDATE people SET profile_photo = ? WHERE person_uuid = ?;", [new_master_b64, test_person_uuid])
-	
-	# Action: Save Current as Original
-	db.execute("UPDATE people SET original_profile_photo = profile_photo WHERE person_uuid = ?;", [test_person_uuid])
+	# F. Test Staff Editing Protection (Staff editing updates ONLY profile_photo and NEVER overwrites original)
+	var staff_edit_img = Image.create(80, 80, false, Image.FORMAT_RGBA8)
+	staff_edit_img.fill(Color(1.0, 1.0, 0.0, 1.0)) # Yellow image
+	var staff_edit_b64 = "data:image/png;base64," + Marshalls.raw_to_base64(staff_edit_img.save_png_to_buffer())
+	db.execute("UPDATE people SET profile_photo = ? WHERE person_uuid = ?;", [staff_edit_b64, test_person_uuid])
 	var p_row_f = db.execute("SELECT profile_photo, original_profile_photo FROM people WHERE person_uuid = ?;", [test_person_uuid])["data"][0]
-	assert(p_row_f["original_profile_photo"] == new_master_b64, "F. Protected Original replaced after Save Current as Original action")
-	print("✅ Test F Passed: Save Current as Original replaces protected original master.")
+	assert(p_row_f["profile_photo"] == staff_edit_b64, "F. Current photo updated by staff edit")
+	assert(p_row_f["original_profile_photo"] == raw_source_b64, "F. Protected Original MUST remain unchanged during staff edits!")
+	print("✅ Test F Passed: Staff edits update ONLY current photo and never overwrite Protected Original.")
 
 	# G. Test New Replacement Photo (New source becomes new protected original)
 	var replacement_source_img = Image.create(120, 120, false, Image.FORMAT_RGBA8)

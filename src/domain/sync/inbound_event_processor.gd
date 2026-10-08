@@ -188,8 +188,8 @@ func _process_portal_registration(event_id: int, payload: Dictionary) -> void:
 	if person_id > 0:
 		print("[Processor] Matched existing member ID ", person_id, " for portal registration.")
 		db.execute(
-			"UPDATE people SET first_name = ?, last_name = ?, phone = ?, email = ?, school_email = COALESCE(NULLIF(?, ''), school_email), preferred_email = ?, birthday = ?, primary_role = ?, relationship = ?, campus_community_applies = ?, institution_id = COALESCE(?, institution_id), institution_other_name = COALESCE(NULLIF(?, ''), institution_other_name), academic_year = ?, grade = ?, sms_consent = ?, sms_consent_given = ?, emergency_contact_name = COALESCE(NULLIF(?, ''), emergency_contact_name), emergency_contact_phone = COALESCE(NULLIF(?, ''), emergency_contact_phone), profile_photo = COALESCE(NULLIF(?, ''), profile_photo), flag_status = 'Clear', updated_at = datetime('now') WHERE id = ?;",
-			[norm["first_name"], norm["last_name"], phone, email, school_email, preferred_email, norm.get("birthday", ""), sys_role, norm["relationship"], campus_applies, inst_id, inst_other, norm.get("academic_year", ""), norm.get("grade", ""), norm["sms_consent"], norm["sms_consent_given"], em_name, em_phone, photo_base64, person_id]
+			"UPDATE people SET first_name = ?, last_name = ?, phone = ?, email = ?, school_email = COALESCE(NULLIF(?, ''), school_email), preferred_email = ?, birthday = ?, primary_role = ?, relationship = ?, campus_community_applies = ?, institution_id = COALESCE(?, institution_id), institution_other_name = COALESCE(NULLIF(?, ''), institution_other_name), academic_year = ?, grade = ?, sms_consent = ?, sms_consent_given = ?, emergency_contact_name = COALESCE(NULLIF(?, ''), emergency_contact_name), emergency_contact_phone = COALESCE(NULLIF(?, ''), emergency_contact_phone), profile_photo = COALESCE(NULLIF(?, ''), profile_photo), original_profile_photo = CASE WHEN ? != '' THEN ? ELSE original_profile_photo END, flag_status = 'Clear', updated_at = datetime('now') WHERE id = ?;",
+			[norm["first_name"], norm["last_name"], phone, email, school_email, preferred_email, norm.get("birthday", ""), sys_role, norm["relationship"], campus_applies, inst_id, inst_other, norm.get("academic_year", ""), norm.get("grade", ""), norm["sms_consent"], norm["sms_consent_given"], em_name, em_phone, photo_base64, photo_base64, photo_base64, person_id]
 		)
 	else:
 		created_person_uuid = "usr_" + _generate_uuid().replace("-", "").substr(0, 16)
@@ -198,7 +198,7 @@ func _process_portal_registration(event_id: int, payload: Dictionary) -> void:
 			human_id = PersonServiceScript.generate_canonical_human_id(db)
 
 		var p_ins_res = db.execute(
-			"INSERT INTO people (person_uuid, human_id, first_name, last_name, phone, email, school_email, preferred_email, birthday, primary_role, relationship, campus_community_applies, institution_id, institution_other_name, academic_year, grade, emergency_contact_name, emergency_contact_phone, sms_consent, sms_consent_given, sms_consent_source, sms_consent_at, profile_photo, flag_status, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Clear', 'active', datetime('now'));",
+			"INSERT INTO people (person_uuid, human_id, first_name, last_name, phone, email, school_email, preferred_email, birthday, primary_role, relationship, campus_community_applies, institution_id, institution_other_name, academic_year, grade, emergency_contact_name, emergency_contact_phone, sms_consent, sms_consent_given, sms_consent_source, sms_consent_at, profile_photo, original_profile_photo, flag_status, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Clear', 'active', datetime('now'));",
 			[
 				created_person_uuid, human_id, norm["first_name"], norm["last_name"], phone, email, school_email, preferred_email,
 				norm.get("birthday", ""), sys_role, norm["relationship"], campus_applies, inst_id, inst_other,
@@ -206,7 +206,7 @@ func _process_portal_registration(event_id: int, payload: Dictionary) -> void:
 				em_name, em_phone,
 				norm["sms_consent"], norm["sms_consent_given"], norm.get("sms_consent_source", "Public Registration"),
 				norm.get("sms_consent_at", Time.get_datetime_string_from_system()),
-				photo_base64
+				photo_base64, photo_base64
 			]
 		)
 
@@ -288,13 +288,13 @@ func _process_portal_update_photo(event_id: int, payload: Dictionary) -> void:
 	var affected_rows = 0
 
 	if human_id != "":
-		update_res = db.execute("UPDATE people SET profile_photo = ?, updated_at = datetime('now') WHERE human_id = ?;", [photo_base64, human_id])
+		update_res = db.execute("UPDATE people SET profile_photo = ?, original_profile_photo = ?, updated_at = datetime('now') WHERE human_id = ?;", [photo_base64, photo_base64, human_id])
 		if update_res.get("success", false) and update_res.has("data") and update_res["data"].size() > 0:
 			affected_rows = int(update_res["data"][0].get("affected_rows", 0))
 
 	if affected_rows == 0 and phone != "":
 		var phone_e164 = str(payload.get("phone_e164", "")).strip_edges()
-		update_res = db.execute("UPDATE people SET profile_photo = ?, updated_at = datetime('now') WHERE phone = ? OR (phone IS NOT NULL AND phone != '' AND (phone = ? OR phone = ?));", [photo_base64, phone, phone, phone_e164])
+		update_res = db.execute("UPDATE people SET profile_photo = ?, original_profile_photo = ?, updated_at = datetime('now') WHERE phone = ? OR (phone IS NOT NULL AND phone != '' AND (phone = ? OR phone = ?));", [photo_base64, photo_base64, phone, phone, phone_e164])
 		if update_res.get("success", false) and update_res.has("data") and update_res["data"].size() > 0:
 			affected_rows = int(update_res["data"][0].get("affected_rows", 0))
 

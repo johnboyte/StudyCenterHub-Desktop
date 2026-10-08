@@ -1690,26 +1690,7 @@ func _populate_profile_section(p: Dictionary) -> void:
 	)
 	btns_hbox.add_child(btn_upload_photo)
 
-	if has_photo:
-		var btn_save_as_orig = Button.new()
-		btn_save_as_orig.text = "⭐ Save Current as Original"
-		btn_save_as_orig.custom_minimum_size = Vector2(180, 40)
-		btn_save_as_orig.add_theme_font_size_override("font_size", 14)
-		btn_save_as_orig.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 1.0, 1.0))
-		btn_save_as_orig.add_theme_color_override("font_pressed_color", Color(0.80, 0.80, 0.80, 1.0))
-		btn_save_as_orig.pressed.connect(func():
-			_show_photo_confirm_dialog(
-				"Save Current as Original",
-				"Replace the protected original photo with the current photo?\nYou will no longer be able to restore the previous original.",
-				"Replace Original",
-				func():
-					if db:
-						db.execute("UPDATE people SET original_profile_photo = profile_photo WHERE person_uuid = ?;", [p_uuid])
-					_invalidate_photo_cache(p_uuid)
-					refresh_view()
-			)
-		)
-		btns_hbox.add_child(btn_save_as_orig)
+
 
 	if has_photo or has_original:
 		var btn_remove = Button.new()
@@ -5884,43 +5865,29 @@ func _open_image_editor(source_img: Image, on_save_callback: Callable, person_uu
 	)
 
 	var btn_reset = Button.new()
-	btn_reset.text = "Reset View"
-	btn_reset.custom_minimum_size = Vector2(100, 36)
+	btn_reset.text = "🔄 Restore Original"
+	btn_reset.custom_minimum_size = Vector2(140, 36)
 	act_hbox.add_child(btn_reset)
 	btn_reset.pressed.connect(func():
+		var restored_img: Image = null
+		if person_uuid != "" and db != null:
+			var res = db.execute("SELECT original_profile_photo, profile_photo FROM people WHERE person_uuid = ? LIMIT 1;", [person_uuid])
+			if res["success"] and res["data"].size() > 0:
+				var orig_b64 = _clean_str(res["data"][0].get("original_profile_photo", ""))
+				if orig_b64 == "":
+					orig_b64 = _clean_str(res["data"][0].get("profile_photo", ""))
+				if orig_b64 != "":
+					restored_img = _create_image_from_base64(orig_b64)
+		if restored_img != null:
+			current_image.copy_from(restored_img)
+		else:
+			current_image.copy_from(source_img)
 		state["zoom"] = 1.0
 		state["offset_x"] = 0.0
 		state["offset_y"] = 0.0
 		state["rotation_clicks"] = 0
 		update_preview.call()
 	)
-
-	# DO NOT show "Save Current as Original" when in Restoring Mode (per Section 6)
-	if person_uuid != "" and not is_restoring_mode:
-		var btn_save_as_orig_ed = Button.new()
-		btn_save_as_orig_ed.text = "⭐ Save Current as Original"
-		btn_save_as_orig_ed.custom_minimum_size = Vector2(170, 36)
-		act_hbox.add_child(btn_save_as_orig_ed)
-		btn_save_as_orig_ed.pressed.connect(func():
-			_show_photo_confirm_dialog(
-				"Save Current as Original",
-				"Replace the protected original photo with the current photo?\nYou will no longer be able to restore the previous original.",
-				"Replace Original",
-				func():
-					if db:
-						db.execute("UPDATE people SET original_profile_photo = profile_photo WHERE person_uuid = ?;", [person_uuid])
-						var check_res = db.execute("SELECT profile_photo, original_profile_photo FROM people WHERE person_uuid = ? LIMIT 1;", [person_uuid])
-						if check_res["success"] and check_res["data"].size() > 0:
-							var cur_b = _clean_str(check_res["data"][0].get("profile_photo", ""))
-							var orig_b = _clean_str(check_res["data"][0].get("original_profile_photo", ""))
-							print("[LIVE PHOTO TRACE] AFTER SAVE CURRENT AS ORIGINAL (EDITOR):")
-							print("   CURRENT:  len=", cur_b.length(), " sha256=", _get_b64_hash(cur_b))
-							print("   ORIGINAL: len=", orig_b.length(), " sha256=", _get_b64_hash(orig_b))
-							print("   CURRENT == ORIGINAL: ", (cur_b == orig_b))
-					_invalidate_photo_cache(person_uuid)
-					refresh_view()
-			)
-		)
 
 	var separator = HSeparator.new(); main_vbox.add_child(separator)
 	var action_hbox = HBoxContainer.new()
