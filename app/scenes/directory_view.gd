@@ -5968,7 +5968,15 @@ func _open_native_camera_dialog(on_capture_callback: Callable) -> void:
 	CameraServer.set_monitoring_feeds(true)
 	var feeds = CameraServer.feeds()
 	if feeds.size() == 0:
-		_on_take_camera_photo_pressed("")
+		CameraServer.set_monitoring_feeds(false)
+		var err_dlg = AcceptDialog.new()
+		err_dlg.title = "📷 Camera Device Unavailable"
+		err_dlg.dialog_text = "No active camera hardware was detected on this device.\n\nPlease connect a webcam or enable camera permissions in macOS System Settings."
+		err_dlg.size = Vector2i(420, 160)
+		err_dlg.exclusive = true
+		err_dlg.confirmed.connect(func(): err_dlg.queue_free())
+		add_child(err_dlg)
+		err_dlg.popup_centered()
 		return
 
 	var cam_dialog = Window.new()
@@ -5978,11 +5986,7 @@ func _open_native_camera_dialog(on_capture_callback: Callable) -> void:
 	cam_dialog.exclusive = false
 
 	var active_feed = feeds[0]
-	active_feed.set_active(true)
-	print("--- CAMERA DEBUG ---")
-	print("Feed Name: ", active_feed.get_name())
-	print("Feed Datatype: ", active_feed.get_datatype())
-	print("--------------------")
+	active_feed.feed_is_active = true
 
 	var panel = Panel.new()
 	panel.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -6017,66 +6021,17 @@ func _open_native_camera_dialog(on_capture_callback: Callable) -> void:
 	feed_panel.add_theme_stylebox_override("panel", feed_st)
 	main_vbox.add_child(feed_panel)
 
-	# Container for viewport
-	var viewport_container = SubViewportContainer.new()
-	viewport_container.custom_minimum_size = Vector2(320, 240)
-	feed_panel.add_child(viewport_container)
-
-	var sub_viewport = SubViewport.new()
-	sub_viewport.size = Vector2i(320, 240)
-	sub_viewport.disable_3d = true
-	sub_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	viewport_container.add_child(sub_viewport)
-
+	# Direct TextureRect for hardware camera feed (no SubViewport container to prevent shader corruption)
 	var texture_rect = TextureRect.new()
-	texture_rect.size = Vector2(320, 240)
+	texture_rect.custom_minimum_size = Vector2(320, 240)
 	texture_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	texture_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
-	sub_viewport.add_child(texture_rect)
+	feed_panel.add_child(texture_rect)
 
-	var created_textures: Array = []
-	var is_ycbcr_sep = (active_feed.get_datatype() == 2) # FEED_YCBCR_SEP only
-
-	if is_ycbcr_sep:
-		var y_tex = CameraTexture.new()
-		y_tex.camera_feed_id = active_feed.get_id()
-		y_tex.which_feed = 0
-		y_tex.camera_is_active = true
-		created_textures.append(y_tex)
-
-		var uv_tex = CameraTexture.new()
-		uv_tex.camera_feed_id = active_feed.get_id()
-		uv_tex.which_feed = 1
-		uv_tex.camera_is_active = true
-		created_textures.append(uv_tex)
-
-		var shader = Shader.new()
-		shader.code = """shader_type canvas_item;
-		uniform sampler2D y_tex;
-		uniform sampler2D uv_tex;
-		void fragment() {
-			float y = texture(y_tex, UV).r;
-			vec2 uv = texture(uv_tex, UV).rg - vec2(0.5, 0.5);
-			float r = y + 1.402 * uv.y;
-			float g = y - 0.344 * uv.x - 0.714 * uv.y;
-			float b = y + 1.772 * uv.x;
-			COLOR = vec4(clamp(vec3(r, g, b), 0.0, 1.0), 1.0);
-		}"""
-
-		var mat = ShaderMaterial.new()
-		mat.shader = shader
-		mat.set_shader_parameter("y_tex", y_tex)
-		mat.set_shader_parameter("uv_tex", uv_tex)
-
-		texture_rect.texture = y_tex
-		texture_rect.material = mat
-	else:
-		var cam_tex = CameraTexture.new()
-		cam_tex.camera_feed_id = active_feed.get_id()
-		cam_tex.camera_is_active = true
-		created_textures.append(cam_tex)
-		texture_rect.texture = cam_tex
-		texture_rect.material = null
+	var cam_tex = CameraTexture.new()
+	cam_tex.camera_feed_id = active_feed.get_id()
+	cam_tex.camera_is_active = true
+	texture_rect.texture = cam_tex
 
 	var instr_lbl = Label.new()
 	instr_lbl.text = "Center yourself in the camera feed above."
@@ -6114,13 +6069,12 @@ func _open_native_camera_dialog(on_capture_callback: Callable) -> void:
 	var cleanup_camera = func():
 		if is_cleaned_up: return
 		is_cleaned_up = true
-		for tex in created_textures:
-			if tex is CameraTexture:
-				tex.camera_is_active = false
+		if is_instance_valid(cam_tex):
+			cam_tex.camera_is_active = false
 		if is_instance_valid(texture_rect):
 			texture_rect.texture = null
 		if is_instance_valid(active_feed):
-			active_feed.set_active(false)
+			active_feed.feed_is_active = false
 		CameraServer.set_monitoring_feeds(false)
 		if is_instance_valid(cam_dialog):
 			cam_dialog.queue_free()
@@ -6128,17 +6082,24 @@ func _open_native_camera_dialog(on_capture_callback: Callable) -> void:
 	cam_dialog.close_requested.connect(cleanup_camera)
 	cam_dialog.tree_exited.connect(cleanup_camera)
 	cancel_btn.pressed.connect(cleanup_camera)
+	tree_exiting.connect(cleanup_camera)
 
 	capture_btn.pressed.connect(func():
-		var img = sub_viewport.get_texture().get_image()
-		if img and not img.is_empty():
-			var snap_img = Image.new()
-			snap_img.copy_from(img)
-			cleanup_camera.call()
+		var screen_img = get_viewport().get_texture().get_image()
+		var snap_img: Image = null
+		if screen_img and not screen_img.is_empty():
+			var rect = texture_rect.get_global_rect()
+			var crop_rect = Rect2i(int(rect.position.x), int(rect.position.y), int(rect.size.x), int(rect.size.y))
+			crop_rect.position.x = clampi(crop_rect.position.x, 0, screen_img.get_width() - 1)
+			crop_rect.position.y = clampi(crop_rect.position.y, 0, screen_img.get_height() - 1)
+			crop_rect.size.x = clampi(crop_rect.size.x, 1, screen_img.get_width() - crop_rect.position.x)
+			crop_rect.size.y = clampi(crop_rect.size.y, 1, screen_img.get_height() - crop_rect.position.y)
+			snap_img = screen_img.get_region(crop_rect)
+		
+		cleanup_camera.call()
+		
+		if snap_img and not snap_img.is_empty():
 			on_capture_callback.call(snap_img)
-		else:
-			cleanup_camera.call()
-			_on_take_camera_photo_pressed("")
 	)
 
 	add_child(cam_dialog)
