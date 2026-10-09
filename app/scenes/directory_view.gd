@@ -6073,8 +6073,10 @@ func _open_native_camera_dialog(on_capture_callback: Callable) -> void:
 			cam_tex.camera_is_active = false
 		if is_instance_valid(texture_rect):
 			texture_rect.texture = null
-		if is_instance_valid(active_feed):
-			active_feed.feed_is_active = false
+		var all_feeds = CameraServer.feeds()
+		for f in all_feeds:
+			if is_instance_valid(f):
+				f.feed_is_active = false
 		CameraServer.set_monitoring_feeds(false)
 		if is_instance_valid(cam_dialog):
 			cam_dialog.queue_free()
