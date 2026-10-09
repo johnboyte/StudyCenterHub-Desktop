@@ -24,45 +24,45 @@ func _init():
 	else:
 		print("FAIL 1/7: Expected 'production', got: ", env1)
 
-	# Test 2: Explicit STUDYCENTERHUB_ENV = staging
-	var env2 = SQLiteDatabase.resolve_environment("staging", "/Users/johnboyte/Downloads/Godot.app/Contents/MacOS/Godot", [])
-	if env2 == "staging":
+	# Test 2: Non-production environment variable defaults to development
+	var env2 = SQLiteDatabase.resolve_environment("dev", "/Users/johnboyte/Downloads/Godot.app/Contents/MacOS/Godot", [])
+	if env2 == "development":
 		pass_count += 1
-		print("PASS 2/7: Explicit STUDYCENTERHUB_ENV=staging resolves to 'staging'.")
+		print("PASS 2/8: Non-production environment variable resolves to 'development'.")
 	else:
-		print("FAIL 2/7: Expected 'staging', got: ", env2)
+		print("FAIL 2/8: Expected 'development', got: ", env2)
 
 	# Test 3: Explicit STUDYCENTERHUB_ENV = development
 	var env3 = SQLiteDatabase.resolve_environment("development", "/Users/johnboyte/Downloads/Godot.app/Contents/MacOS/Godot", [])
 	if env3 == "development":
 		pass_count += 1
-		print("PASS 3/7: Explicit STUDYCENTERHUB_ENV=development resolves to 'development'.")
+		print("PASS 3/8: Explicit STUDYCENTERHUB_ENV=development resolves to 'development'.")
 	else:
-		print("FAIL 3/7: Expected 'development', got: ", env3)
+		print("FAIL 3/8: Expected 'development', got: ", env3)
 
 	# Test 4: Unset env with Production .pck cmdline arg (--main-pack .../StudyCenterHub-Desktop-Production.app/Contents/Resources/StudyCenterHub-Desktop-Production.pck)
 	var env4 = SQLiteDatabase.resolve_environment("", "/Users/johnboyte/Downloads/Godot.app/Contents/MacOS/Godot", ["--main-pack", "/Users/johnboyte/Development/StudyCenterHub-Desktop/builds/StudyCenterHub-Desktop-Production.app/Contents/Resources/StudyCenterHub-Desktop-Production.pck"])
 	if env4 == "production":
 		pass_count += 1
-		print("PASS 4/7: Production .pck cmdline arg resolves to 'production' when STUDYCENTERHUB_ENV is empty.")
+		print("PASS 4/8: Production .pck cmdline arg resolves to 'production' when STUDYCENTERHUB_ENV is empty.")
 	else:
-		print("FAIL 4/7: Expected 'production', got: ", env4)
+		print("FAIL 4/8: Expected 'production', got: ", env4)
 
 	# Test 5: Unset env with Production app executable path (.../builds/StudyCenterHub-Desktop-Production.app/Contents/MacOS/StudyCenterHub-Desktop-Production)
 	var env5 = SQLiteDatabase.resolve_environment("", "/Users/johnboyte/Development/StudyCenterHub-Desktop/builds/StudyCenterHub-Desktop-Production.app/Contents/MacOS/StudyCenterHub-Desktop-Production", [])
 	if env5 == "production":
 		pass_count += 1
-		print("PASS 5/7: Production .app executable path resolves to 'production' when STUDYCENTERHUB_ENV is empty.")
+		print("PASS 5/8: Production .app executable path resolves to 'production' when STUDYCENTERHUB_ENV is empty.")
 	else:
-		print("FAIL 5/7: Expected 'production', got: ", env5)
+		print("FAIL 5/8: Expected 'production', got: ", env5)
 
-	# Test 6: Unset env with RC1/Staging app path (.../builds/StudyCenterHub-Desktop-RC1.app)
-	var env6 = SQLiteDatabase.resolve_environment("", "/Users/johnboyte/Development/StudyCenterHub-Desktop/builds/StudyCenterHub-Desktop-RC1.app/Contents/MacOS/StudyCenterHub-Desktop-RC1", [])
-	if env6 == "staging":
+	# Test 6: Unset env with Development app path (.../builds/StudyCenterHub-Desktop-Development.app)
+	var env6 = SQLiteDatabase.resolve_environment("", "/Users/johnboyte/Development/StudyCenterHub-Desktop/builds/StudyCenterHub-Desktop-Development.app/Contents/MacOS/StudyCenterHub-Desktop-Development", [])
+	if env6 == "development":
 		pass_count += 1
-		print("PASS 6/7: RC1/Staging app executable path resolves to 'staging' when STUDYCENTERHUB_ENV is empty.")
+		print("PASS 6/8: Development app executable path resolves to 'development' when STUDYCENTERHUB_ENV is empty.")
 	else:
-		print("FAIL 6/7: Expected 'staging', got: ", env6)
+		print("FAIL 6/8: Expected 'development', got: ", env6)
 
 	# Test 7: Unset env with standard source launch (Godot --path ...)
 	var env7 = SQLiteDatabase.resolve_environment("", "/Users/johnboyte/Downloads/Godot.app/Contents/MacOS/Godot", ["--path", "/Users/johnboyte/Development/StudyCenterHub-Desktop/study-center-hub---desktop"])

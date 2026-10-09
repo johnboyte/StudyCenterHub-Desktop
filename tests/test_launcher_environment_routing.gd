@@ -31,38 +31,38 @@ func _init():
 	else:
 		print("FAIL 2/7: Executable path /Applications/StudyCenterHub.app fell back to 'development'!")
 
-	# Test 3: Candidate / Development paths resolve to staging / development
-	var env3 = SQLiteDatabase.resolve_environment("", "/Users/johnboyte/Development/StudyCenterHub-Desktop/builds/StudyCenterHub-Desktop-Candidate.app/Contents/MacOS/StudyCenterHub-Desktop-Candidate", [])
-	if env3 == "staging":
+	# Test 3: Development app path resolves to development
+	var env3 = SQLiteDatabase.resolve_environment("", "/Users/johnboyte/Development/StudyCenterHub-Desktop/builds/StudyCenterHub-Desktop-Development.app/Contents/MacOS/StudyCenterHub-Desktop-Development", [])
+	if env3 == "development":
 		pass_count += 1
-		print("PASS 3/7: Candidate app path resolves to 'staging'.")
+		print("PASS 3/7: Development app path resolves to 'development'.")
 	else:
-		print("FAIL 3/7: Expected 'staging', got: ", env3)
+		print("FAIL 3/7: Expected 'development', got: ", env3)
 
-	# Test 4: Check Production vs Candidate Bundle Identifiers
+	# Test 4: Check Production vs Development Bundle Identifiers
 	var prod_plist_path = "/Applications/StudyCenterHub.app/Contents/Info.plist"
-	var candidate_plist_path = "/Users/johnboyte/Development/StudyCenterHub-Desktop/builds/StudyCenterHub-Desktop-Candidate.app/Contents/Info.plist"
+	var dev_plist_path = "/Users/johnboyte/Development/StudyCenterHub-Desktop/builds/StudyCenterHub-Desktop-Development.app/Contents/Info.plist"
 	var prod_bundle_id = "org.godotengine.studycenterhub"
-	var candidate_bundle_id = "org.godotengine.studycenterhub.candidate"
+	var dev_bundle_id = "org.godotengine.studycenterhub.development"
 	
-	if FileAccess.file_exists(prod_plist_path) and FileAccess.file_exists(candidate_plist_path):
+	if FileAccess.file_exists(prod_plist_path) and FileAccess.file_exists(dev_plist_path):
 		var f_prod = FileAccess.open(prod_plist_path, FileAccess.READ)
 		var p_text = f_prod.get_as_text()
 		f_prod.close()
 		
-		var f_cand = FileAccess.open(candidate_plist_path, FileAccess.READ)
-		var c_text = f_cand.get_as_text()
-		f_cand.close()
+		var f_dev = FileAccess.open(dev_plist_path, FileAccess.READ)
+		var c_text = f_dev.get_as_text()
+		f_dev.close()
 		
-		if p_text.contains(prod_bundle_id) and c_text.contains(candidate_bundle_id) and prod_bundle_id != candidate_bundle_id:
+		if p_text.contains(prod_bundle_id) and c_text.contains(dev_bundle_id) and prod_bundle_id != dev_bundle_id:
 			pass_count += 1
-			print("PASS 4/7: Production and Candidate bundle identifiers are verified distinct.")
+			print("PASS 4/7: Production and Development bundle identifiers are verified distinct.")
 		else:
 			print("FAIL 4/7: Bundle identifiers match or missing in Info.plist!")
 	else:
-		if prod_bundle_id != candidate_bundle_id:
+		if prod_bundle_id != dev_bundle_id:
 			pass_count += 1
-			print("PASS 4/7: Production and Candidate bundle identifiers differ.")
+			print("PASS 4/7: Production and Development bundle identifiers differ.")
 		else:
 			print("FAIL 4/7: Bundle identifiers are identical!")
 
