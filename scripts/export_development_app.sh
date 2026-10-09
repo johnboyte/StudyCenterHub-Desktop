@@ -48,7 +48,7 @@ if [ -f "$PROJECT_DIR/bin/libmac_wkwebview.dylib" ]; then
     echo "✅ Authoritative Native Dylib (Single Copy) Packaged at Contents/Frameworks/libmac_wkwebview.dylib"
 fi
 
-"$GODOT_BIN" --headless --path "$PROJECT_DIR" --export-pack "macOS" "$TARGET_PCK"
+"$GODOT_BIN" --headless --path "$PROJECT_DIR" -s scripts/pack_pck.gd -- "$TARGET_PCK"
 
 if [ -f "$TARGET_PCK" ]; then
     echo "✅ PCK File Created: $TARGET_PCK"
@@ -91,6 +91,8 @@ if [ -f "$TARGET_PCK" ]; then
 	<string>10.13.0</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>StudyCenterHub uses the camera to capture profile photos during registration and check-in.</string>
 </dict>
 </plist>
 EOF

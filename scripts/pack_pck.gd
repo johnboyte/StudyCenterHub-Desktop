@@ -1,12 +1,17 @@
 extends SceneTree
 
 func _init() -> void:
+	var args = OS.get_cmdline_user_args()
+	var pck_path = "/Users/johnboyte/Development/StudyCenterHub-Desktop/builds/StudyCenterHub-Desktop-Development.pck"
+	if args.size() > 0 and args[0] != "":
+		pck_path = args[0]
+		
 	print("==========================================================")
-	print("PACKING PRODUCTION PCK USING NATIVE GODOT PCKPACKER")
+	print("PACKING PCK USING NATIVE GODOT PCKPACKER")
+	print("Target PCK: ", pck_path)
 	print("==========================================================")
 	
 	var packer = PCKPacker.new()
-	var pck_path = "/Users/johnboyte/Development/StudyCenterHub-Desktop/builds/StudyCenterHub-Desktop-Production.pck"
 	var err = packer.pck_start(pck_path)
 	if err != OK:
 		print("FAIL: pck_start failed with error code: ", err)
@@ -17,15 +22,6 @@ func _init() -> void:
 	packer.flush()
 	
 	print("✓ PASS: Successfully packed ", files_added, " project files into: ", pck_path)
-	
-	# Copy to installed app bundle
-	var dest_pck = "/Applications/StudyCenterHub.app/Contents/Resources/StudyCenterHub-Desktop-Production.pck"
-	var copy_err = DirAccess.copy_absolute(pck_path, dest_pck)
-	if copy_err == OK:
-		print("✓ PASS: Successfully updated installed Production PCK at: ", dest_pck)
-	else:
-		print("FAIL: Failed to copy PCK to installed app: ", copy_err)
-		
 	print("==========================================================")
 	quit(0)
 

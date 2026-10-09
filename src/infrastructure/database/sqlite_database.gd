@@ -36,23 +36,14 @@ func _init(path: String = "") -> void:
 
 static func resolve_environment(explicit_env: String, exec_path: String, cmdline_args: Array) -> String:
 	var clean_env = explicit_env.to_lower().strip_edges()
-	if clean_env == "production" or clean_env == "staging" or clean_env == "development":
+	if clean_env == "production" or clean_env == "development":
 		return clean_env
 	
 	var full_context = (exec_path + " " + " ".join(cmdline_args)).to_lower()
 	
-	# Candidate/staging or explicit dev app bundle targets check
-	if full_context.contains("studycenterhub-desktop-candidate") or full_context.contains("studycenterhub-desktop-rc1"):
-		return "staging"
-	if full_context.contains("studycenterhub-desktop-development"):
-		return "development"
-
 	# Canonical installed Production application or Production build artifact check
 	if full_context.contains("/applications/studycenterhub.app") or full_context.contains("studycenterhub-desktop-production") or full_context.contains("studycenterhub – production"):
 		return "production"
-	
-	if full_context.contains("staging") or full_context.contains("rc1"):
-		return "staging"
 	
 	return "development"
 

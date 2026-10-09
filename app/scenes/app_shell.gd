@@ -239,8 +239,6 @@ func _apply_window_title() -> void:
 	)
 	if env_mode == "production":
 		DisplayServer.window_set_title("StudyCenterHub - Desktop")
-	elif env_mode == "staging":
-		DisplayServer.window_set_title("StudyCenterHub - Desktop (Staging)")
 	else:
 		DisplayServer.window_set_title("StudyCenterHub - Desktop (Development)")
 	
@@ -371,8 +369,6 @@ func _apply_pd008_theme_styles() -> void:
 
 	if env == "production":
 		badge_st.bg_color = Color(0.18, 0.49, 0.35, 1.0) # Forest Green #2E7D56
-	elif env == "staging":
-		badge_st.bg_color = Color(0.88, 0.55, 0.11, 1.0) # Warm Amber/Orange #DF8C1B
 	else:
 		badge_st.bg_color = Color(0.20, 0.38, 0.65, 1.0) # Professional Blue #3461A6
 
