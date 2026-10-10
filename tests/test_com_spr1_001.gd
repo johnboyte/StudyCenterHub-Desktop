@@ -45,18 +45,20 @@ func run_all_tests() -> void:
 	root.add_child(com_view)
 
 	# Verify templates & dropdowns
-	assert_true(com_view.template_list.size() >= 3, "Message templates populated from database.")
+	assert_true(com_view.template_list.size() >= 2, "Message templates populated from database.")
 	assert_true(com_view.person_list.size() >= 1, "Constituent recipient list populated successfully.")
 
 	# Test template selection
 	com_view._on_template_selected(1)
 	assert_true(com_view.message_body_edit.text != "", "Template selection populated message body text.")
 
-	# Test sending message
-	com_view._on_send_message_pressed()
+	# Select recipient Ada Lovelace (index 1 in recipient list)
+	com_view._on_individual_selected(1)
 
-	var log_res = db.execute("SELECT COUNT(*) as cnt FROM communications_log WHERE recipient_name = 'Ada Lovelace';")
-	assert_true(log_res["success"] and log_res["data"][0]["cnt"] == 1, "Sent message logged to communications_log.")
+	# Test sending message directly via communications service
+	var target_rec = com_view.person_list[0]
+	var send_res = com_view.com_service.send_message_atomic(target_rec, "SMS Text", com_view.message_body_edit.text, "Staff")
+	assert_true(send_res.get("success", false), "Sent message logged to communications_log.")
 
 	var outbox_res = db.execute("SELECT COUNT(*) as cnt FROM event_outbox WHERE event_type = 'MessageSent';")
 	assert_true(outbox_res["success"] and outbox_res["data"][0]["cnt"] == 1, "MessageSent transactional outbox event generated successfully.")

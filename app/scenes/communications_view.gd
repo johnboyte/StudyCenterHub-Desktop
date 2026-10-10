@@ -574,11 +574,25 @@ func _setup_communicate_send_composer() -> void:
 			composer_card = get_node("MarginContainer/MainVBox/ComposerCard") as PanelContainer
 	if not composer_card: return
 
-	if not channel_dropdown and has_node("%ChannelDropdown"): channel_dropdown = get_node("%ChannelDropdown") as OptionButton
-	if not recipient_dropdown and has_node("%RecipientDropdown"): recipient_dropdown = get_node("%RecipientDropdown") as OptionButton
-	if not template_dropdown and has_node("%TemplateDropdown"): template_dropdown = get_node("%TemplateDropdown") as OptionButton
-	if not btn_send_message and has_node("%BtnSendMessage"): btn_send_message = get_node("%BtnSendMessage") as Button
-	if not message_body_edit and has_node("%MessageBodyEdit"): message_body_edit = get_node("%MessageBodyEdit") as TextEdit
+	if not channel_dropdown or not is_instance_valid(channel_dropdown):
+		if has_node("%ChannelDropdown"): channel_dropdown = get_node("%ChannelDropdown") as OptionButton
+		else: channel_dropdown = OptionButton.new()
+
+	if not recipient_dropdown or not is_instance_valid(recipient_dropdown):
+		if has_node("%RecipientDropdown"): recipient_dropdown = get_node("%RecipientDropdown") as OptionButton
+		else: recipient_dropdown = OptionButton.new()
+
+	if not template_dropdown or not is_instance_valid(template_dropdown):
+		if has_node("%TemplateDropdown"): template_dropdown = get_node("%TemplateDropdown") as OptionButton
+		else: template_dropdown = OptionButton.new()
+
+	if not btn_send_message or not is_instance_valid(btn_send_message):
+		if has_node("%BtnSendMessage"): btn_send_message = get_node("%BtnSendMessage") as Button
+		else: btn_send_message = Button.new()
+
+	if not message_body_edit or not is_instance_valid(message_body_edit):
+		if has_node("%MessageBodyEdit"): message_body_edit = get_node("%MessageBodyEdit") as TextEdit
+		else: message_body_edit = TextEdit.new()
 	var composer_vbox = composer_card.get_node_or_null("ComposerMargin/ComposerVBox") as VBoxContainer
 	if not composer_vbox: return
 
@@ -842,8 +856,10 @@ func _setup_communicate_send_composer() -> void:
 func _reparent_node(node: Node, new_parent: Node) -> void:
 	if not node or not new_parent: return
 	var p = node.get_parent()
+	if p == new_parent: return
 	if p:
 		p.remove_child(node)
+	node.owner = null
 	new_parent.add_child(node)
 
 func _setup_attachment_area(parent_vbox: VBoxContainer) -> void:
@@ -1208,6 +1224,19 @@ func _populate_dropdowns() -> void:
 				var ln = str(p.get("last_name", ""))
 				var name = (fn + " " + ln).strip_edges() + " (" + str(p.get("human_id", "")) + ")"
 				recipient_dropdown.add_item(name, i + 1)
+
+	# Populate Message Templates dropdown
+	if template_dropdown:
+		template_dropdown.clear()
+		template_list.clear()
+		template_dropdown.add_item("-- Select Message Template --", 0)
+		var tmpls = com_service.get_templates() if com_service else []
+		for tmpl in tmpls:
+			if str(tmpl.get("title", "")) == "Parent Check-In Alert":
+				continue
+			template_list.append(tmpl)
+			var title = str(tmpl.get("title", "Template"))
+			template_dropdown.add_item(title, template_list.size())
 
 	_refresh_checkbox_list()
 	_refresh_individual_chips()
