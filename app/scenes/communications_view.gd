@@ -565,8 +565,6 @@ func _get_active_theme_color() -> Color:
 	return Color(0.596, 0.192, 0.255, 1.0)
 
 func _setup_communicate_send_composer() -> void:
-	if audience_type_dropdown and is_instance_valid(audience_type_dropdown):
-		return
 	if not composer_card:
 		if has_node("%ComposerCard"):
 			composer_card = get_node("%ComposerCard") as PanelContainer
@@ -574,272 +572,86 @@ func _setup_communicate_send_composer() -> void:
 			composer_card = get_node("MarginContainer/MainVBox/ComposerCard") as PanelContainer
 	if not composer_card: return
 
-	if not channel_dropdown or not is_instance_valid(channel_dropdown):
-		if has_node("%ChannelDropdown"): channel_dropdown = get_node("%ChannelDropdown") as OptionButton
-		else: channel_dropdown = OptionButton.new()
+	if has_node("%AudienceTypeDropdown"): audience_type_dropdown = get_node("%AudienceTypeDropdown") as OptionButton
+	if has_node("%RecipientDropdown"): recipient_dropdown = get_node("%RecipientDropdown") as OptionButton
+	if has_node("%RealLifeStatusDropdown"): real_life_status_dropdown = get_node("%RealLifeStatusDropdown") as OptionButton
+	if has_node("%PathwayDropdown"): pathway_dropdown = get_node("%PathwayDropdown") as OptionButton
+	if has_node("%SessionDropdown"): session_dropdown = get_node("%SessionDropdown") as OptionButton
 
-	if not recipient_dropdown or not is_instance_valid(recipient_dropdown):
-		if has_node("%RecipientDropdown"): recipient_dropdown = get_node("%RecipientDropdown") as OptionButton
-		else: recipient_dropdown = OptionButton.new()
+	if has_node("%IndividualSelectionVBox"): individual_selection_vbox = get_node("%IndividualSelectionVBox") as VBoxContainer
+	if has_node("%RecipientSearchInput"): recipient_search_input = get_node("%RecipientSearchInput") as LineEdit
+	if has_node("%BtnSelectAllShown"): btn_select_all_shown = get_node("%BtnSelectAllShown") as Button
+	if has_node("%BtnClearSelection"): btn_clear_selection = get_node("%BtnClearSelection") as Button
+	if has_node("%CheckboxScrollContainer"): checkbox_scroll_container = get_node("%CheckboxScrollContainer") as ScrollContainer
+	if has_node("%CheckboxListVBox"): checkbox_list_vbox = get_node("%CheckboxListVBox") as VBoxContainer
 
-	if not template_dropdown or not is_instance_valid(template_dropdown):
-		if has_node("%TemplateDropdown"): template_dropdown = get_node("%TemplateDropdown") as OptionButton
-		else: template_dropdown = OptionButton.new()
+	if has_node("%ChipsScrollContainer"): chips_scroll_container = get_node("%ChipsScrollContainer") as ScrollContainer
+	if has_node("%IndividualChipsContainer"): individual_chips_container = get_node("%IndividualChipsContainer") as HFlowContainer
 
-	if not btn_send_message or not is_instance_valid(btn_send_message):
-		if has_node("%BtnSendMessage"): btn_send_message = get_node("%BtnSendMessage") as Button
-		else: btn_send_message = Button.new()
+	if has_node("%ChannelDropdown"): channel_dropdown = get_node("%ChannelDropdown") as OptionButton
+	if has_node("%AudCountLabel"): aud_count_label = get_node("%AudCountLabel") as Label
+	if has_node("%BtnReviewRecipients"): btn_review_recipients = get_node("%BtnReviewRecipients") as Button
 
-	if not message_body_edit or not is_instance_valid(message_body_edit):
-		if has_node("%MessageBodyEdit"): message_body_edit = get_node("%MessageBodyEdit") as TextEdit
-		else: message_body_edit = TextEdit.new()
-	var composer_vbox = composer_card.get_node_or_null("ComposerMargin/ComposerVBox") as VBoxContainer
-	if not composer_vbox: return
+	if has_node("%TemplateDropdown"): template_dropdown = get_node("%TemplateDropdown") as OptionButton
+	if has_node("%BtnSendMessage"): btn_send_message = get_node("%BtnSendMessage") as Button
+	if has_node("%BtnScheduleMessage"): btn_schedule_message = get_node("%BtnScheduleMessage") as Button
 
-	for child in composer_vbox.get_children():
-		composer_vbox.remove_child(child)
+	if has_node("%MessageBodyEdit"): message_body_edit = get_node("%MessageBodyEdit") as TextEdit
+	if has_node("%CharCountLabel"): char_count_label = get_node("%CharCountLabel") as Label
 
-	composer_vbox.add_theme_constant_override("separation", 10)
+	_apply_composer_styles_and_items()
 
-	# Top Header Label
-	var title_lbl = Label.new()
-	title_lbl.text = "📢 COMMUNICATE / SEND"
-	title_lbl.add_theme_font_size_override("font_size", 17)
-	title_lbl.add_theme_color_override("font_color", _get_active_theme_color())
-	composer_vbox.add_child(title_lbl)
+func _apply_composer_styles_and_items() -> void:
+	if audience_type_dropdown and audience_type_dropdown.item_count == 0:
+		audience_type_dropdown.add_item("Individual", 0)
+		audience_type_dropdown.add_item("Real Life", 1)
+		audience_type_dropdown.add_item("Pathway", 2)
+		audience_type_dropdown.add_item("Session", 3)
+		audience_type_dropdown.add_item("Volunteers", 4)
+		audience_type_dropdown.add_item("Checked In Today", 5)
+		audience_type_dropdown.add_item("All Active People", 6)
+		_style_dropdown_control(audience_type_dropdown)
 
-	# Row 1: Audience Type & Sub-Selectors
-	var row1 = HBoxContainer.new()
-	row1.add_theme_constant_override("separation", 10)
+	if real_life_status_dropdown and real_life_status_dropdown.item_count == 0:
+		real_life_status_dropdown.add_item("Status: Both (Interested & In Real Life)", 0)
+		real_life_status_dropdown.add_item("Status: Interested", 1)
+		real_life_status_dropdown.add_item("Status: In Real Life", 2)
+		_style_dropdown_control(real_life_status_dropdown)
 
-	var aud_type_lbl = Label.new()
-	aud_type_lbl.text = "Audience Type:"
-	aud_type_lbl.add_theme_font_size_override("font_size", 14)
-	aud_type_lbl.add_theme_color_override("font_color", Color(0.20, 0.25, 0.32, 1.0))
-	row1.add_child(aud_type_lbl)
+	if recipient_search_input:
+		_style_input_control(recipient_search_input, 13)
+	if btn_select_all_shown:
+		_style_secondary_button(btn_select_all_shown)
+	if btn_clear_selection:
+		_style_secondary_button(btn_clear_selection)
+	if recipient_dropdown:
+		_style_dropdown_control(recipient_dropdown)
+	if channel_dropdown:
+		_style_dropdown_control(channel_dropdown)
+	if btn_review_recipients:
+		_style_secondary_button(btn_review_recipients)
+	if template_dropdown:
+		_style_dropdown_control(template_dropdown)
+	if btn_send_message:
+		_style_primary_button(btn_send_message)
+	if btn_schedule_message:
+		_style_disabled_button(btn_schedule_message)
+		if not btn_schedule_message.pressed.is_connected(_on_schedule_message_pressed):
+			btn_schedule_message.pressed.connect(_on_schedule_message_pressed)
 
-	audience_type_dropdown = OptionButton.new()
-	audience_type_dropdown.custom_minimum_size = Vector2(180, 38)
-	audience_type_dropdown.add_item("Individual", 0)
-	audience_type_dropdown.add_item("Real Life", 1)
-	audience_type_dropdown.add_item("Pathway", 2)
-	audience_type_dropdown.add_item("Session", 3)
-	audience_type_dropdown.add_item("Volunteers", 4)
-	audience_type_dropdown.add_item("Checked In Today", 5)
-	audience_type_dropdown.add_item("All Active People", 6)
-	_style_dropdown_control(audience_type_dropdown)
-	row1.add_child(audience_type_dropdown)
-
-	# Individual Search Dropdown
-	_style_dropdown_control(recipient_dropdown)
-	recipient_dropdown.custom_minimum_size = Vector2(240, 38)
-	recipient_dropdown.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_reparent_node(recipient_dropdown, row1)
-
-	# Real Life Status Dropdown
-	real_life_status_dropdown = OptionButton.new()
-	real_life_status_dropdown.custom_minimum_size = Vector2(260, 38)
-	real_life_status_dropdown.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	real_life_status_dropdown.add_item("Status: Both (Interested & In Real Life)", 0)
-	real_life_status_dropdown.add_item("Status: Interested", 1)
-	real_life_status_dropdown.add_item("Status: In Real Life", 2)
-	real_life_status_dropdown.visible = false
-	_style_dropdown_control(real_life_status_dropdown)
-	row1.add_child(real_life_status_dropdown)
-
-	# Pathway Dropdown
-	pathway_dropdown = OptionButton.new()
-	pathway_dropdown.custom_minimum_size = Vector2(280, 38)
-	pathway_dropdown.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	pathway_dropdown.visible = false
-	_style_dropdown_control(pathway_dropdown)
-	row1.add_child(pathway_dropdown)
-
-	# Session Dropdown
-	session_dropdown = OptionButton.new()
-	session_dropdown.custom_minimum_size = Vector2(280, 38)
-	session_dropdown.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	session_dropdown.visible = false
-	_style_dropdown_control(session_dropdown)
-	row1.add_child(session_dropdown)
-
-	composer_vbox.add_child(row1)
-
-	# Row 1.2: Checkbox Recipient Selection Section (Audience = Individual)
-	individual_selection_vbox = VBoxContainer.new()
-	individual_selection_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	individual_selection_vbox.add_theme_constant_override("separation", 6)
-
-	var search_bar_hbox = HBoxContainer.new()
-	search_bar_hbox.add_theme_constant_override("separation", 8)
-
-	recipient_search_input = LineEdit.new()
-	recipient_search_input.placeholder_text = "🔍 Search constituents by name, ID, phone, or email..."
-	recipient_search_input.custom_minimum_size = Vector2(240, 34)
-	recipient_search_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	recipient_search_input.caret_blink = true
-	recipient_search_input.add_theme_color_override("caret_color", Color(0.12, 0.16, 0.22, 1.0))
-	_style_input_control(recipient_search_input, 13)
-	search_bar_hbox.add_child(recipient_search_input)
-
-	btn_select_all_shown = Button.new()
-	btn_select_all_shown.text = "Select All Shown"
-	btn_select_all_shown.custom_minimum_size = Vector2(120, 34)
-	_style_secondary_button(btn_select_all_shown)
-	search_bar_hbox.add_child(btn_select_all_shown)
-
-	btn_clear_selection = Button.new()
-	btn_clear_selection.text = "Clear Selection"
-	btn_clear_selection.custom_minimum_size = Vector2(110, 34)
-	_style_secondary_button(btn_clear_selection)
-	search_bar_hbox.add_child(btn_clear_selection)
-
-	individual_selection_vbox.add_child(search_bar_hbox)
-
-	checkbox_scroll_container = ScrollContainer.new()
-	checkbox_scroll_container.custom_minimum_size = Vector2(0, 140)
-	checkbox_scroll_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	checkbox_scroll_container.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	checkbox_scroll_container.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-	
-	var scroll_st = StyleBoxFlat.new()
-	scroll_st.bg_color = Color(0.98, 0.99, 1.0, 1.0)
-	scroll_st.border_width_left = 1; scroll_st.border_width_top = 1; scroll_st.border_width_right = 1; scroll_st.border_width_bottom = 1
-	scroll_st.border_color = Color(0.85, 0.88, 0.92, 1.0)
-	scroll_st.corner_radius_top_left = 6; scroll_st.corner_radius_top_right = 6; scroll_st.corner_radius_bottom_left = 6; scroll_st.corner_radius_bottom_right = 6
-	scroll_st.content_margin_left = 8; scroll_st.content_margin_top = 6; scroll_st.content_margin_right = 8; scroll_st.content_margin_bottom = 6
-	checkbox_scroll_container.add_theme_stylebox_override("panel", scroll_st)
-
-	checkbox_list_vbox = VBoxContainer.new()
-	checkbox_list_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	checkbox_list_vbox.add_theme_constant_override("separation", 4)
-	checkbox_scroll_container.add_child(checkbox_list_vbox)
-
-	individual_selection_vbox.add_child(checkbox_scroll_container)
-
-	composer_vbox.add_child(individual_selection_vbox)
-
-	# Row 1.5: Selected Individual Chips Scroll & Flow Container
-	chips_scroll_container = ScrollContainer.new()
-	chips_scroll_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	chips_scroll_container.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	chips_scroll_container.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-	chips_scroll_container.custom_minimum_size = Vector2(0, 0)
-	chips_scroll_container.visible = false
-
-	individual_chips_container = HFlowContainer.new()
-	individual_chips_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	individual_chips_container.add_theme_constant_override("h_separation", 8)
-	individual_chips_container.add_theme_constant_override("v_separation", 8)
-	chips_scroll_container.add_child(individual_chips_container)
-
-	composer_vbox.add_child(chips_scroll_container)
-
-	# Row 2: Delivery Channel, Recipient Summary & Review Button
-	var row2 = HBoxContainer.new()
-	row2.add_theme_constant_override("separation", 12)
-
-	var ch_lbl = Label.new()
-	ch_lbl.text = "Channel:"
-	ch_lbl.add_theme_font_size_override("font_size", 14)
-	ch_lbl.add_theme_color_override("font_color", Color(0.20, 0.25, 0.32, 1.0))
-	row2.add_child(ch_lbl)
-
-	_style_dropdown_control(channel_dropdown)
-	channel_dropdown.custom_minimum_size = Vector2(180, 38)
-	_reparent_node(channel_dropdown, row2)
-
-	aud_count_label = Label.new()
-	aud_count_label.text = "0 Eligible Recipients | 0 Excluded"
-	aud_count_label.add_theme_font_size_override("font_size", 14)
-	aud_count_label.add_theme_color_override("font_color", Color(0.18, 0.45, 0.85, 1.0))
-	aud_count_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row2.add_child(aud_count_label)
-
-	btn_review_recipients = Button.new()
-	btn_review_recipients.text = "👁️ Review Recipients"
-	btn_review_recipients.custom_minimum_size = Vector2(170, 38)
-	_style_secondary_button(btn_review_recipients)
-	row2.add_child(btn_review_recipients)
-
-	composer_vbox.add_child(row2)
-
-	# Row 3: Template & Action Buttons
-	var row3 = HBoxContainer.new()
-	row3.add_theme_constant_override("separation", 10)
-
-	var tmpl_lbl = Label.new()
-	tmpl_lbl.text = "Template:"
-	tmpl_lbl.add_theme_font_size_override("font_size", 14)
-	tmpl_lbl.add_theme_color_override("font_color", Color(0.20, 0.25, 0.32, 1.0))
-	row3.add_child(tmpl_lbl)
-
-	_style_dropdown_control(template_dropdown)
-	template_dropdown.custom_minimum_size = Vector2(220, 38)
-	template_dropdown.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_reparent_node(template_dropdown, row3)
-
-	btn_send_message.text = "✉️ Send Message"
-	btn_send_message.custom_minimum_size = Vector2(155, 38)
-	_style_primary_button(btn_send_message)
-	_reparent_node(btn_send_message, row3)
-
-	btn_schedule_message = Button.new()
-	btn_schedule_message.text = "🕒 Schedule Message"
-	btn_schedule_message.custom_minimum_size = Vector2(165, 38)
-	btn_schedule_message.disabled = true
-	btn_schedule_message.tooltip_text = "Type a message or attach an image to schedule"
-	_style_disabled_button(btn_schedule_message)
-	btn_schedule_message.pressed.connect(_on_schedule_message_pressed)
-	row3.add_child(btn_schedule_message)
-
-	composer_vbox.add_child(row3)
-
-	# Row 4: Message Body TextEdit (narrow ~660px writing area & live character count)
 	if message_body_edit:
-		var msg_section = VBoxContainer.new()
-		msg_section.add_theme_constant_override("separation", 6)
-		msg_section.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		msg_section.custom_minimum_size = Vector2(660, 0)
-
-		var msg_hdr_hbox = HBoxContainer.new()
-		msg_hdr_hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		msg_hdr_hbox.custom_minimum_size = Vector2(660, 0)
-
-		var msg_hdr_lbl = Label.new()
-		msg_hdr_lbl.text = "Message:"
-		msg_hdr_lbl.add_theme_font_size_override("font_size", 14)
-		msg_hdr_lbl.add_theme_color_override("font_color", Color(0.20, 0.25, 0.32, 1.0))
-		msg_hdr_hbox.add_child(msg_hdr_lbl)
-
-
-		var msg_hdr_spacer = Control.new()
-		msg_hdr_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		msg_hdr_spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		msg_hdr_hbox.add_child(msg_hdr_spacer)
-
-		msg_section.add_child(msg_hdr_hbox)
-
 		message_body_edit.custom_minimum_size = Vector2(660, 140)
-		message_body_edit.placeholder_text = "Type your message body or select a pre-built template..."
 		message_body_edit.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
 		message_body_edit.scroll_fit_content_height = false
 		message_body_edit.caret_blink = true
 		message_body_edit.add_theme_color_override("caret_color", Color(0.12, 0.16, 0.22, 1.0))
-		_reparent_node(message_body_edit, msg_section)
 
 		if SpellingAssistanceHelperScript:
 			SpellingAssistanceHelperScript.attach_inline_spell_check(message_body_edit)
 
 		var env_prefill = OS.get_environment("STUDYCENTERHUB_PREFILL_COMMS_MSG")
-		if env_prefill != "":
+		if env_prefill != "" and message_body_edit.text == "":
 			message_body_edit.text = env_prefill
-
-		if not char_count_label:
-			char_count_label = Label.new()
-			char_count_label.add_theme_font_size_override("font_size", 13)
-			char_count_label.add_theme_color_override("font_color", Color(0.40, 0.45, 0.55, 1.0))
-		_reparent_node(char_count_label, msg_section)
 
 		if not message_body_edit.text_changed.is_connected(_update_character_count):
 			message_body_edit.text_changed.connect(func():
@@ -847,11 +659,10 @@ func _setup_communicate_send_composer() -> void:
 				_update_composer_validation()
 			)
 
-		composer_vbox.add_child(msg_section)
-		_update_character_count()
-
-	# Row 5: Attachment Area
-	_setup_attachment_area(composer_vbox)
+	var composer_vbox = composer_card.get_node_or_null("ComposerMargin/ComposerVBox") as VBoxContainer
+	if composer_vbox:
+		_setup_attachment_area(composer_vbox)
+	_update_character_count()
 
 func _reparent_node(node: Node, new_parent: Node) -> void:
 	if not node or not new_parent: return

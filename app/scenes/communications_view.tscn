@@ -59,53 +59,206 @@ theme_override_constants/margin_bottom = 16
 [node name="ComposerVBox" type="VBoxContainer" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin"]
 layout_mode = 2
 size_flags_horizontal = 3
+theme_override_constants/separation = 10
+
+[node name="TitleLabel" type="Label" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.596, 0.192, 0.255, 1)
+theme_override_font_sizes/font_size = 17
+text = "📢 COMMUNICATE / SEND"
+
+[node name="Row1HBox" type="HBoxContainer" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="AudienceTypeLabel" type="Label" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/Row1HBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.2, 0.25, 0.32, 1)
+theme_override_font_sizes/font_size = 14
+text = "Audience Type:"
+
+[node name="AudienceTypeDropdown" type="OptionButton" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/Row1HBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(180, 38)
+layout_mode = 2
+
+[node name="RecipientDropdown" type="OptionButton" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/Row1HBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(240, 38)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="RealLifeStatusDropdown" type="OptionButton" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/Row1HBox"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(260, 38)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="PathwayDropdown" type="OptionButton" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/Row1HBox"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(280, 38)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="SessionDropdown" type="OptionButton" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/Row1HBox"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(280, 38)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="IndividualSelectionVBox" type="VBoxContainer" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 6
+
+[node name="SearchBarHBox" type="HBoxContainer" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/IndividualSelectionVBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="RecipientSearchInput" type="LineEdit" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/IndividualSelectionVBox/SearchBarHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(240, 34)
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "🔍 Search constituents by name, ID, phone, or email..."
+
+[node name="BtnSelectAllShown" type="Button" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/IndividualSelectionVBox/SearchBarHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(120, 34)
+layout_mode = 2
+text = "Select All Shown"
+
+[node name="BtnClearSelection" type="Button" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/IndividualSelectionVBox/SearchBarHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(110, 34)
+layout_mode = 2
+text = "Clear Selection"
+
+[node name="CheckboxScrollContainer" type="ScrollContainer" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/IndividualSelectionVBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 140)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="CheckboxListVBox" type="VBoxContainer" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/IndividualSelectionVBox/CheckboxScrollContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+
+[node name="ChipsScrollContainer" type="ScrollContainer" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="IndividualChipsContainer" type="HFlowContainer" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/ChipsScrollContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/h_separation = 8
+theme_override_constants/v_separation = 8
+
+[node name="Row2HBox" type="HBoxContainer" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox"]
+layout_mode = 2
 theme_override_constants/separation = 12
 
-[node name="TopHBox" type="HBoxContainer" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox"]
+[node name="ChannelLabel" type="Label" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/Row2HBox"]
 layout_mode = 2
-size_flags_horizontal = 3
-theme_override_constants/separation = 12
-
-[node name="ChannelDropdown" type="OptionButton" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/TopHBox"]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(150, 40)
-layout_mode = 2
-size_flags_horizontal = 3
-size_flags_stretch_ratio = 0.8
+theme_override_colors/font_color = Color(0.2, 0.25, 0.32, 1)
 theme_override_font_sizes/font_size = 14
+text = "Channel:"
 
-[node name="RecipientDropdown" type="OptionButton" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/TopHBox"]
+[node name="ChannelDropdown" type="OptionButton" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/Row2HBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(300, 40)
+custom_minimum_size = Vector2(180, 38)
+layout_mode = 2
+
+[node name="AudCountLabel" type="Label" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/Row2HBox"]
+unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
-size_flags_stretch_ratio = 2.4
+theme_override_colors/font_color = Color(0.18, 0.45, 0.85, 1)
 theme_override_font_sizes/font_size = 14
+text = "0 Eligible Recipients | 0 Excluded"
 
-[node name="TemplateDropdown" type="OptionButton" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/TopHBox"]
+[node name="BtnReviewRecipients" type="Button" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/Row2HBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(210, 40)
+custom_minimum_size = Vector2(170, 38)
+layout_mode = 2
+text = "👁️ Review Recipients"
+
+[node name="Row3HBox" type="HBoxContainer" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="TemplateLabel" type="Label" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/Row3HBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.2, 0.25, 0.32, 1)
+theme_override_font_sizes/font_size = 14
+text = "Template:"
+
+[node name="TemplateDropdown" type="OptionButton" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/Row3HBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(220, 38)
 layout_mode = 2
 size_flags_horizontal = 3
-size_flags_stretch_ratio = 1.2
-theme_override_font_sizes/font_size = 14
 
-[node name="BtnSendMessage" type="Button" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/TopHBox"]
+[node name="BtnSendMessage" type="Button" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/Row3HBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(155, 40)
+custom_minimum_size = Vector2(155, 38)
+layout_mode = 2
+text = "✉️ Send Message"
+
+[node name="BtnScheduleMessage" type="Button" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/Row3HBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(165, 38)
+layout_mode = 2
+disabled = true
+text = "🕒 Schedule Message"
+
+[node name="MessageSectionVBox" type="VBoxContainer" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(660, 0)
 layout_mode = 2
 size_flags_horizontal = 3
-size_flags_stretch_ratio = 0.8
-theme_override_font_sizes/font_size = 14
-text = "📤 Send Message"
+theme_override_constants/separation = 6
 
-[node name="MessageBodyEdit" type="TextEdit" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox"]
+[node name="MessageHBox" type="HBoxContainer" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/MessageSectionVBox"]
+custom_minimum_size = Vector2(660, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="MessageLabel" type="Label" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/MessageSectionVBox/MessageHBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.2, 0.25, 0.32, 1)
+theme_override_font_sizes/font_size = 14
+text = "Message:"
+
+[node name="MessageSpacer" type="Control" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/MessageSectionVBox/MessageHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="MessageBodyEdit" type="TextEdit" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/MessageSectionVBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 90)
+custom_minimum_size = Vector2(660, 140)
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_font_sizes/font_size = 14
-placeholder_text = "Type your message body or select a pre-built template above..."
+placeholder_text = "Type your message body or select a pre-built template..."
+wrap_mode = 1
+
+[node name="CharCountLabel" type="Label" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/MessageSectionVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.4, 0.45, 0.55, 1)
+theme_override_font_sizes/font_size = 13
+text = "0 characters • Est. 0 SMS segments"
 
 [node name="VoicemailCard" type="PanelContainer" parent="MarginContainer/MainVBox"]
 unique_name_in_owner = true
