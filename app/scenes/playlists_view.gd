@@ -10,6 +10,7 @@ extends Control
 const PlaylistsServiceScript = preload("res://src/domain/playlists/playlists_service.gd")
 const YouTubeOAuthServiceScript = preload("res://src/domain/playlists/youtube_oauth_service.gd")
 const YouTubePlaylistSyncServiceScript = preload("res://src/domain/playlists/youtube_playlist_sync_service.gd")
+const NativePlayerBridge = preload("res://src/infrastructure/native/native_player_bridge.gd")
 
 var db: RefCounted:
 	set(value):

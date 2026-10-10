@@ -720,7 +720,8 @@ class SpellingSyntaxHighlighter extends SyntaxHighlighter:
 		if line_str.strip_edges() == "":
 			return {}
 
-		var issues = SpellingAssistanceHelper.check_text(line_str)
+		const HelperScript = preload("res://src/ui/components/spelling_assistance_helper.gd")
+		var issues = HelperScript.check_text(line_str)
 		if issues.size() == 0:
 			return {}
 

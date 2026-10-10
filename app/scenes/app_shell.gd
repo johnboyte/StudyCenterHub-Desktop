@@ -237,10 +237,11 @@ func _apply_window_title() -> void:
 		OS.get_executable_path(),
 		OS.get_cmdline_args()
 	)
+	var build_tag = " [v5.5.0 • ce49bd4]"
 	if env_mode == "production":
-		DisplayServer.window_set_title("StudyCenterHub - Desktop")
+		DisplayServer.window_set_title("StudyCenterHub - Desktop" + build_tag)
 	else:
-		DisplayServer.window_set_title("StudyCenterHub - Desktop (Development)")
+		DisplayServer.window_set_title("StudyCenterHub - Desktop (Development)" + build_tag)
 	
 	if not _twilio_config_cached and db:
 		_twilio_config_cached = true
@@ -349,7 +350,7 @@ func _apply_pd008_theme_styles() -> void:
 	)
 
 	var env_label = Label.new()
-	env_label.text = env.to_upper()
+	env_label.text = env.to_upper() + " [v5.5.0 • ce49bd4]"
 	env_label.add_theme_font_size_override("font_size", 12)
 	env_label.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
 	env_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
