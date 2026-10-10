@@ -687,7 +687,7 @@ static NSDragOperation custom_draggingUpdated(id self, SEL _cmd, id<NSDraggingIn
 static BOOL custom_performDragOperation(id self, SEL _cmd, id<NSDraggingInfo> sender) {
     NSPasteboard *pboard = [sender draggingPasteboard];
     NSString *typesStr = [[pboard types] componentsJoinedByString:@", "];
-    NSLog(@"[NATIVE_LOG] EXTERNAL DROP CALLBACK RECEIVED (%@) types=%@", [self className], typesStr);
+    NSLog(@"[NATIVE_LOG] 🚀 EXTERNAL DROP CALLBACK RECEIVED (%@) types=%@", [self className], typesStr);
     
     NSString *rawType = @"unknown";
     NSString *extracted = extractURLFromPasteboard(pboard, &rawType);
@@ -708,9 +708,14 @@ static BOOL custom_performDragOperation(id self, SEL _cmd, id<NSDraggingInfo> se
             (float)bounds.size.height
         });
         
-        NSLog(@"[NATIVE_LOG] EXTERNAL PAYLOAD TYPE: %@ payload=%@", rawType, extracted);
-        NSLog(@"[NATIVE_LOG] EXTERNAL DROP RECEIVED type=%@ payload_len=%lu loc=(%.1f, %.1f)",
+        NSLog(@"[NATIVE_LOG] 🎯 EXTERNAL PAYLOAD TYPE: %@ payload=%@", rawType, extracted);
+        NSLog(@"[NATIVE_LOG] 🎯 EXTERNAL DROP RECEIVED type=%@ payload_len=%lu loc=(%.1f, %.1f)",
               rawType, (unsigned long)extracted.length, godot_x, godot_y);
+        
+        IMP orig = get_orig_imp([self class], _cmd);
+        if (orig) {
+            ((PerformDragIMP)orig)(self, _cmd, sender);
+        }
         return YES;
     }
     
@@ -902,6 +907,13 @@ static void ensure_external_drag_receiver() {
     if (mainWin) {
         g_diag_info.window_found = true;
         g_diag_info.main_window_ptr = [NSString stringWithFormat:@"%p", mainWin].UTF8String;
+        [mainWin registerForDraggedTypes:dragTypes];
+        if (mainWin.contentView) {
+            [mainWin.contentView registerForDraggedTypes:dragTypes];
+            setup_class_drag_swizzle([mainWin.contentView class]);
+        }
+        setup_class_drag_swizzle([mainWin class]);
+        NSLog(@"[NATIVE_LOG] 🟢 Registered mainWin (%p) and contentView (%@) for AppKit drag types", mainWin, mainWin.contentView ? [mainWin.contentView className] : @"nil");
     } else {
         g_diag_info.window_found = false;
         g_diag_info.main_window_ptr = "nil";
