@@ -88,6 +88,7 @@ var channel_mms_indicator: Label = null
 
 func _enter_tree() -> void:
 	NativePlayerBridgeScript.enable_external_drag()
+	NativePlayerBridgeScript.set_drag_box_visible(true)
 	var win = get_window()
 	if win and not win.files_dropped.is_connected(_on_window_files_dropped):
 		win.files_dropped.connect(_on_window_files_dropped)
@@ -95,6 +96,7 @@ func _enter_tree() -> void:
 func _ready() -> void:
 	add_to_group("sync_listeners")
 	NativePlayerBridgeScript.enable_external_drag()
+	NativePlayerBridgeScript.set_drag_box_visible(true)
 	_setup_communicate_send_composer()
 	_init_database()
 	_style_card()
@@ -1036,11 +1038,12 @@ func _on_window_files_dropped(files: PackedStringArray) -> void:
 
 func _open_image_file_dialog() -> void:
 	var dlg = FileDialog.new()
+	dlg.use_native_dialog = true
 	dlg.file_mode = FileDialog.FILE_MODE_OPEN_FILE
 	dlg.access = FileDialog.ACCESS_FILESYSTEM
-	dlg.add_filter("*.png, *.jpg, *.jpeg, *.webp, *.heic, *.heif", "Flyer / Image Files")
+	dlg.add_filter("*.png, *.jpg, *.jpeg, *.webp, *.heic, *.heif", "Flyer / Image Files (*.png, *.jpg, *.jpeg, *.webp, *.heic, *.heif)")
 	dlg.title = "Select Flyer or Graphic Image"
-	dlg.size = Vector2i(750, 500)
+	dlg.size = Vector2i(800, 550)
 	dlg.file_selected.connect(func(path: String):
 		_set_attached_image(path)
 		dlg.queue_free()

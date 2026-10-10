@@ -692,7 +692,7 @@ func switch_view(view_name: String, params: Dictionary = {}) -> bool:
 
 	current_view_name = view_name
 
-	if view_name != "playlists":
+	if view_name != "playlists" and view_name != "communications":
 		NativePlayerBridgeScript.set_drag_box_visible(false)
 
 	if view_name == "kiosk":

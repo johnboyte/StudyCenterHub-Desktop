@@ -438,11 +438,19 @@ func optimize_image_for_mms(file_path: String) -> String:
 			
 	return file_path
 
+func _clean_file_path(raw_path: String) -> String:
+	var path = raw_path.strip_edges()
+	if path.begins_with("file://"):
+		path = path.substr(7)
+	path = path.uri_decode()
+	return path
+
 func validate_attachment(file_path: String, channel: String) -> Dictionary:
-	if file_path == "": return {"valid": true, "reason": "", "processed_path": ""}
-	var target_path = convert_heic_to_jpeg_if_needed(file_path)
+	var clean_path = _clean_file_path(file_path)
+	if clean_path == "": return {"valid": true, "reason": "", "processed_path": ""}
+	var target_path = convert_heic_to_jpeg_if_needed(clean_path)
 	if not FileAccess.file_exists(target_path):
-		return {"valid": false, "reason": "Attachment File Not Found on Disk", "processed_path": ""}
+		return {"valid": false, "reason": "Attachment File Not Found on Disk (" + target_path.get_file() + ")", "processed_path": ""}
 	var ext = target_path.get_extension().to_lower()
 	if ext not in ["png", "jpg", "jpeg", "webp"]:
 		return {"valid": false, "reason": "Unsupported File Type (Only PNG, JPG, WEBP, HEIC allowed)", "processed_path": ""}

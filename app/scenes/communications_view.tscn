@@ -323,7 +323,7 @@ theme_override_constants/separation = 12
 
 [node name="AttachmentThumbnail" type="TextureRect" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/AttachmentCard/AttachmentMargin/AttachmentVBox/AttachmentPreviewBox/PreviewMargin/PreviewHBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(64, 64)
+custom_minimum_size = Vector2(120, 120)
 layout_mode = 2
 expand_mode = 1
 stretch_mode = 5
