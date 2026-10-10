@@ -87,12 +87,14 @@ var channel_mms_indicator: Label = null
 @onready var log_card: PanelContainer = %LogCard
 
 func _enter_tree() -> void:
+	NativePlayerBridgeScript.enable_external_drag()
 	var win = get_window()
 	if win and not win.files_dropped.is_connected(_on_window_files_dropped):
 		win.files_dropped.connect(_on_window_files_dropped)
 
 func _ready() -> void:
 	add_to_group("sync_listeners")
+	NativePlayerBridgeScript.enable_external_drag()
 	_setup_communicate_send_composer()
 	_init_database()
 	_style_card()
@@ -662,9 +664,9 @@ func _setup_communicate_send_composer() -> void:
 	if not aud_count_label: aud_count_label = _find_composer_node("AudCountLabel", "Row2HBox/AudCountLabel") as Label
 	if not btn_review_recipients: btn_review_recipients = _find_composer_node("BtnReviewRecipients", "Row2HBox/BtnReviewRecipients") as Button
 
-	if not template_dropdown: template_dropdown = _find_composer_node("TemplateDropdown", "Row3HBox/TemplateDropdown") as OptionButton
-	if not btn_send_message: btn_send_message = _find_composer_node("BtnSendMessage", "Row3HBox/BtnSendMessage") as Button
-	if not btn_schedule_message: btn_schedule_message = _find_composer_node("BtnScheduleMessage", "Row3HBox/BtnScheduleMessage") as Button
+	if not template_dropdown: template_dropdown = _find_composer_node("TemplateDropdown", "Row2HBox/TemplateDropdown") as OptionButton
+	if not btn_send_message: btn_send_message = _find_composer_node("BtnSendMessage", "ActionRowHBox/BtnSendMessage") as Button
+	if not btn_schedule_message: btn_schedule_message = _find_composer_node("BtnScheduleMessage", "ActionRowHBox/BtnScheduleMessage") as Button
 
 	if not message_body_edit: message_body_edit = _find_composer_node("MessageBodyEdit", "MessageSectionVBox/MessageBodyEdit") as TextEdit
 	if not char_count_label: char_count_label = _find_composer_node("CharCountLabel", "MessageSectionVBox/CharCountLabel") as Label

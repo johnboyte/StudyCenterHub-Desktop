@@ -175,8 +175,20 @@ text = "Channel:"
 
 [node name="ChannelDropdown" type="OptionButton" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/Row2HBox"]
 unique_name_in_owner = true
+custom_minimum_size = Vector2(140, 38)
+layout_mode = 2
+
+[node name="TemplateLabel" type="Label" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/Row2HBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.2, 0.25, 0.32, 1)
+theme_override_font_sizes/font_size = 14
+text = "Template:"
+
+[node name="TemplateDropdown" type="OptionButton" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/Row2HBox"]
+unique_name_in_owner = true
 custom_minimum_size = Vector2(180, 38)
 layout_mode = 2
+size_flags_horizontal = 3
 
 [node name="AudCountLabel" type="Label" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/Row2HBox"]
 unique_name_in_owner = true
@@ -191,35 +203,6 @@ unique_name_in_owner = true
 custom_minimum_size = Vector2(170, 38)
 layout_mode = 2
 text = "👁️ Review Recipients"
-
-[node name="Row3HBox" type="HBoxContainer" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox"]
-layout_mode = 2
-theme_override_constants/separation = 10
-
-[node name="TemplateLabel" type="Label" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/Row3HBox"]
-layout_mode = 2
-theme_override_colors/font_color = Color(0.2, 0.25, 0.32, 1)
-theme_override_font_sizes/font_size = 14
-text = "Template:"
-
-[node name="TemplateDropdown" type="OptionButton" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/Row3HBox"]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(220, 38)
-layout_mode = 2
-size_flags_horizontal = 3
-
-[node name="BtnSendMessage" type="Button" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/Row3HBox"]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(155, 38)
-layout_mode = 2
-text = "✉️ Send Message"
-
-[node name="BtnScheduleMessage" type="Button" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/Row3HBox"]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(165, 38)
-layout_mode = 2
-disabled = true
-text = "🕒 Schedule Message"
 
 [node name="MessageSectionVBox" type="VBoxContainer" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox"]
 unique_name_in_owner = true
@@ -373,6 +356,28 @@ unique_name_in_owner = true
 custom_minimum_size = Vector2(90, 28)
 layout_mode = 2
 text = "❌ Remove"
+
+[node name="ActionRowHBox" type="HBoxContainer" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="ActionSpacer" type="Control" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/ActionRowHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="BtnSendMessage" type="Button" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/ActionRowHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(165, 40)
+layout_mode = 2
+text = "✉️ Send Message"
+
+[node name="BtnScheduleMessage" type="Button" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/ActionRowHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(175, 40)
+layout_mode = 2
+disabled = true
+text = "🕒 Schedule Message"
 
 [node name="VoicemailCard" type="PanelContainer" parent="MarginContainer/MainVBox"]
 unique_name_in_owner = true
