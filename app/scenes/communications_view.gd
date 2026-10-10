@@ -565,41 +565,60 @@ func _get_active_theme_color() -> Color:
 	return Color(0.596, 0.192, 0.255, 1.0)
 
 func _setup_communicate_send_composer() -> void:
-	if not composer_card:
-		if has_node("%ComposerCard"):
-			composer_card = get_node("%ComposerCard") as PanelContainer
-		elif has_node("MarginContainer/MainVBox/ComposerCard"):
-			composer_card = get_node("MarginContainer/MainVBox/ComposerCard") as PanelContainer
+	if not composer_card or not is_instance_valid(composer_card):
+		composer_card = get_node_or_null("MarginContainer/MainVBox/ComposerCard") as PanelContainer
+		if not composer_card:
+			composer_card = get_node_or_null("%ComposerCard") as PanelContainer
 	if not composer_card: return
 
-	if has_node("%AudienceTypeDropdown"): audience_type_dropdown = get_node("%AudienceTypeDropdown") as OptionButton
-	if has_node("%RecipientDropdown"): recipient_dropdown = get_node("%RecipientDropdown") as OptionButton
-	if has_node("%RealLifeStatusDropdown"): real_life_status_dropdown = get_node("%RealLifeStatusDropdown") as OptionButton
-	if has_node("%PathwayDropdown"): pathway_dropdown = get_node("%PathwayDropdown") as OptionButton
-	if has_node("%SessionDropdown"): session_dropdown = get_node("%SessionDropdown") as OptionButton
+	if not audience_type_dropdown: audience_type_dropdown = _find_composer_node("AudienceTypeDropdown", "Row1HBox/AudienceTypeDropdown") as OptionButton
+	if not recipient_dropdown: recipient_dropdown = _find_composer_node("RecipientDropdown", "Row1HBox/RecipientDropdown") as OptionButton
+	if not real_life_status_dropdown: real_life_status_dropdown = _find_composer_node("RealLifeStatusDropdown", "Row1HBox/RealLifeStatusDropdown") as OptionButton
+	if not pathway_dropdown: pathway_dropdown = _find_composer_node("PathwayDropdown", "Row1HBox/PathwayDropdown") as OptionButton
+	if not session_dropdown: session_dropdown = _find_composer_node("SessionDropdown", "Row1HBox/SessionDropdown") as OptionButton
 
-	if has_node("%IndividualSelectionVBox"): individual_selection_vbox = get_node("%IndividualSelectionVBox") as VBoxContainer
-	if has_node("%RecipientSearchInput"): recipient_search_input = get_node("%RecipientSearchInput") as LineEdit
-	if has_node("%BtnSelectAllShown"): btn_select_all_shown = get_node("%BtnSelectAllShown") as Button
-	if has_node("%BtnClearSelection"): btn_clear_selection = get_node("%BtnClearSelection") as Button
-	if has_node("%CheckboxScrollContainer"): checkbox_scroll_container = get_node("%CheckboxScrollContainer") as ScrollContainer
-	if has_node("%CheckboxListVBox"): checkbox_list_vbox = get_node("%CheckboxListVBox") as VBoxContainer
+	if not individual_selection_vbox: individual_selection_vbox = _find_composer_node("IndividualSelectionVBox", "IndividualSelectionVBox") as VBoxContainer
+	if not recipient_search_input: recipient_search_input = _find_composer_node("RecipientSearchInput", "IndividualSelectionVBox/SearchBarHBox/RecipientSearchInput") as LineEdit
+	if not btn_select_all_shown: btn_select_all_shown = _find_composer_node("BtnSelectAllShown", "IndividualSelectionVBox/SearchBarHBox/BtnSelectAllShown") as Button
+	if not btn_clear_selection: btn_clear_selection = _find_composer_node("BtnClearSelection", "IndividualSelectionVBox/SearchBarHBox/BtnClearSelection") as Button
+	if not checkbox_scroll_container: checkbox_scroll_container = _find_composer_node("CheckboxScrollContainer", "IndividualSelectionVBox/CheckboxScrollContainer") as ScrollContainer
+	if not checkbox_list_vbox: checkbox_list_vbox = _find_composer_node("CheckboxListVBox", "IndividualSelectionVBox/CheckboxScrollContainer/CheckboxListVBox") as VBoxContainer
 
-	if has_node("%ChipsScrollContainer"): chips_scroll_container = get_node("%ChipsScrollContainer") as ScrollContainer
-	if has_node("%IndividualChipsContainer"): individual_chips_container = get_node("%IndividualChipsContainer") as HFlowContainer
+	if not chips_scroll_container: chips_scroll_container = _find_composer_node("ChipsScrollContainer", "ChipsScrollContainer") as ScrollContainer
+	if not individual_chips_container: individual_chips_container = _find_composer_node("IndividualChipsContainer", "ChipsScrollContainer/IndividualChipsContainer") as HFlowContainer
 
-	if has_node("%ChannelDropdown"): channel_dropdown = get_node("%ChannelDropdown") as OptionButton
-	if has_node("%AudCountLabel"): aud_count_label = get_node("%AudCountLabel") as Label
-	if has_node("%BtnReviewRecipients"): btn_review_recipients = get_node("%BtnReviewRecipients") as Button
+	if not channel_dropdown: channel_dropdown = _find_composer_node("ChannelDropdown", "Row2HBox/ChannelDropdown") as OptionButton
+	if not aud_count_label: aud_count_label = _find_composer_node("AudCountLabel", "Row2HBox/AudCountLabel") as Label
+	if not btn_review_recipients: btn_review_recipients = _find_composer_node("BtnReviewRecipients", "Row2HBox/BtnReviewRecipients") as Button
 
-	if has_node("%TemplateDropdown"): template_dropdown = get_node("%TemplateDropdown") as OptionButton
-	if has_node("%BtnSendMessage"): btn_send_message = get_node("%BtnSendMessage") as Button
-	if has_node("%BtnScheduleMessage"): btn_schedule_message = get_node("%BtnScheduleMessage") as Button
+	if not template_dropdown: template_dropdown = _find_composer_node("TemplateDropdown", "Row3HBox/TemplateDropdown") as OptionButton
+	if not btn_send_message: btn_send_message = _find_composer_node("BtnSendMessage", "Row3HBox/BtnSendMessage") as Button
+	if not btn_schedule_message: btn_schedule_message = _find_composer_node("BtnScheduleMessage", "Row3HBox/BtnScheduleMessage") as Button
 
-	if has_node("%MessageBodyEdit"): message_body_edit = get_node("%MessageBodyEdit") as TextEdit
-	if has_node("%CharCountLabel"): char_count_label = get_node("%CharCountLabel") as Label
+	if not message_body_edit: message_body_edit = _find_composer_node("MessageBodyEdit", "MessageSectionVBox/MessageBodyEdit") as TextEdit
+	if not char_count_label: char_count_label = _find_composer_node("CharCountLabel", "MessageSectionVBox/CharCountLabel") as Label
+
+	if not attachment_card: attachment_card = _find_composer_node("AttachmentCard", "AttachmentCard") as PanelContainer
+	if not attachment_drop_zone: attachment_drop_zone = _find_composer_node("AttachmentDropZone", "AttachmentCard/AttachmentMargin/AttachmentVBox/AttachmentDropZone") as PanelContainer
+	if not attachment_preview_box: attachment_preview_box = _find_composer_node("AttachmentPreviewBox", "AttachmentCard/AttachmentMargin/AttachmentVBox/AttachmentPreviewBox") as PanelContainer
+	if not attachment_thumbnail: attachment_thumbnail = _find_composer_node("AttachmentThumbnail", "AttachmentCard/AttachmentMargin/AttachmentVBox/AttachmentPreviewBox/PreviewMargin/PreviewHBox/AttachmentThumbnail") as TextureRect
+	if not attachment_info_label: attachment_info_label = _find_composer_node("AttachmentInfoLabel", "AttachmentCard/AttachmentMargin/AttachmentVBox/AttachmentPreviewBox/PreviewMargin/PreviewHBox/InfoVBox/AttachmentInfoLabel") as Label
+	if not channel_mms_indicator: channel_mms_indicator = _find_composer_node("ChannelMmsIndicator", "AttachmentCard/AttachmentMargin/AttachmentVBox/AttachmentHBox/ChannelMmsIndicator") as Label
+	if not btn_choose_image: btn_choose_image = _find_composer_node("BtnChooseImage", "AttachmentCard/AttachmentMargin/AttachmentVBox/AttachmentDropZone/DropZoneMargin/DropZoneHBox/BtnChooseImage") as Button
+	if not btn_replace_image: btn_replace_image = _find_composer_node("BtnReplaceImage", "AttachmentCard/AttachmentMargin/AttachmentVBox/AttachmentPreviewBox/PreviewMargin/PreviewHBox/BtnVBox/BtnReplaceImage") as Button
+	if not btn_remove_image: btn_remove_image = _find_composer_node("BtnRemoveImage", "AttachmentCard/AttachmentMargin/AttachmentVBox/AttachmentPreviewBox/PreviewMargin/PreviewHBox/BtnVBox/BtnRemoveImage") as Button
 
 	_apply_composer_styles_and_items()
+
+func _find_composer_node(unique_name: String, path_suffix: String) -> Node:
+	var res: Node = null
+	if composer_card:
+		res = composer_card.get_node_or_null("ComposerMargin/ComposerVBox/" + path_suffix)
+	if not res and has_node("%" + unique_name):
+		res = get_node("%" + unique_name)
+	if not res:
+		res = get_node_or_null("MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/" + path_suffix)
+	return res
 
 func _apply_composer_styles_and_items() -> void:
 	if audience_type_dropdown and audience_type_dropdown.item_count == 0:
@@ -675,6 +694,53 @@ func _reparent_node(node: Node, new_parent: Node) -> void:
 
 func _setup_attachment_area(parent_vbox: VBoxContainer) -> void:
 	if attachment_card and is_instance_valid(attachment_card):
+		var card_st = StyleBoxFlat.new()
+		card_st.bg_color = Color(0.97, 0.98, 1.0, 1.0)
+		card_st.border_width_left = 1; card_st.border_width_top = 1; card_st.border_width_right = 1; card_st.border_width_bottom = 1
+		card_st.border_color = Color(0.82, 0.86, 0.92, 1.0)
+		card_st.corner_radius_top_left = 8; card_st.corner_radius_top_right = 8; card_st.corner_radius_bottom_left = 8; card_st.corner_radius_bottom_right = 8
+		card_st.content_margin_left = 12; card_st.content_margin_top = 10; card_st.content_margin_right = 12; card_st.content_margin_bottom = 10
+		attachment_card.add_theme_stylebox_override("panel", card_st)
+
+		if attachment_drop_zone:
+			var dz_st = StyleBoxFlat.new()
+			dz_st.bg_color = Color(0.94, 0.96, 0.99, 1.0)
+			dz_st.border_width_left = 2; dz_st.border_width_top = 2; dz_st.border_width_right = 2; dz_st.border_width_bottom = 2
+			dz_st.border_color = Color(0.65, 0.75, 0.88, 1.0)
+			dz_st.corner_radius_top_left = 6; dz_st.corner_radius_top_right = 6; dz_st.corner_radius_bottom_left = 6; dz_st.corner_radius_bottom_right = 6
+			dz_st.content_margin_left = 14; dz_st.content_margin_top = 10; dz_st.content_margin_right = 14; dz_st.content_margin_bottom = 10
+			attachment_drop_zone.add_theme_stylebox_override("panel", dz_st)
+
+		if attachment_preview_box:
+			var prev_st = StyleBoxFlat.new()
+			prev_st.bg_color = Color(1.0, 1.0, 1.0, 1.0)
+			prev_st.border_width_left = 1; prev_st.border_width_top = 1; prev_st.border_width_right = 1; prev_st.border_width_bottom = 1
+			prev_st.border_color = Color(0.20, 0.55, 0.90, 1.0)
+			prev_st.corner_radius_top_left = 6; prev_st.corner_radius_top_right = 6; prev_st.corner_radius_bottom_left = 6; prev_st.corner_radius_bottom_right = 6
+			prev_st.content_margin_left = 10; prev_st.content_margin_top = 8; prev_st.content_margin_right = 10; prev_st.content_margin_bottom = 8
+			attachment_preview_box.add_theme_stylebox_override("panel", prev_st)
+
+		if btn_choose_image:
+			_style_secondary_button(btn_choose_image)
+			if not btn_choose_image.pressed.is_connected(_open_image_file_dialog):
+				btn_choose_image.pressed.connect(_open_image_file_dialog)
+		if btn_replace_image:
+			_style_secondary_button(btn_replace_image)
+			if not btn_replace_image.pressed.is_connected(_open_image_file_dialog):
+				btn_replace_image.pressed.connect(_open_image_file_dialog)
+		if btn_remove_image:
+			_style_secondary_button(btn_remove_image)
+			if not btn_remove_image.pressed.is_connected(_clear_attached_image):
+				btn_remove_image.pressed.connect(_clear_attached_image)
+
+		var win = get_window()
+		if win and not win.files_dropped.is_connected(_on_window_files_dropped):
+			win.files_dropped.connect(_on_window_files_dropped)
+
+		if channel_dropdown and not channel_dropdown.item_selected.is_connected(_on_channel_selected_change):
+			channel_dropdown.item_selected.connect(_on_channel_selected_change)
+
+		_update_composer_validation()
 		return
 
 	attachment_card = PanelContainer.new()
@@ -809,11 +875,14 @@ func _on_channel_selected_change(_idx: int) -> void:
 	_update_composer_validation()
 
 func _set_attached_image(file_path: String) -> void:
-	if not com_service:
+	if not attachment_thumbnail or not attachment_info_label or not attachment_drop_zone or not attachment_preview_box:
+		_setup_communicate_send_composer()
+
+	if not com_service and db:
 		com_service = CommunicationsServiceScript.new(db)
 	
 	var ch = channel_dropdown.get_item_text(channel_dropdown.selected) if (channel_dropdown and channel_dropdown.selected >= 0 and channel_dropdown.selected < channel_dropdown.get_item_count()) else "SMS Text"
-	var val = com_service.validate_attachment(file_path, ch)
+	var val = com_service.validate_attachment(file_path, ch) if com_service else {"valid": true, "processed_path": file_path}
 	if not val.get("valid", false):
 		OS.alert(val.get("reason", "Invalid image attachment."), "Attachment Invalid")
 		return
@@ -827,20 +896,22 @@ func _set_attached_image(file_path: String) -> void:
 	var err = img.load(target_path)
 	if err == OK:
 		var tex = ImageTexture.create_from_image(img)
-		attachment_thumbnail.texture = tex
+		if attachment_thumbnail: attachment_thumbnail.texture = tex
 		var f_size_mb = 0.0
 		var f = FileAccess.open(target_path, FileAccess.READ)
 		if f: f_size_mb = f.get_length() / (1024.0 * 1024.0)
-		attachment_info_label.text = "📎 " + target_path.get_file() + "\nDimensions: %dx%d px | Size: %.2f MB" % [img.get_width(), img.get_height(), f_size_mb]
+		if attachment_info_label: attachment_info_label.text = "📎 " + target_path.get_file() + "\nDimensions: %dx%d px | Size: %.2f MB" % [img.get_width(), img.get_height(), f_size_mb]
 	else:
-		attachment_thumbnail.texture = null
-		attachment_info_label.text = "📎 " + target_path.get_file()
+		if attachment_thumbnail: attachment_thumbnail.texture = null
+		if attachment_info_label: attachment_info_label.text = "📎 " + target_path.get_file()
 
-	attachment_drop_zone.visible = false
-	attachment_preview_box.visible = true
+	if attachment_drop_zone: attachment_drop_zone.visible = false
+	if attachment_preview_box: attachment_preview_box.visible = true
 	_update_composer_validation()
 
 func _clear_attached_image() -> void:
+	if not attachment_drop_zone or not attachment_preview_box:
+		_setup_communicate_send_composer()
 	current_attachment_path = ""
 	if attachment_thumbnail: attachment_thumbnail.texture = null
 	if attachment_info_label: attachment_info_label.text = ""
@@ -1239,6 +1310,7 @@ func _update_chips_scroll_height() -> void:
 		return
 
 	chips_scroll_container.visible = (selected_audience_type == "Individual")
+	if not is_inside_tree() or get_tree() == null: return
 	await get_tree().process_frame
 	if not is_inside_tree() or not individual_chips_container: return
 	var content_h = individual_chips_container.get_combined_minimum_size().y
@@ -1272,7 +1344,7 @@ func _connect_signals() -> void:
 		btn_review_recipients.pressed.connect(_open_review_recipients_dialog)
 
 func _on_audience_type_selected(index: int) -> void:
-	if index < 0 or not audience_type_dropdown: return
+	if index < 0 or not audience_type_dropdown or index >= audience_type_dropdown.item_count: return
 	selected_audience_type = audience_type_dropdown.get_item_text(index)
 
 	if recipient_dropdown: recipient_dropdown.visible = (selected_audience_type == "Individual")

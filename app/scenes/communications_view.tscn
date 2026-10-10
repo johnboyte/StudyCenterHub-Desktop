@@ -260,6 +260,120 @@ theme_override_colors/font_color = Color(0.4, 0.45, 0.55, 1)
 theme_override_font_sizes/font_size = 13
 text = "0 characters • Est. 0 SMS segments"
 
+[node name="AttachmentCard" type="PanelContainer" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(660, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="AttachmentMargin" type="MarginContainer" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/AttachmentCard"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10
+
+[node name="AttachmentVBox" type="VBoxContainer" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/AttachmentCard/AttachmentMargin"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="AttachmentHBox" type="HBoxContainer" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/AttachmentCard/AttachmentMargin/AttachmentVBox"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="AttachmentHeaderLabel" type="Label" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/AttachmentCard/AttachmentMargin/AttachmentVBox/AttachmentHBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.2, 0.25, 0.35, 1)
+theme_override_font_sizes/font_size = 13
+text = "ATTACH FLYER / IMAGE"
+
+[node name="ChannelMmsIndicator" type="Label" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/AttachmentCard/AttachmentMargin/AttachmentVBox/AttachmentHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.15, 0.45, 0.85, 1)
+theme_override_font_sizes/font_size = 12
+text = "📱 SMS Text"
+
+[node name="AttachmentDropZone" type="PanelContainer" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/AttachmentCard/AttachmentMargin/AttachmentVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="DropZoneMargin" type="MarginContainer" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/AttachmentCard/AttachmentMargin/AttachmentVBox/AttachmentDropZone"]
+layout_mode = 2
+theme_override_constants/margin_left = 14
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 14
+theme_override_constants/margin_bottom = 10
+
+[node name="DropZoneHBox" type="HBoxContainer" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/AttachmentCard/AttachmentMargin/AttachmentVBox/AttachmentDropZone/DropZoneMargin"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="DropZoneLabel" type="Label" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/AttachmentCard/AttachmentMargin/AttachmentVBox/AttachmentDropZone/DropZoneMargin/DropZoneHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.3, 0.35, 0.45, 1)
+theme_override_font_sizes/font_size = 13
+text = "📎 Drag flyer / image here (PNG, JPG, WEBP, HEIC) or"
+
+[node name="BtnChooseImage" type="Button" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/AttachmentCard/AttachmentMargin/AttachmentVBox/AttachmentDropZone/DropZoneMargin/DropZoneHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(130, 32)
+layout_mode = 2
+text = "📂 Choose Image"
+
+[node name="AttachmentPreviewBox" type="PanelContainer" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/AttachmentCard/AttachmentMargin/AttachmentVBox"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+
+[node name="PreviewMargin" type="MarginContainer" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/AttachmentCard/AttachmentMargin/AttachmentVBox/AttachmentPreviewBox"]
+layout_mode = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 8
+
+[node name="PreviewHBox" type="HBoxContainer" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/AttachmentCard/AttachmentMargin/AttachmentVBox/AttachmentPreviewBox/PreviewMargin"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="AttachmentThumbnail" type="TextureRect" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/AttachmentCard/AttachmentMargin/AttachmentVBox/AttachmentPreviewBox/PreviewMargin/PreviewHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(64, 64)
+layout_mode = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="InfoVBox" type="VBoxContainer" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/AttachmentCard/AttachmentMargin/AttachmentVBox/AttachmentPreviewBox/PreviewMargin/PreviewHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 2
+
+[node name="AttachmentInfoLabel" type="Label" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/AttachmentCard/AttachmentMargin/AttachmentVBox/AttachmentPreviewBox/PreviewMargin/PreviewHBox/InfoVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.12, 0.16, 0.22, 1)
+theme_override_font_sizes/font_size = 13
+text = "flyer.png"
+autowrap_mode = 2
+
+[node name="BtnVBox" type="VBoxContainer" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/AttachmentCard/AttachmentMargin/AttachmentVBox/AttachmentPreviewBox/PreviewMargin/PreviewHBox"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="BtnReplaceImage" type="Button" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/AttachmentCard/AttachmentMargin/AttachmentVBox/AttachmentPreviewBox/PreviewMargin/PreviewHBox/BtnVBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(90, 28)
+layout_mode = 2
+text = "🔄 Replace"
+
+[node name="BtnRemoveImage" type="Button" parent="MarginContainer/MainVBox/ComposerCard/ComposerMargin/ComposerVBox/AttachmentCard/AttachmentMargin/AttachmentVBox/AttachmentPreviewBox/PreviewMargin/PreviewHBox/BtnVBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(90, 28)
+layout_mode = 2
+text = "❌ Remove"
+
 [node name="VoicemailCard" type="PanelContainer" parent="MarginContainer/MainVBox"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 560)
