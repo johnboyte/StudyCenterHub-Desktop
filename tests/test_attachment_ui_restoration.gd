@@ -97,11 +97,15 @@ func _init() -> void:
 	assert("0 character" in comms_view.char_count_label.text, "CharCountLabel must indicate 0 characters when text edit is empty")
 	print("  ✓ PASS 12/14: Character counter accurately reads 0 when empty.")
 
-	# PASS 13: Window files dropped handler connected
+	# PASS 13: Window files dropped handler & Control drop target connected
 	var win = comms_view.get_window()
 	if win:
 		assert(win.files_dropped.is_connected(comms_view._on_window_files_dropped), "Window files_dropped signal must be connected")
-	print("  ✓ PASS 13/14: Window drag-and-drop listener connected.")
+	assert(comms_view._can_drop_data(Vector2.ZERO, test_img_path) == true, "comms_view._can_drop_data must return true for image path")
+	comms_view._clear_attached_image()
+	comms_view._drop_data(Vector2.ZERO, test_img_path)
+	assert(comms_view.current_attachment_path != "", "comms_view._drop_data must attach image path")
+	print("  ✓ PASS 13/14: Window drag-and-drop & Control drop target handlers active.")
 
 	# PASS 14: Action buttons validate with attachment alone
 	comms_view.current_eligible_recipients = [101]

@@ -10,6 +10,7 @@ const WorkQueueHeaderBarScene = preload("res://app/scenes/components/work_queue_
 const QueueControllerScript = preload("res://src/domain/work_queue/queue_controller.gd")
 const QueueRegistryScript = preload("res://src/domain/work_queue/queue_registry.gd")
 const SpellingAssistanceHelperScript = preload("res://src/ui/components/spelling_assistance_helper.gd")
+const NativePlayerBridgeScript = preload("res://src/infrastructure/native/native_player_bridge.gd")
 
 var db: RefCounted:
 	set(value):
@@ -85,6 +86,11 @@ var channel_mms_indicator: Label = null
 @onready var threads_card: PanelContainer = %ThreadsCard
 @onready var log_card: PanelContainer = %LogCard
 
+func _enter_tree() -> void:
+	var win = get_window()
+	if win and not win.files_dropped.is_connected(_on_window_files_dropped):
+		win.files_dropped.connect(_on_window_files_dropped)
+
 func _ready() -> void:
 	add_to_group("sync_listeners")
 	_setup_communicate_send_composer()
@@ -93,6 +99,71 @@ func _ready() -> void:
 	_populate_dropdowns()
 	_connect_signals()
 	_refresh_all_feeds()
+	var win = get_window()
+	if win and not win.files_dropped.is_connected(_on_window_files_dropped):
+		win.files_dropped.connect(_on_window_files_dropped)
+
+func _process(_delta: float) -> void:
+	if not is_inside_tree() or not is_visible_in_tree():
+		return
+	var drop_data = NativePlayerBridgeScript.poll_external_drop()
+	if not drop_data.is_empty():
+		var payload = str(drop_data.get("payload", ""))
+		if payload != "":
+			var ext = payload.get_extension().to_lower()
+			if ext in ["png", "jpg", "jpeg", "webp", "heic", "heif"]:
+				_set_attached_image(payload)
+
+func _can_drop_data(_at_position: Vector2, data: Variant) -> bool:
+	if typeof(data) == TYPE_STRING:
+		var ext = (data as String).get_extension().to_lower()
+		return ext in ["png", "jpg", "jpeg", "webp", "heic", "heif"]
+	elif typeof(data) == TYPE_DICTIONARY:
+		var path = str(data.get("path", data.get("file_path", data.get("payload", ""))))
+		var ext = path.get_extension().to_lower()
+		return ext in ["png", "jpg", "jpeg", "webp", "heic", "heif"]
+	elif (typeof(data) == TYPE_ARRAY or typeof(data) == TYPE_PACKED_STRING_ARRAY) and data.size() > 0:
+		var ext = str(data[0]).get_extension().to_lower()
+		return ext in ["png", "jpg", "jpeg", "webp", "heic", "heif"]
+	return true
+
+func _drop_data(_at_position: Vector2, data: Variant) -> void:
+	var file_path = ""
+	if typeof(data) == TYPE_STRING:
+		file_path = data
+	elif typeof(data) == TYPE_DICTIONARY:
+		file_path = str(data.get("path", data.get("file_path", data.get("payload", ""))))
+	elif (typeof(data) == TYPE_ARRAY or typeof(data) == TYPE_PACKED_STRING_ARRAY) and data.size() > 0:
+		file_path = str(data[0])
+	
+	if file_path != "":
+		_set_attached_image(file_path)
+
+func _on_drop_zone_gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		_open_image_file_dialog()
+
+func _on_drop_zone_mouse_entered() -> void:
+	if attachment_drop_zone:
+		attachment_drop_zone.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		var dz_st = StyleBoxFlat.new()
+		dz_st.bg_color = Color(0.90, 0.94, 1.0, 1.0)
+		dz_st.border_width_left = 2; dz_st.border_width_top = 2; dz_st.border_width_right = 2; dz_st.border_width_bottom = 2
+		dz_st.border_color = Color(0.20, 0.55, 0.90, 1.0)
+		dz_st.corner_radius_top_left = 6; dz_st.corner_radius_top_right = 6; dz_st.corner_radius_bottom_left = 6; dz_st.corner_radius_bottom_right = 6
+		dz_st.content_margin_left = 14; dz_st.content_margin_top = 10; dz_st.content_margin_right = 14; dz_st.content_margin_bottom = 10
+		attachment_drop_zone.add_theme_stylebox_override("panel", dz_st)
+
+func _on_drop_zone_mouse_exited() -> void:
+	if attachment_drop_zone:
+		attachment_drop_zone.mouse_default_cursor_shape = Control.CURSOR_ARROW
+		var dz_st = StyleBoxFlat.new()
+		dz_st.bg_color = Color(0.94, 0.96, 0.99, 1.0)
+		dz_st.border_width_left = 2; dz_st.border_width_top = 2; dz_st.border_width_right = 2; dz_st.border_width_bottom = 2
+		dz_st.border_color = Color(0.65, 0.75, 0.88, 1.0)
+		dz_st.corner_radius_top_left = 6; dz_st.corner_radius_top_right = 6; dz_st.corner_radius_bottom_left = 6; dz_st.corner_radius_bottom_right = 6
+		dz_st.content_margin_left = 14; dz_st.content_margin_top = 10; dz_st.content_margin_right = 14; dz_st.content_margin_bottom = 10
+		attachment_drop_zone.add_theme_stylebox_override("panel", dz_st)
 
 func on_inbound_events_processed(count: int) -> void:
 	if count > 0 and is_inside_tree():
@@ -710,6 +781,13 @@ func _setup_attachment_area(parent_vbox: VBoxContainer) -> void:
 			dz_st.corner_radius_top_left = 6; dz_st.corner_radius_top_right = 6; dz_st.corner_radius_bottom_left = 6; dz_st.corner_radius_bottom_right = 6
 			dz_st.content_margin_left = 14; dz_st.content_margin_top = 10; dz_st.content_margin_right = 14; dz_st.content_margin_bottom = 10
 			attachment_drop_zone.add_theme_stylebox_override("panel", dz_st)
+			attachment_drop_zone.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+			if not attachment_drop_zone.gui_input.is_connected(_on_drop_zone_gui_input):
+				attachment_drop_zone.gui_input.connect(_on_drop_zone_gui_input)
+			if not attachment_drop_zone.mouse_entered.is_connected(_on_drop_zone_mouse_entered):
+				attachment_drop_zone.mouse_entered.connect(_on_drop_zone_mouse_entered)
+			if not attachment_drop_zone.mouse_exited.is_connected(_on_drop_zone_mouse_exited):
+				attachment_drop_zone.mouse_exited.connect(_on_drop_zone_mouse_exited)
 
 		if attachment_preview_box:
 			var prev_st = StyleBoxFlat.new()
