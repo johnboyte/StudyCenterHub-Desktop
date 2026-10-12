@@ -185,4 +185,4 @@ func _format_relay_message(constituent_name: String, from_phone: String, body: S
 	if digits.length() == 10:
 		display_phone = "(%s) %s-%s" % [digits.substr(0, 3), digits.substr(3, 3), digits.substr(6, 4)]
 
-	return "Incoming Text — %s\nFrom: %s\n%s\n\nRef: %s\nReply with:\n%s your reply" % [constituent_name, display_phone, body, token, token]
+	return "Incoming Text — %s\nFrom: %s\nMessage: %s\n\nRef: %s\nReply with:\n%s your reply" % [constituent_name, display_phone, body, token, token]

@@ -2391,7 +2391,7 @@ if ($uri === '/api/v1/sync/test-sms-relay-lookup' && ($method === 'GET' || $meth
         $formatted_display_phone = sprintf("(%s) %s-%s", substr($digits, 0, 3), substr($digits, 3, 3), substr($digits, 6, 4));
     }
 
-    $sample_msg = "Incoming Text — {$constituent_name}\nFrom: {$formatted_display_phone}\n{$test_body}\n\nRef: TEST\nReply with:\nTEST your reply";
+    $sample_msg = "Incoming Text — {$constituent_name}\nFrom: {$formatted_display_phone}\nMessage: {$test_body}\n\nRef: TEST\nReply with:\nTEST your reply";
 
     echo json_encode([
         'success' => true,
@@ -8290,7 +8290,7 @@ if ($uri === '/api/v1/webhooks/twilio/sms') {
                     $formatted_display_phone = sprintf("(%s) %s-%s", substr($digits, 0, 3), substr($digits, 3, 3), substr($digits, 6, 4));
                 }
 
-                $fwd_msg = "Incoming Text — {$constituent_name}\nFrom: {$formatted_display_phone}\n{$fwd_body}\n\nRef: {$token}\nReply with:\n{$token} your reply";
+                $fwd_msg = "Incoming Text — {$constituent_name}\nFrom: {$formatted_display_phone}\nMessage: {$fwd_body}\n\nRef: {$token}\nReply with:\n{$token} your reply";
 
                 $tw_sid = $config['TWILIO_ACCOUNT_SID'] ?? '';
                 $tw_token = $config['TWILIO_AUTH_TOKEN'] ?? '';

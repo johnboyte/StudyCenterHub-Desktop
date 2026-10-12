@@ -11,7 +11,9 @@ cursor = conn.cursor()
 
 # 2. Query Real Active Members for directory_index
 cursor.execute("""
-    SELECT human_id, first_name, COALESCE(last_name, '') as last_name, phone, COALESCE(profile_photo, '') as profile_photo
+    SELECT human_id, first_name, COALESCE(last_name, '') as last_name, phone, 
+           COALESCE(emergency_contact_phone, '') as emergency_contact_phone,
+           COALESCE(profile_photo, '') as profile_photo
     FROM people
     WHERE status = 'active'
 """)
