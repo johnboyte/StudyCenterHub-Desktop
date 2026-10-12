@@ -510,6 +510,7 @@ func publish_today_attendance_index(callback: Callable = Callable()) -> void:
 func publish_directory_index(callback: Callable = Callable()) -> void:
 	var res = db.execute("""
 		SELECT p.first_name, COALESCE(p.last_name, '') as last_name, p.phone, p.human_id, COALESCE(p.profile_photo, '') as profile_photo,
+		       COALESCE(p.emergency_contact_phone, '') as emergency_contact_phone,
 		       (SELECT MAX(al.check_in_date) FROM attendance_log al WHERE al.person_id = p.id) as last_checkin_date
 		FROM people p WHERE p.status = 'active';
 	""")

@@ -557,6 +557,7 @@ try {
         );");
     try { $pdo->exec("ALTER TABLE directory_index ADD COLUMN primary_email TEXT DEFAULT ''"); } catch (Exception $e) {}
     try { $pdo->exec("ALTER TABLE directory_index ADD COLUMN sms_consent INTEGER DEFAULT 0"); } catch (Exception $e) {}
+    try { $pdo->exec("ALTER TABLE directory_index ADD COLUMN emergency_phone_e164 TEXT DEFAULT ''"); } catch (Throwable $e) {}
 
     $pdo->exec("CREATE TABLE IF NOT EXISTS today_attendance_index (
             human_id TEXT PRIMARY KEY,
@@ -2019,13 +2020,15 @@ if ($uri === '/api/v1/sync/directory-index' && $method === 'POST') {
     try { $pdo->exec("ALTER TABLE directory_index ADD COLUMN last_name TEXT DEFAULT ''"); } catch (Throwable $e) {}
     try { $pdo->exec("ALTER TABLE directory_index ADD COLUMN profile_photo TEXT DEFAULT ''"); } catch (Throwable $e) {}
     try { $pdo->exec("ALTER TABLE directory_index ADD COLUMN person_uuid TEXT DEFAULT ''"); } catch (Throwable $e) {}
+    try { $pdo->exec("ALTER TABLE directory_index ADD COLUMN emergency_phone_e164 TEXT DEFAULT ''"); } catch (Throwable $e) {}
 
     $stmt = $pdo->prepare("
-        INSERT INTO directory_index (human_id, person_uuid, phone_e164, first_name, last_name, masked_phone, profile_photo, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        INSERT INTO directory_index (human_id, person_uuid, phone_e164, emergency_phone_e164, first_name, last_name, masked_phone, profile_photo, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
         ON CONFLICT(human_id) DO UPDATE SET
             person_uuid = excluded.person_uuid,
             phone_e164 = excluded.phone_e164,
+            emergency_phone_e164 = excluded.emergency_phone_e164,
             first_name = excluded.first_name,
             last_name = excluded.last_name,
             masked_phone = excluded.masked_phone,
@@ -2045,12 +2048,14 @@ if ($uri === '/api/v1/sync/directory-index' && $method === 'POST') {
         $photo = trim($m['profile_photo'] ?? '');
         $puuid = trim($m['person_uuid'] ?? '');
         $raw_p = $m['phone'] ?? $m['phone_e164'] ?? '';
+        $raw_ep = $m['emergency_contact_phone'] ?? '';
         $e164 = normalize_phone_e164_php($raw_p);
+        $ep_e164 = !empty($raw_ep) ? normalize_phone_e164_php($raw_ep) : '';
         $mp = mask_phone_php($raw_p);
 
         if ($hid !== '' && $fn !== '') {
             try {
-                $stmt->execute([$hid, $puuid, $e164, $fn, $ln, $mp, $photo]);
+                $stmt->execute([$hid, $puuid, $e164, $ep_e164, $fn, $ln, $mp, $photo]);
                 $count++;
                 $published_hids[] = $hid;
             } catch (Throwable $e) {
@@ -2312,6 +2317,93 @@ if ($uri === '/api/v1/sync/mobile-auth-diagnostic/latest' && $method === 'GET') 
     echo json_encode([
         'success' => true,
         'latest_diagnostic' => $diag
+    ]);
+    exit;
+}
+
+// Route: Safe Diagnostic Test Endpoint for SMS Relay Constituent Name Lookup (Protected by Sync API Key)
+if ($uri === '/api/v1/sync/test-sms-relay-lookup' && ($method === 'GET' || $method === 'POST')) {
+    header('Content-Type: application/json; charset=utf-8');
+    $req_key = $_SERVER['HTTP_X_SYNC_API_KEY'] ?? $_GET['sync_api_key'] ?? '';
+    if ($req_key !== $sync_api_key) {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'error' => 'Unauthorized']);
+        exit;
+    }
+
+    try { $pdo->exec("ALTER TABLE directory_index ADD COLUMN emergency_phone_e164 TEXT DEFAULT ''"); } catch (Throwable $e) {}
+
+    $input = ($method === 'POST') ? json_decode(file_get_contents('php://input'), true) : $_GET;
+    $test_phone = trim($input['phone'] ?? $_GET['phone'] ?? '');
+    $test_body = trim($input['body'] ?? $_GET['body'] ?? 'Are you open this afternoon?');
+
+    if (empty($test_phone)) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => 'Missing phone parameter']);
+        exit;
+    }
+
+    $from_norm = normalize_phone_e164_php($test_phone);
+    $from_digits = preg_replace('/\D/', '', $from_norm);
+    $from_last10 = (strlen($from_digits) >= 10) ? substr($from_digits, -10) : '';
+
+    $constituent_name = 'Unknown Contact';
+    $matched_rows = [];
+    try {
+        $p_stmt = $pdo->prepare("
+            SELECT first_name, last_name, human_id, phone_e164, emergency_phone_e164 
+            FROM directory_index 
+            WHERE phone_e164 = ? 
+               OR emergency_phone_e164 = ?
+               OR (length(?) = 10 AND (
+                   SUBSTR(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone_e164, ' ', ''), '-', ''), '(', ''), ')', ''), '+', ''), -10) = ?
+                   OR SUBSTR(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(emergency_phone_e164, ' ', ''), '-', ''), '(', ''), ')', ''), '+', ''), -10) = ?
+               ))
+               OR human_id = ?
+        ");
+        $p_stmt->execute([$from_norm, $from_norm, $from_last10, $from_last10, $from_last10, $from_norm]);
+        $matched_rows = $p_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $matched_names = [];
+        foreach ($matched_rows as $row) {
+            $fn = trim($row['first_name'] ?? '');
+            $ln = trim($row['last_name'] ?? '');
+            $full = trim("$fn $ln");
+            if (!empty($full)) {
+                $clean_name = ($full === strtolower($full)) ? ucwords($full) : $full;
+                if (!in_array($clean_name, $matched_names, true)) {
+                    $matched_names[] = $clean_name;
+                }
+            }
+        }
+
+        if (count($matched_names) === 1) {
+            $constituent_name = $matched_names[0];
+        } elseif (count($matched_names) > 1) {
+            $constituent_name = implode(' / ', $matched_names);
+        }
+    } catch (Throwable $e) {}
+
+    $formatted_display_phone = $from_norm;
+    $digits = preg_replace('/[^0-9]/', '', $from_norm);
+    if (strlen($digits) === 11 && strpos($digits, '1') === 0) $digits = substr($digits, 1);
+    if (strlen($digits) === 10) {
+        $formatted_display_phone = sprintf("(%s) %s-%s", substr($digits, 0, 3), substr($digits, 3, 3), substr($digits, 6, 4));
+    }
+
+    $sample_msg = "Incoming Text — {$constituent_name}\nFrom: {$formatted_display_phone}\n{$test_body}\n\nRef: TEST\nReply with:\nTEST your reply";
+
+    echo json_encode([
+        'success' => true,
+        'input_phone' => $test_phone,
+        'normalized_e164' => $from_norm,
+        'last10' => $from_last10,
+        'matched' => ($constituent_name !== 'Unknown Contact'),
+        'match_count' => count($matched_rows),
+        'constituent_name' => $constituent_name,
+        'matched_records' => $matched_rows,
+        'formatted_display_phone' => $formatted_display_phone,
+        'forwarded_notification_sample' => $sample_msg
     ]);
     exit;
 }
@@ -8113,17 +8205,49 @@ if ($uri === '/api/v1/webhooks/twilio/sms') {
         // Forwarding logic to Staff Relay Phone (if enabled)
         if ($relay_enabled && !empty($relay_phone) && $from_norm !== $relay_phone) {
             try {
+                try { $pdo->exec("ALTER TABLE directory_index ADD COLUMN emergency_phone_e164 TEXT DEFAULT ''"); } catch (Throwable $e) {}
+
                 $constituent_name = 'Unknown Contact';
                 $from_e164 = normalize_phone_e164_php($from_norm);
                 $from_digits = preg_replace('/\D/', '', $from_norm);
                 $from_last10 = (strlen($from_digits) >= 10) ? substr($from_digits, -10) : '';
 
-                $p_stmt = $pdo->prepare("SELECT first_name, last_name FROM directory_index WHERE phone_e164 = ? OR (length(?) = 10 AND phone_e164 LIKE ?) OR human_id = ? LIMIT 1");
-                $p_stmt->execute([$from_e164, $from_last10, '%' . $from_last10, $from_norm]);
-                if ($row = $p_stmt->fetch(PDO::FETCH_ASSOC)) {
+                // Robust, format-agnostic phone lookup:
+                // Normalizes incoming number to 10 digits and E.164, and matches against
+                // directory_index.phone_e164 and emergency_phone_e164 stripping punctuation (spaces, dashes, parens, plus)
+                // in SQLite so any format ((864) 555-1234, 864-555-1234, 8645551234, +1 864 555 1234, 18645551234) matches.
+                // Also handles multiple people sharing a number safely without arbitrary selection.
+                $p_stmt = $pdo->prepare("
+                    SELECT first_name, last_name, human_id, phone_e164, emergency_phone_e164 
+                    FROM directory_index 
+                    WHERE phone_e164 = ? 
+                       OR emergency_phone_e164 = ?
+                       OR (length(?) = 10 AND (
+                           SUBSTR(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone_e164, ' ', ''), '-', ''), '(', ''), ')', ''), '+', ''), -10) = ?
+                           OR SUBSTR(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(emergency_phone_e164, ' ', ''), '-', ''), '(', ''), ')', ''), '+', ''), -10) = ?
+                       ))
+                       OR human_id = ?
+                ");
+                $p_stmt->execute([$from_e164, $from_e164, $from_last10, $from_last10, $from_last10, $from_norm]);
+                $matched_rows = $p_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+                $matched_names = [];
+                foreach ($matched_rows as $row) {
                     $fn = trim($row['first_name'] ?? '');
                     $ln = trim($row['last_name'] ?? '');
-                    if (!empty($fn) || !empty($ln)) $constituent_name = trim("$fn $ln");
+                    $full = trim("$fn $ln");
+                    if (!empty($full)) {
+                        $clean_name = ($full === strtolower($full)) ? ucwords($full) : $full;
+                        if (!in_array($clean_name, $matched_names, true)) {
+                            $matched_names[] = $clean_name;
+                        }
+                    }
+                }
+
+                if (count($matched_names) === 1) {
+                    $constituent_name = $matched_names[0];
+                } elseif (count($matched_names) > 1) {
+                    $constituent_name = implode(' / ', $matched_names);
                 }
 
                 $pdo->exec("UPDATE sms_relay_sessions SET status = 'expired' WHERE status = 'active' AND expires_at <= datetime('now')");
@@ -8166,7 +8290,7 @@ if ($uri === '/api/v1/webhooks/twilio/sms') {
                     $formatted_display_phone = sprintf("(%s) %s-%s", substr($digits, 0, 3), substr($digits, 3, 3), substr($digits, 6, 4));
                 }
 
-                $fwd_msg = "STUDY CENTER — {$constituent_name}\n{$formatted_display_phone}\n{$fwd_body}\n\nRef: {$token}\nReply with:\n{$token} your reply";
+                $fwd_msg = "Incoming Text — {$constituent_name}\nFrom: {$formatted_display_phone}\n{$fwd_body}\n\nRef: {$token}\nReply with:\n{$token} your reply";
 
                 $tw_sid = $config['TWILIO_ACCOUNT_SID'] ?? '';
                 $tw_token = $config['TWILIO_AUTH_TOKEN'] ?? '';
