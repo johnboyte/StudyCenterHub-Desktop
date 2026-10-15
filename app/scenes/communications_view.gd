@@ -69,6 +69,20 @@ var btn_send_message: Button = null
 var message_body_edit: TextEdit = null
 var char_count_label: Label = null
 
+const SMSEncodingHelperScript = preload("res://src/domain/communications/sms_encoding_helper.gd")
+
+# SMS Cost Estimator & Optimization Members
+var btn_optimize_sms: Button = null
+var sms_estimator_card: PanelContainer = null
+var lbl_est_recipients_val: Label = null
+var lbl_est_chars_val: Label = null
+var lbl_est_encoding_val: Label = null
+var lbl_est_segs_per_recip_val: Label = null
+var lbl_est_total_segs_val: Label = null
+var lbl_est_cost_val: Label = null
+var lbl_est_rate_note: Label = null
+var lbl_est_alert_banner: Label = null
+
 # Attachment Members
 var current_attachment_path: String = ""
 var attachment_card: PanelContainer = null
@@ -81,14 +95,45 @@ var btn_remove_image: Button = null
 var btn_replace_image: Button = null
 var channel_mms_indicator: Label = null
 
+# Live Drag Diagnostic Members (DEV ONLY)
+var diag_card: PanelContainer = null
+var diag_status_label: Label = null
+var diag_detail_label: Label = null
+var diag_current_stage: String = "WAITING FOR FILE"
+
 @onready var composer_card: PanelContainer = %ComposerCard
 @onready var voicemail_card: PanelContainer = %VoicemailCard
 @onready var threads_card: PanelContainer = %ThreadsCard
 @onready var log_card: PanelContainer = %LogCard
 
+func _update_drag_diagnostic(stage: String, detail: String = "") -> void:
+	diag_current_stage = stage
+	var time_str = Time.get_time_string_from_system()
+	print("[DRAG_DIAGNOSTIC] [%s] STAGE: %s | DETAIL: %s" % [time_str, stage, detail])
+	
+	if not diag_status_label or not is_instance_valid(diag_status_label):
+		return
+		
+	diag_status_label.text = "STAGE: " + stage
+	
+	if stage.begins_with("FAILED"):
+		diag_status_label.add_theme_color_override("font_color", Color(0.95, 0.30, 0.30, 1.0))
+	elif stage == "IMAGE ATTACHED SUCCESSFULLY":
+		diag_status_label.add_theme_color_override("font_color", Color(0.20, 0.85, 0.40, 1.0))
+	elif stage == "WAITING FOR FILE":
+		diag_status_label.add_theme_color_override("font_color", Color(0.65, 0.70, 0.80, 1.0))
+	else:
+		diag_status_label.add_theme_color_override("font_color", Color(0.30, 0.75, 1.0, 1.0))
+		
+	if diag_detail_label and is_instance_valid(diag_detail_label):
+		if detail != "":
+			diag_detail_label.text = "[%s] %s" % [time_str, detail]
+		else:
+			diag_detail_label.text = "[%s] Active monitoring..." % [time_str]
+
 func _enter_tree() -> void:
 	NativePlayerBridgeScript.enable_external_drag()
-	NativePlayerBridgeScript.set_drag_box_visible(true)
+	NativePlayerBridgeScript.set_drag_box_visible(false)
 	var win = get_window()
 	if win and not win.files_dropped.is_connected(_on_window_files_dropped):
 		win.files_dropped.connect(_on_window_files_dropped)
@@ -96,7 +141,7 @@ func _enter_tree() -> void:
 func _ready() -> void:
 	add_to_group("sync_listeners")
 	NativePlayerBridgeScript.enable_external_drag()
-	NativePlayerBridgeScript.set_drag_box_visible(true)
+	NativePlayerBridgeScript.set_drag_box_visible(false)
 	_setup_communicate_send_composer()
 	_init_database()
 	_style_card()
@@ -112,11 +157,21 @@ func _process(_delta: float) -> void:
 		return
 	var drop_data = NativePlayerBridgeScript.poll_external_drop()
 	if not drop_data.is_empty():
+		var ev_type = str(drop_data.get("event", ""))
 		var payload = str(drop_data.get("payload", ""))
-		if payload != "":
-			var ext = payload.get_extension().to_lower()
-			if ext in ["png", "jpg", "jpeg", "webp", "heic", "heif"]:
+		var gx = float(drop_data.get("x", 0.0))
+		var gy = float(drop_data.get("y", 0.0))
+		
+		if ev_type == "EXTERNAL_DRAG_ENTERED":
+			if diag_current_stage == "WAITING FOR FILE":
+				_update_drag_diagnostic("DRAG ENTERED MACOS WINDOW", "Native AppKit drag entered main window at (%.1f, %.1f)" % [gx, gy])
+		elif ev_type == "EXTERNAL_DROP":
+			_update_drag_diagnostic("FILE DROP RECEIVED", "Native AppKit drop captured at (%.1f, %.1f)" % [gx, gy])
+			if payload != "":
+				_update_drag_diagnostic("FILE PATH RECEIVED", "Extracted path: " + payload)
 				_set_attached_image(payload)
+			else:
+				_update_drag_diagnostic("FAILED AT: FILE PATH RECEIVED", "Native drop payload was empty")
 
 func _can_drop_data(_at_position: Vector2, data: Variant) -> bool:
 	if typeof(data) == TYPE_STRING:
@@ -141,6 +196,8 @@ func _drop_data(_at_position: Vector2, data: Variant) -> void:
 		file_path = str(data[0])
 	
 	if file_path != "":
+		_update_drag_diagnostic("FILE DROP RECEIVED", "Internal Control drop data received")
+		_update_drag_diagnostic("FILE PATH RECEIVED", "Extracted path: " + file_path)
 		_set_attached_image(file_path)
 
 func _on_drop_zone_gui_input(event: InputEvent) -> void:
@@ -157,6 +214,9 @@ func _on_drop_zone_mouse_entered() -> void:
 		dz_st.corner_radius_top_left = 6; dz_st.corner_radius_top_right = 6; dz_st.corner_radius_bottom_left = 6; dz_st.corner_radius_bottom_right = 6
 		dz_st.content_margin_left = 14; dz_st.content_margin_top = 10; dz_st.content_margin_right = 14; dz_st.content_margin_bottom = 10
 		attachment_drop_zone.add_theme_stylebox_override("panel", dz_st)
+	
+	if diag_current_stage == "DRAG ENTERED MACOS WINDOW" or diag_current_stage == "WAITING FOR FILE":
+		_update_drag_diagnostic("DRAG ENTERED DROP ZONE", "Mouse cursor entered attachment drop zone rect")
 
 func _on_drop_zone_mouse_exited() -> void:
 	if attachment_drop_zone:
@@ -756,6 +816,7 @@ func _apply_composer_styles_and_items() -> void:
 	var composer_vbox = composer_card.get_node_or_null("ComposerMargin/ComposerVBox") as VBoxContainer
 	if composer_vbox:
 		_setup_attachment_area(composer_vbox)
+		_setup_sms_cost_estimator_and_optimization(composer_vbox)
 	_update_character_count()
 
 func _reparent_node(node: Node, new_parent: Node) -> void:
@@ -839,6 +900,41 @@ func _setup_attachment_area(parent_vbox: VBoxContainer) -> void:
 	var vbox = VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 8)
 	attachment_card.add_child(vbox)
+
+	# --- DEVELOPMENT-ONLY LIVE DRAG DIAGNOSTIC PANEL ---
+	if not diag_card or not is_instance_valid(diag_card):
+		diag_card = PanelContainer.new()
+		var diag_st = StyleBoxFlat.new()
+		diag_st.bg_color = Color(0.10, 0.14, 0.20, 1.0)
+		diag_st.border_width_left = 2; diag_st.border_width_top = 2; diag_st.border_width_right = 2; diag_st.border_width_bottom = 2
+		diag_st.border_color = Color(0.20, 0.55, 0.90, 1.0)
+		diag_st.corner_radius_top_left = 6; diag_st.corner_radius_top_right = 6; diag_st.corner_radius_bottom_left = 6; diag_st.corner_radius_bottom_right = 6
+		diag_st.content_margin_left = 14; diag_st.content_margin_top = 8; diag_st.content_margin_right = 14; diag_st.content_margin_bottom = 8
+		diag_card.add_theme_stylebox_override("panel", diag_st)
+
+		var diag_vbox = VBoxContainer.new()
+		diag_vbox.add_theme_constant_override("separation", 2)
+		diag_card.add_child(diag_vbox)
+
+		var diag_title = Label.new()
+		diag_title.text = "🔍 FINDER DRAG-AND-DROP DIAGNOSTIC (DEV ONLY)"
+		diag_title.add_theme_font_size_override("font_size", 12)
+		diag_title.add_theme_color_override("font_color", Color(0.70, 0.80, 0.95, 1.0))
+		diag_vbox.add_child(diag_title)
+
+		diag_status_label = Label.new()
+		diag_status_label.text = "STAGE: WAITING FOR FILE"
+		diag_status_label.add_theme_font_size_override("font_size", 14)
+		diag_status_label.add_theme_color_override("font_color", Color(0.65, 0.70, 0.80, 1.0))
+		diag_vbox.add_child(diag_status_label)
+
+		diag_detail_label = Label.new()
+		diag_detail_label.text = "Drag a PNG, JPG, WEBP, or HEIC file from Finder over the drop zone below."
+		diag_detail_label.add_theme_font_size_override("font_size", 12)
+		diag_detail_label.add_theme_color_override("font_color", Color(0.75, 0.80, 0.88, 1.0))
+		diag_vbox.add_child(diag_detail_label)
+
+		vbox.add_child(diag_card)
 
 	var hdr_hbox = HBoxContainer.new()
 	hdr_hbox.add_theme_constant_override("separation", 10)
@@ -955,6 +1051,291 @@ func _setup_attachment_area(parent_vbox: VBoxContainer) -> void:
 
 func _on_channel_selected_change(_idx: int) -> void:
 	_update_composer_validation()
+	_update_character_count()
+
+func _setup_sms_cost_estimator_and_optimization(parent_vbox: VBoxContainer) -> void:
+	var msg_sec = parent_vbox.get_node_or_null("MessageSectionVBox") as VBoxContainer
+	if not msg_sec:
+		msg_sec = _find_composer_node("MessageSectionVBox", "MessageSectionVBox") as VBoxContainer
+	if not msg_sec:
+		return
+
+	# 1. Setup "✨ Optimize for SMS" button in MessageHBox
+	var msg_hbox = msg_sec.get_node_or_null("MessageHBox") as HBoxContainer
+	if msg_hbox:
+		if not btn_optimize_sms or not is_instance_valid(btn_optimize_sms):
+			btn_optimize_sms = Button.new()
+			btn_optimize_sms.name = "BtnOptimizeSMS"
+			btn_optimize_sms.text = "✨ Optimize for SMS"
+			btn_optimize_sms.tooltip_text = "Convert curly quotes, em dashes, and non-GSM punctuation to save billable segments"
+			btn_optimize_sms.visible = false
+
+			var opt_st = StyleBoxFlat.new()
+			opt_st.bg_color = Color(0.93, 0.96, 1.0, 1.0)
+			opt_st.border_width_left = 1; opt_st.border_width_top = 1; opt_st.border_width_right = 1; opt_st.border_width_bottom = 1
+			opt_st.border_color = Color(0.25, 0.55, 0.95, 1.0)
+			opt_st.corner_radius_top_left = 6; opt_st.corner_radius_top_right = 6; opt_st.corner_radius_bottom_left = 6; opt_st.corner_radius_bottom_right = 6
+			opt_st.content_margin_left = 10; opt_st.content_margin_top = 3; opt_st.content_margin_right = 10; opt_st.content_margin_bottom = 3
+			btn_optimize_sms.add_theme_stylebox_override("normal", opt_st)
+
+			var opt_hover = opt_st.duplicate()
+			opt_hover.bg_color = Color(0.85, 0.92, 1.0, 1.0)
+			btn_optimize_sms.add_theme_stylebox_override("hover", opt_hover)
+
+			btn_optimize_sms.add_theme_color_override("font_color", Color(0.10, 0.35, 0.75, 1.0))
+			btn_optimize_sms.add_theme_font_size_override("font_size", 12)
+			btn_optimize_sms.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+			btn_optimize_sms.pressed.connect(_on_btn_optimize_sms_pressed)
+			msg_hbox.add_child(btn_optimize_sms)
+
+	# 2. Setup dedicated SMS Cost & Segment Estimator Card below MessageBodyEdit
+	if not sms_estimator_card or not is_instance_valid(sms_estimator_card):
+		sms_estimator_card = PanelContainer.new()
+		sms_estimator_card.name = "SMSEstimatorCard"
+		sms_estimator_card.custom_minimum_size = Vector2(660, 0)
+		sms_estimator_card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+		var est_st = StyleBoxFlat.new()
+		est_st.bg_color = Color(0.97, 0.98, 0.99, 1.0)
+		est_st.border_width_left = 1; est_st.border_width_top = 1; est_st.border_width_right = 1; est_st.border_width_bottom = 1
+		est_st.border_color = Color(0.82, 0.86, 0.92, 1.0)
+		est_st.corner_radius_top_left = 6; est_st.corner_radius_top_right = 6; est_st.corner_radius_bottom_left = 6; est_st.corner_radius_bottom_right = 6
+		est_st.content_margin_left = 12; est_st.content_margin_top = 8; est_st.content_margin_right = 12; est_st.content_margin_bottom = 8
+		sms_estimator_card.add_theme_stylebox_override("panel", est_st)
+
+		var card_vbox = VBoxContainer.new()
+		card_vbox.add_theme_constant_override("separation", 6)
+		sms_estimator_card.add_child(card_vbox)
+
+		# Row 1: Header + Cost
+		var hdr_hbox = HBoxContainer.new()
+		hdr_hbox.add_theme_constant_override("separation", 10)
+		card_vbox.add_child(hdr_hbox)
+
+		var title_lbl = Label.new()
+		title_lbl.text = "📊 SMS Cost & Segment Estimator"
+		title_lbl.add_theme_font_size_override("font_size", 12)
+		title_lbl.add_theme_color_override("font_color", Color(0.25, 0.35, 0.50, 1.0))
+		hdr_hbox.add_child(title_lbl)
+
+		var hdr_spacer = Control.new()
+		hdr_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		hdr_hbox.add_child(hdr_spacer)
+
+		lbl_est_cost_val = Label.new()
+		lbl_est_cost_val.text = "💰 Est. Cost: $0.00"
+		lbl_est_cost_val.add_theme_font_size_override("font_size", 13)
+		lbl_est_cost_val.add_theme_color_override("font_color", Color(0.12, 0.48, 0.24, 1.0))
+		hdr_hbox.add_child(lbl_est_cost_val)
+
+		# Row 2: 5 key metrics
+		var metrics_hbox = HBoxContainer.new()
+		metrics_hbox.add_theme_constant_override("separation", 16)
+		card_vbox.add_child(metrics_hbox)
+
+		lbl_est_recipients_val = Label.new()
+		lbl_est_recipients_val.text = "👥 Recipients: 1"
+		lbl_est_recipients_val.add_theme_font_size_override("font_size", 12)
+		lbl_est_recipients_val.add_theme_color_override("font_color", Color(0.20, 0.25, 0.35, 1.0))
+		metrics_hbox.add_child(lbl_est_recipients_val)
+
+		lbl_est_chars_val = Label.new()
+		lbl_est_chars_val.text = "📝 Chars: 0"
+		lbl_est_chars_val.add_theme_font_size_override("font_size", 12)
+		lbl_est_chars_val.add_theme_color_override("font_color", Color(0.20, 0.25, 0.35, 1.0))
+		metrics_hbox.add_child(lbl_est_chars_val)
+
+		lbl_est_encoding_val = Label.new()
+		lbl_est_encoding_val.text = "🔤 GSM-7"
+		lbl_est_encoding_val.add_theme_font_size_override("font_size", 12)
+		lbl_est_encoding_val.add_theme_color_override("font_color", Color(0.15, 0.55, 0.35, 1.0))
+		metrics_hbox.add_child(lbl_est_encoding_val)
+
+		lbl_est_segs_per_recip_val = Label.new()
+		lbl_est_segs_per_recip_val.text = "📦 Per Recip: 0"
+		lbl_est_segs_per_recip_val.add_theme_font_size_override("font_size", 12)
+		lbl_est_segs_per_recip_val.add_theme_color_override("font_color", Color(0.20, 0.25, 0.35, 1.0))
+		metrics_hbox.add_child(lbl_est_segs_per_recip_val)
+
+		lbl_est_total_segs_val = Label.new()
+		lbl_est_total_segs_val.text = "📊 Total: 0 segs"
+		lbl_est_total_segs_val.add_theme_font_size_override("font_size", 12)
+		lbl_est_total_segs_val.add_theme_color_override("font_color", Color(0.12, 0.35, 0.65, 1.0))
+		metrics_hbox.add_child(lbl_est_total_segs_val)
+
+		# Row 3: Alert banner (visible when non-GSM characters detected)
+		lbl_est_alert_banner = Label.new()
+		lbl_est_alert_banner.text = ""
+		lbl_est_alert_banner.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		lbl_est_alert_banner.add_theme_font_size_override("font_size", 11)
+		lbl_est_alert_banner.add_theme_color_override("font_color", Color(0.78, 0.38, 0.05, 1.0))
+		lbl_est_alert_banner.visible = false
+		card_vbox.add_child(lbl_est_alert_banner)
+
+		# Row 4: Rate note
+		lbl_est_rate_note = Label.new()
+		lbl_est_rate_note.text = "Rates: $0.0079 Twilio base + ~$0.0043 carrier fee per segment • 160 chars/seg (GSM-7) or 67 chars/seg (Unicode)"
+		lbl_est_rate_note.add_theme_font_size_override("font_size", 10)
+		lbl_est_rate_note.add_theme_color_override("font_color", Color(0.55, 0.60, 0.68, 1.0))
+		card_vbox.add_child(lbl_est_rate_note)
+
+		msg_sec.add_child(sms_estimator_card)
+
+func _on_btn_optimize_sms_pressed() -> void:
+	if not message_body_edit: return
+	var txt = message_body_edit.text
+	if txt.strip_edges() == "": return
+
+	var recips = 0
+	if current_eligible_recipients.size() > 0:
+		for p in current_eligible_recipients:
+			if p.get("eval", {}).get("sms_ok", false): recips += 1
+	if recips == 0:
+		recips = maxi(1, selected_individual_ids.size()) if selected_audience_type == "Individual" else 27
+
+	var opt_data = SMSEncodingHelperScript.get_optimized_text(txt, recips)
+	if not opt_data.get("has_changes", false):
+		OS.alert("This message already uses GSM-7 standard encoding. No further optimization needed!", "Message Already Optimized")
+		return
+
+	# Show Confirmation Dialog with Before/After preview
+	var dlg = ConfirmationDialog.new()
+	dlg.title = "Optimize Message for SMS"
+	dlg.ok_button_text = "Apply Optimization"
+	dlg.cancel_button_text = "Keep Original"
+	dlg.min_size = Vector2(580, 420)
+
+	var margin = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 12)
+	margin.add_theme_constant_override("margin_top", 10)
+	margin.add_theme_constant_override("margin_right", 12)
+	margin.add_theme_constant_override("margin_bottom", 10)
+
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 12)
+	margin.add_child(vbox)
+
+	# Savings highlight banner
+	var savings_card = PanelContainer.new()
+	var sc_st = StyleBoxFlat.new()
+	sc_st.bg_color = Color(0.92, 0.98, 0.94, 1.0)
+	sc_st.border_width_left = 1; sc_st.border_width_top = 1; sc_st.border_width_right = 1; sc_st.border_width_bottom = 1
+	sc_st.border_color = Color(0.20, 0.70, 0.35, 1.0)
+	sc_st.corner_radius_top_left = 6; sc_st.corner_radius_top_right = 6; sc_st.corner_radius_bottom_left = 6; sc_st.corner_radius_bottom_right = 6
+	sc_st.content_margin_left = 12; sc_st.content_margin_top = 8; sc_st.content_margin_right = 12; sc_st.content_margin_bottom = 8
+	savings_card.add_theme_stylebox_override("panel", sc_st)
+
+	var sc_vbox = VBoxContainer.new()
+	sc_vbox.add_theme_constant_override("separation", 2)
+	savings_card.add_child(sc_vbox)
+
+	var sc_title = Label.new()
+	var pct = opt_data.get("percent_savings", 0.0)
+	var tot_sav = opt_data.get("total_segment_savings", 0)
+	var cost_sav = opt_data.get("cost_savings", 0.0)
+	if tot_sav > 0:
+		sc_title.text = "🎉 ESTIMATED SAVINGS: %.0f%% fewer billable segments (Save %d segments • $%.2f)" % [pct, tot_sav, cost_sav]
+		sc_title.add_theme_color_override("font_color", Color(0.10, 0.50, 0.20, 1.0))
+	else:
+		sc_title.text = "ℹ️ Message formatted for standard GSM-7 compatibility"
+		sc_title.add_theme_color_override("font_color", Color(0.20, 0.35, 0.60, 1.0))
+	sc_title.add_theme_font_size_override("font_size", 13)
+	sc_vbox.add_child(sc_title)
+	vbox.add_child(savings_card)
+
+	# Before vs After Comparison Card
+	var comp_card = PanelContainer.new()
+	var comp_st = StyleBoxFlat.new()
+	comp_st.bg_color = Color(0.96, 0.97, 0.99, 1.0)
+	comp_st.border_width_left = 1; comp_st.border_width_top = 1; comp_st.border_width_right = 1; comp_st.border_width_bottom = 1
+	comp_st.border_color = Color(0.82, 0.86, 0.92, 1.0)
+	comp_st.corner_radius_top_left = 6; comp_st.corner_radius_top_right = 6; comp_st.corner_radius_bottom_left = 6; comp_st.corner_radius_bottom_right = 6
+	comp_st.content_margin_left = 12; comp_st.content_margin_top = 8; comp_st.content_margin_right = 12; comp_st.content_margin_bottom = 8
+	comp_card.add_theme_stylebox_override("panel", comp_st)
+
+	var comp_hbox = HBoxContainer.new()
+	comp_hbox.add_theme_constant_override("separation", 24)
+	comp_card.add_child(comp_hbox)
+
+	var before_info = opt_data["before"]
+	var after_info = opt_data["after"]
+
+	var b_lbl = Label.new()
+	b_lbl.text = "BEFORE:\n• Encoding: %s\n• %d segments / recipient\n• %d total billable segments\n• Est. Cost: $%.2f" % [
+		before_info["encoding"],
+		before_info["segments_per_recipient"],
+		before_info["total_billable_units"],
+		before_info["estimated_cost"]
+	]
+	b_lbl.add_theme_color_override("font_color", Color(0.40, 0.25, 0.25, 1.0))
+	b_lbl.add_theme_font_size_override("font_size", 12)
+	comp_hbox.add_child(b_lbl)
+
+	var a_lbl = Label.new()
+	a_lbl.text = "AFTER (Optimized):\n• Encoding: %s\n• %d segments / recipient\n• %d total billable segments\n• Est. Cost: $%.2f" % [
+		after_info["encoding"],
+		after_info["segments_per_recipient"],
+		after_info["total_billable_units"],
+		after_info["estimated_cost"]
+	]
+	a_lbl.add_theme_color_override("font_color", Color(0.15, 0.45, 0.20, 1.0))
+	a_lbl.add_theme_font_size_override("font_size", 12)
+	comp_hbox.add_child(a_lbl)
+
+	vbox.add_child(comp_card)
+
+	# Replacements Made Summary
+	var repls = opt_data.get("replacements", [])
+	if repls.size() > 0:
+		var r_desc = []
+		for r in repls:
+			r_desc.append("%s → %s (%d)" % [r["from"], r["to"], r["count"]])
+		var r_lbl = Label.new()
+		r_lbl.text = "Substitutions: " + ", ".join(r_desc)
+		r_lbl.add_theme_color_override("font_color", Color(0.40, 0.45, 0.55, 1.0))
+		r_lbl.add_theme_font_size_override("font_size", 12)
+		vbox.add_child(r_lbl)
+
+	# Check if emoji remain
+	var non_gsm_after = after_info.get("non_gsm_characters", [])
+	if non_gsm_after.size() > 0:
+		var has_emoji = false
+		for item in non_gsm_after:
+			if item.get("is_emoji", false): has_emoji = true
+		if has_emoji:
+			var emoji_lbl = Label.new()
+			emoji_lbl.text = "ℹ️ Note: Emoji (e.g. 🏠, 📖) are preserved. Keeping emojis requires Unicode encoding (67 chars/segment)."
+			emoji_lbl.add_theme_color_override("font_color", Color(0.70, 0.45, 0.10, 1.0))
+			emoji_lbl.add_theme_font_size_override("font_size", 11)
+			vbox.add_child(emoji_lbl)
+
+	# Text Preview
+	var prev_title = Label.new()
+	prev_title.text = "Preview of Optimized Text:"
+	prev_title.add_theme_font_size_override("font_size", 12)
+	vbox.add_child(prev_title)
+
+	var preview_edit = TextEdit.new()
+	preview_edit.text = opt_data["optimized_text"]
+	preview_edit.editable = false
+	preview_edit.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
+	preview_edit.custom_minimum_size = Vector2(540, 100)
+	preview_edit.add_theme_font_size_override("font_size", 12)
+	vbox.add_child(preview_edit)
+
+	dlg.add_child(margin)
+	add_child(dlg)
+	dlg.popup_centered()
+
+	dlg.confirmed.connect(func():
+		message_body_edit.text = opt_data["optimized_text"]
+		_update_character_count()
+		_update_composer_validation()
+		dlg.queue_free()
+	)
+	dlg.canceled.connect(func():
+		dlg.queue_free()
+	)
 
 func _set_attached_image(file_path: String) -> void:
 	if not attachment_thumbnail or not attachment_info_label or not attachment_drop_zone or not attachment_preview_box:
@@ -963,10 +1344,14 @@ func _set_attached_image(file_path: String) -> void:
 	if not com_service and db:
 		com_service = CommunicationsServiceScript.new(db)
 	
+	_update_drag_diagnostic("IMAGE VALIDATION STARTED", "Validating file path: " + file_path)
+	
 	var ch = channel_dropdown.get_item_text(channel_dropdown.selected) if (channel_dropdown and channel_dropdown.selected >= 0 and channel_dropdown.selected < channel_dropdown.get_item_count()) else "SMS Text"
 	var val = com_service.validate_attachment(file_path, ch) if com_service else {"valid": true, "processed_path": file_path}
 	if not val.get("valid", false):
-		OS.alert(val.get("reason", "Invalid image attachment."), "Attachment Invalid")
+		var reason = str(val.get("reason", "Invalid image attachment."))
+		_update_drag_diagnostic("FAILED AT: IMAGE VALIDATION STARTED — " + reason, file_path)
+		OS.alert(reason, "Attachment Invalid")
 		return
 
 	var target_path = val.get("processed_path", file_path)
@@ -983,9 +1368,12 @@ func _set_attached_image(file_path: String) -> void:
 		var f = FileAccess.open(target_path, FileAccess.READ)
 		if f: f_size_mb = f.get_length() / (1024.0 * 1024.0)
 		if attachment_info_label: attachment_info_label.text = "📎 " + target_path.get_file() + "\nDimensions: %dx%d px | Size: %.2f MB" % [img.get_width(), img.get_height(), f_size_mb]
+		
+		_update_drag_diagnostic("IMAGE ATTACHED SUCCESSFULLY", "Attached %s (%dx%d px, %.2f MB)" % [target_path.get_file(), img.get_width(), img.get_height(), f_size_mb])
 	else:
 		if attachment_thumbnail: attachment_thumbnail.texture = null
 		if attachment_info_label: attachment_info_label.text = "📎 " + target_path.get_file()
+		_update_drag_diagnostic("FAILED AT: IMAGE ATTACHED SUCCESSFULLY — Texture load error code " + str(err), target_path)
 
 	if attachment_drop_zone: attachment_drop_zone.visible = false
 	if attachment_preview_box: attachment_preview_box.visible = true
@@ -999,6 +1387,7 @@ func _clear_attached_image() -> void:
 	if attachment_info_label: attachment_info_label.text = ""
 	if attachment_preview_box: attachment_preview_box.visible = false
 	if attachment_drop_zone: attachment_drop_zone.visible = true
+	_update_drag_diagnostic("WAITING FOR FILE", "Image cleared. Ready for Finder file drag.")
 	_update_composer_validation()
 
 func _reset_communications_composer_after_successful_send() -> void:
@@ -1030,11 +1419,14 @@ func _reset_communications_composer_after_successful_send() -> void:
 
 func _on_window_files_dropped(files: PackedStringArray) -> void:
 	if not is_visible_in_tree(): return
+	_update_drag_diagnostic("DRAG ENTERED MACOS WINDOW", "Godot window files_dropped signal received")
 	if files.size() > 0:
 		var dropped_file = files[0]
-		var ext = dropped_file.get_extension().to_lower()
-		if ext in ["png", "jpg", "jpeg", "webp", "heic", "heif"]:
-			_set_attached_image(dropped_file)
+		_update_drag_diagnostic("FILE DROP RECEIVED", "Payload files count: %d" % files.size())
+		_update_drag_diagnostic("FILE PATH RECEIVED", "Extracted path: " + dropped_file)
+		_set_attached_image(dropped_file)
+	else:
+		_update_drag_diagnostic("FAILED AT: FILE DROP RECEIVED", "files_dropped payload was empty")
 
 func _open_image_file_dialog() -> void:
 	var dlg = FileDialog.new()
@@ -1506,21 +1898,117 @@ func _on_channel_selected(index: int) -> void:
 	_update_character_count()
 
 func _update_character_count() -> void:
-	if not message_body_edit or not char_count_label: return
+	if not message_body_edit: return
 	var txt = message_body_edit.text
 	var count = txt.length()
-	var ch = channel_dropdown.get_item_text(channel_dropdown.selected) if (channel_dropdown and channel_dropdown.selected >= 0) else "SMS Text"
+	var ch = channel_dropdown.get_item_text(channel_dropdown.selected) if (channel_dropdown and channel_dropdown.selected >= 0 and channel_dropdown.selected < channel_dropdown.get_item_count()) else "SMS Text"
+	var has_media = (current_attachment_path != "")
 
-	var count_str = "%d character%s" % [count, ("s" if count != 1 else "")]
-	if ch.contains("SMS") or ch.contains("Both"):
-		var segments = 1
-		if count > 160:
-			segments = int(ceil(float(count) / 153.0))
-		elif count == 0:
-			segments = 0
-		count_str += " • Est. %d SMS segment%s" % [segments, ("s" if segments != 1 else "")]
+	# Determine recipient count from resolved recipients
+	var recips = 0
+	if current_eligible_recipients.size() > 0:
+		for p in current_eligible_recipients:
+			var eval_d = p.get("eval", {})
+			if eval_d.get("sms_ok", false) or ch == "SMS Text":
+				recips += 1
+	if recips == 0:
+		if selected_audience_type == "Individual":
+			recips = maxi(1, selected_individual_ids.size())
+		else:
+			recips = 27
 
-	char_count_label.text = count_str
+	var analysis = SMSEncodingHelperScript.analyze_sms(txt, has_media, recips)
+
+	# Legacy char_count_label format must start with "%d character%s" for existing test compatibility
+	if char_count_label:
+		var count_str = "%d character%s" % [count, ("s" if count != 1 else "")]
+		if ch.contains("SMS") or ch.contains("Both"):
+			if count == 0 and not has_media:
+				count_str += " • Est. 0 SMS segments"
+			elif analysis["is_mms"]:
+				count_str += " • MMS • 1 unit/recip • %d recipient%s • $%.2f" % [
+					recips, ("s" if recips != 1 else ""),
+					analysis["estimated_cost"]
+				]
+			else:
+				var segs = analysis["segments_per_recipient"]
+				count_str += " • Est. %d SMS segment%s" % [segs, ("s" if segs != 1 else "")]
+		char_count_label.text = count_str
+
+	# Update rich SMS Estimator Card
+	if sms_estimator_card and is_instance_valid(sms_estimator_card):
+		if ch == "Phone Call" or ch == "Email":
+			sms_estimator_card.visible = false
+			if btn_optimize_sms: btn_optimize_sms.visible = false
+			return
+
+		sms_estimator_card.visible = true
+		if lbl_est_recipients_val:
+			lbl_est_recipients_val.text = "👥 Recipients: %d" % recips
+		if lbl_est_chars_val:
+			lbl_est_chars_val.text = "📝 Chars: %d" % count
+		if lbl_est_encoding_val:
+			if analysis["is_mms"]:
+				lbl_est_encoding_val.text = "🖼️ MMS (Attachment)"
+				lbl_est_encoding_val.add_theme_color_override("font_color", Color(0.15, 0.55, 0.35, 1.0))
+			elif analysis["encoding"] == "Unicode":
+				lbl_est_encoding_val.text = "🔤 Unicode (UCS-2)"
+				lbl_est_encoding_val.add_theme_color_override("font_color", Color(0.85, 0.45, 0.10, 1.0))
+			else:
+				lbl_est_encoding_val.text = "🔤 GSM-7 (Standard)"
+				lbl_est_encoding_val.add_theme_color_override("font_color", Color(0.15, 0.55, 0.35, 1.0))
+
+		if lbl_est_segs_per_recip_val:
+			if analysis["is_mms"]:
+				lbl_est_segs_per_recip_val.text = "📦 Per Recip: 1 MMS"
+			else:
+				lbl_est_segs_per_recip_val.text = "📦 Per Recip: %d seg%s" % [
+					analysis["segments_per_recipient"],
+					("s" if analysis["segments_per_recipient"] != 1 else "")
+				]
+
+		if lbl_est_total_segs_val:
+			if analysis["is_mms"]:
+				lbl_est_total_segs_val.text = "📊 Total: %d MMS units" % analysis["total_billable_units"]
+			else:
+				lbl_est_total_segs_val.text = "📊 Total: %d seg%s" % [
+					analysis["total_billable_units"],
+					("s" if analysis["total_billable_units"] != 1 else "")
+				]
+
+		if lbl_est_cost_val:
+			lbl_est_cost_val.text = "💰 Est. Cost: $%.2f" % analysis["estimated_cost"]
+
+		if lbl_est_rate_note:
+			lbl_est_rate_note.text = analysis["rate_detail"]
+
+		if lbl_est_alert_banner:
+			if analysis["can_optimize"]:
+				var opt_check = SMSEncodingHelperScript.get_optimized_text(txt, recips)
+				if opt_check["total_segment_savings"] > 0:
+					lbl_est_alert_banner.visible = true
+					lbl_est_alert_banner.text = "⚠️ Unicode detected! Optimizing will save %d segments ($%.2f / %.0f%% fewer segments). Click '✨ Optimize for SMS' above." % [
+						opt_check["total_segment_savings"],
+						opt_check["cost_savings"],
+						opt_check["percent_savings"]
+					]
+				else:
+					lbl_est_alert_banner.visible = false
+			else:
+				lbl_est_alert_banner.visible = false
+
+		if btn_optimize_sms and is_instance_valid(btn_optimize_sms):
+			if analysis["can_optimize"]:
+				btn_optimize_sms.visible = true
+				btn_optimize_sms.disabled = false
+				btn_optimize_sms.text = "✨ Optimize for SMS"
+			else:
+				if count > 0 and analysis["encoding"] == "GSM-7":
+					btn_optimize_sms.visible = true
+					btn_optimize_sms.disabled = true
+					btn_optimize_sms.text = "✓ SMS Optimized"
+				else:
+					btn_optimize_sms.visible = false
 
 func _update_audience_resolution() -> void:
 	if not db: return
@@ -1640,6 +2128,7 @@ func _update_audience_resolution() -> void:
 		aud_count_label.text = str(current_eligible_recipients.size()) + " Eligible Recipients | " + str(current_excluded_recipients.size()) + " Excluded"
 
 	_update_composer_validation()
+	_update_character_count()
 
 func _evaluate_person_eligibility(person: Dictionary, channel_str: String) -> Dictionary:
 	var phone = str(person.get("phone", "")).strip_edges()
@@ -1932,6 +2421,22 @@ func _show_individual_send_confirmation_dialog(recipient: Dictionary, channel: S
 		sub_att.add_theme_color_override("font_color", Color(0.18, 0.55, 0.35, 1.0))
 		details_vbox.add_child(sub_att)
 
+	if channel.contains("SMS") or channel.contains("Both"):
+		var has_media = (current_attachment_path != "")
+		var sms_analysis = SMSEncodingHelperScript.analyze_sms(body, has_media, 1)
+		var sub_cost = Label.new()
+		if sms_analysis["is_mms"]:
+			sub_cost.text = "📊 Message Type: MMS (1 unit) • Est. Cost: $%.2f" % sms_analysis["estimated_cost"]
+		else:
+			sub_cost.text = "📊 Est. SMS Segments: %d (%s) • Est. Cost: $%.2f" % [
+				sms_analysis["segments_per_recipient"],
+				sms_analysis["encoding"],
+				sms_analysis["estimated_cost"]
+			]
+		sub_cost.add_theme_font_size_override("font_size", 13)
+		sub_cost.add_theme_color_override("font_color", Color(0.18, 0.45, 0.70, 1.0))
+		details_vbox.add_child(sub_cost)
+
 	var msg_preview = body if body != "" else "[No text message — Image flyer only]"
 	var summary_snippet = msg_preview.left(120) + ("..." if msg_preview.length() > 120 else "")
 	var sub_msg = Label.new()
@@ -1960,11 +2465,21 @@ func _show_individual_send_confirmation_dialog(recipient: Dictionary, channel: S
 	btn_cancel.pressed.connect(func(): backdrop.queue_free())
 	btn_hbox.add_child(btn_cancel)
 
+	var is_sending_individual: Array[bool] = [false]
 	btn_confirm.pressed.connect(func():
-		backdrop.queue_free()
+		if is_sending_individual[0]:
+			return
+		is_sending_individual[0] = true
+		btn_confirm.disabled = true
+		btn_confirm.text = "Sending..."
+		btn_cancel.disabled = true
+		if btn_send_message: btn_send_message.disabled = true
+
 		var res = com_service.send_message_atomic(recipient, channel, body, _get_active_sender_name(), current_attachment_path)
+		backdrop.queue_free()
+		if btn_send_message: btn_send_message.disabled = false
 		if res.get("success", false):
-			print("Individual message sent successfully: ", res["message_uuid"])
+			print("Individual message sent successfully: ", res.get("message_uuid", ""))
 			_reset_communications_composer_after_successful_send()
 		else:
 			OS.alert("Failed to send message: " + str(res.get("error", "Unknown error")), "Send Error")
@@ -2067,6 +2582,27 @@ func _show_group_send_confirmation_dialog(channel: String, body: String) -> void
 	sub_excl.add_theme_font_size_override("font_size", 13)
 	sub_excl.add_theme_color_override("font_color", Color(0.50, 0.30, 0.30, 1.0))
 	details_vbox.add_child(sub_excl)
+
+	if channel.contains("SMS") or channel.contains("Both"):
+		var target_sms_recips = sms_count if channel.contains("Both") else current_eligible_recipients.size()
+		var has_media = (current_attachment_path != "")
+		var sms_analysis = SMSEncodingHelperScript.analyze_sms(body, has_media, target_sms_recips)
+		var sub_cost = Label.new()
+		if sms_analysis["is_mms"]:
+			sub_cost.text = "📊 Message Type: MMS (%d units) • Est. Cost: $%.2f" % [
+				sms_analysis["total_billable_units"],
+				sms_analysis["estimated_cost"]
+			]
+		else:
+			sub_cost.text = "📊 Est. Segments: %d/recip (%d total, %s) • Est. Cost: $%.2f" % [
+				sms_analysis["segments_per_recipient"],
+				sms_analysis["total_billable_units"],
+				sms_analysis["encoding"],
+				sms_analysis["estimated_cost"]
+			]
+		sub_cost.add_theme_font_size_override("font_size", 13)
+		sub_cost.add_theme_color_override("font_color", Color(0.18, 0.45, 0.70, 1.0))
+		details_vbox.add_child(sub_cost)
 
 	if current_attachment_path != "":
 		var sub_att = Label.new()

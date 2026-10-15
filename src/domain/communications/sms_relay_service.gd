@@ -192,11 +192,14 @@ func forward_inbound_sms(caller_node: Node, constituent_phone: String, constitue
 
 	var text_content = message_body.strip_edges()
 	if text_content == "" and media_urls.size() > 0:
-		text_content = "[Image received — open StudyCenterHub to view]"
+		text_content = "[Image received - open StudyCenterHub to view]"
 	elif media_urls.size() > 0:
-		text_content += "\n[Image received — open StudyCenterHub to view]"
+		text_content += "\n[Image received - open StudyCenterHub to view]"
 
-	var fwd_msg = "STUDY CENTER — %s\n%s\n%s\n\nRef: %s\nReply with:\n%s your reply" % [disp_name, disp_phone, text_content, token, token]
+	# Safe GSM-7 formatting for relay notification envelope to avoid unnecessary Unicode segments
+	var clean_disp_name = disp_name.replace("—", "-").replace("–", "-")
+	var clean_text_content = text_content.replace("—", "-").replace("–", "-").replace("‘", "'").replace("’", "'").replace("“", "\"").replace("”", "\"")
+	var fwd_msg = "Incoming Text - %s\nFrom: %s\nMessage: %s\n\nRef: %s\nReply with:\n%s your reply" % [clean_disp_name, disp_phone, clean_text_content, token, token]
 
 	_log_audit_event(int(sess.get("id", 0)), token, "notification_sent", norm_c, norm_r, JSON.stringify({"body": text_content}))
 

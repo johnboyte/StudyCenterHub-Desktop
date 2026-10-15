@@ -88,15 +88,15 @@ func _run_verification() -> void:
 
 	# Test 7: Verify Header & Relay Message Formatting
 	var msg_known = _format_relay_message(name_1, "+17073656637", "Are you open this afternoon?", "BM49")
-	assert(msg_known.begins_with("Incoming Text — McKenna Boykin\nFrom: (707) 365-6637"), "TEST 7a FAIL: Header formatting incorrect for known contact")
+	assert(msg_known.begins_with("Incoming Text - McKenna Boykin\nFrom: (707) 365-6637"), "TEST 7a FAIL: Header formatting incorrect for known contact")
 	assert(msg_known.contains("Are you open this afternoon?"), "TEST 7b FAIL: Message body missing")
 	assert(msg_known.contains("Ref: BM49"), "TEST 7c FAIL: Token missing from formatted message")
 	assert(msg_known.contains("BM49 your reply"), "TEST 7d FAIL: Token reply instructions missing")
 
 	var msg_unknown_fwd = _format_relay_message(name_unknown, "+18645550222", "Hello there", "BM49")
-	assert(msg_unknown_fwd.begins_with("Incoming Text — Unknown Contact\nFrom: (864) 555-0222"), "TEST 7e FAIL: Header formatting incorrect for unknown contact")
+	assert(msg_unknown_fwd.begins_with("Incoming Text - Unknown Contact\nFrom: (864) 555-0222"), "TEST 7e FAIL: Header formatting incorrect for unknown contact")
 
-	print("✓ PASS 7: Message header format 'Incoming Text — <Name>\\nFrom: <Phone>' verified.")
+	print("✓ PASS 7: Message header format 'Incoming Text - <Name>\\nFrom: <Phone>' verified.")
 
 	# Clean up test DB
 	if FileAccess.file_exists(test_db_path):
@@ -185,4 +185,4 @@ func _format_relay_message(constituent_name: String, from_phone: String, body: S
 	if digits.length() == 10:
 		display_phone = "(%s) %s-%s" % [digits.substr(0, 3), digits.substr(3, 3), digits.substr(6, 4)]
 
-	return "Incoming Text — %s\nFrom: %s\nMessage: %s\n\nRef: %s\nReply with:\n%s your reply" % [constituent_name, display_phone, body, token, token]
+	return "Incoming Text - %s\nFrom: %s\nMessage: %s\n\nRef: %s\nReply with:\n%s your reply" % [constituent_name, display_phone, body, token, token]
