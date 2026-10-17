@@ -1134,7 +1134,7 @@ func _setup_sms_cost_estimator_and_optimization(parent_vbox: VBoxContainer) -> v
 		card_vbox.add_child(metrics_hbox)
 
 		lbl_est_recipients_val = Label.new()
-		lbl_est_recipients_val.text = "👥 Recipients: 1"
+		lbl_est_recipients_val.text = "👥 Recipients: 0"
 		lbl_est_recipients_val.add_theme_font_size_override("font_size", 12)
 		lbl_est_recipients_val.add_theme_color_override("font_color", Color(0.20, 0.25, 0.35, 1.0))
 		metrics_hbox.add_child(lbl_est_recipients_val)
@@ -1158,7 +1158,7 @@ func _setup_sms_cost_estimator_and_optimization(parent_vbox: VBoxContainer) -> v
 		metrics_hbox.add_child(lbl_est_segs_per_recip_val)
 
 		lbl_est_total_segs_val = Label.new()
-		lbl_est_total_segs_val.text = "📊 Total: 0 segs"
+		lbl_est_total_segs_val.text = "📊 Total: 0 segments"
 		lbl_est_total_segs_val.add_theme_font_size_override("font_size", 12)
 		lbl_est_total_segs_val.add_theme_color_override("font_color", Color(0.12, 0.35, 0.65, 1.0))
 		metrics_hbox.add_child(lbl_est_total_segs_val)
@@ -1190,8 +1190,6 @@ func _on_btn_optimize_sms_pressed() -> void:
 	if current_eligible_recipients.size() > 0:
 		for p in current_eligible_recipients:
 			if p.get("eval", {}).get("sms_ok", false): recips += 1
-	if recips == 0:
-		recips = maxi(1, selected_individual_ids.size()) if selected_audience_type == "Individual" else 27
 
 	var opt_data = SMSEncodingHelperScript.get_optimized_text(txt, recips)
 	if not opt_data.get("has_changes", false):
@@ -1233,8 +1231,12 @@ func _on_btn_optimize_sms_pressed() -> void:
 	var pct = opt_data.get("percent_savings", 0.0)
 	var tot_sav = opt_data.get("total_segment_savings", 0)
 	var cost_sav = opt_data.get("cost_savings", 0.0)
+	var per_recip_sav = opt_data.get("savings_per_recipient", 0)
 	if tot_sav > 0:
 		sc_title.text = "🎉 ESTIMATED SAVINGS: %.0f%% fewer billable segments (Save %d segments • $%.2f)" % [pct, tot_sav, cost_sav]
+		sc_title.add_theme_color_override("font_color", Color(0.10, 0.50, 0.20, 1.0))
+	elif per_recip_sav > 0:
+		sc_title.text = "🎉 ESTIMATED SAVINGS: %.0f%% fewer billable segments (%d fewer segments per recipient)" % [pct, per_recip_sav]
 		sc_title.add_theme_color_override("font_color", Color(0.10, 0.50, 0.20, 1.0))
 	else:
 		sc_title.text = "ℹ️ Message formatted for standard GSM-7 compatibility"
@@ -1312,15 +1314,38 @@ func _on_btn_optimize_sms_pressed() -> void:
 	# Text Preview
 	var prev_title = Label.new()
 	prev_title.text = "Preview of Optimized Text:"
-	prev_title.add_theme_font_size_override("font_size", 12)
+	prev_title.add_theme_font_size_override("font_size", 13)
+	prev_title.add_theme_color_override("font_color", Color(0.95, 0.95, 1.0, 1.0))
 	vbox.add_child(prev_title)
 
 	var preview_edit = TextEdit.new()
 	preview_edit.text = opt_data["optimized_text"]
 	preview_edit.editable = false
+	preview_edit.selecting_enabled = true
+	preview_edit.context_menu_enabled = true
+	preview_edit.scroll_smooth = true
+	preview_edit.scroll_fit_content_height = false
 	preview_edit.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
-	preview_edit.custom_minimum_size = Vector2(540, 100)
-	preview_edit.add_theme_font_size_override("font_size", 12)
+	preview_edit.custom_minimum_size = Vector2(540, 115)
+	preview_edit.add_theme_font_size_override("font_size", 13)
+	preview_edit.add_theme_constant_override("line_spacing", 4)
+
+	# Readability styling: White text (#FFFFFF) on preserved dark background
+	var prev_st = StyleBoxFlat.new()
+	prev_st.bg_color = Color(0.12, 0.15, 0.20, 1.0) # Preserved dark background
+	prev_st.border_width_left = 1; prev_st.border_width_top = 1; prev_st.border_width_right = 1; prev_st.border_width_bottom = 1
+	prev_st.border_color = Color(0.30, 0.38, 0.48, 1.0)
+	prev_st.corner_radius_top_left = 6; prev_st.corner_radius_top_right = 6; prev_st.corner_radius_bottom_left = 6; prev_st.corner_radius_bottom_right = 6
+	prev_st.content_margin_left = 12; prev_st.content_margin_top = 10; prev_st.content_margin_right = 12; prev_st.content_margin_bottom = 10
+	preview_edit.add_theme_stylebox_override("normal", prev_st)
+	preview_edit.add_theme_stylebox_override("read_only", prev_st)
+	preview_edit.add_theme_stylebox_override("focus", prev_st)
+
+	# Pure white text (#FFFFFF) for normal, read-only, and selection
+	preview_edit.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
+	preview_edit.add_theme_color_override("font_readonly_color", Color(1.0, 1.0, 1.0, 1.0))
+	preview_edit.add_theme_color_override("font_selected_color", Color(1.0, 1.0, 1.0, 1.0))
+	preview_edit.add_theme_color_override("selection_color", Color(0.22, 0.45, 0.85, 0.70))
 	vbox.add_child(preview_edit)
 
 	dlg.add_child(margin)
@@ -1911,11 +1936,6 @@ func _update_character_count() -> void:
 			var eval_d = p.get("eval", {})
 			if eval_d.get("sms_ok", false) or ch == "SMS Text":
 				recips += 1
-	if recips == 0:
-		if selected_audience_type == "Individual":
-			recips = maxi(1, selected_individual_ids.size())
-		else:
-			recips = 27
 
 	var analysis = SMSEncodingHelperScript.analyze_sms(txt, has_media, recips)
 
@@ -1969,11 +1989,16 @@ func _update_character_count() -> void:
 
 		if lbl_est_total_segs_val:
 			if analysis["is_mms"]:
-				lbl_est_total_segs_val.text = "📊 Total: %d MMS units" % analysis["total_billable_units"]
+				var m_units = analysis["total_billable_units"]
+				lbl_est_total_segs_val.text = "📊 Total: %d MMS unit%s" % [
+					m_units,
+					("s" if m_units != 1 else "")
+				]
 			else:
-				lbl_est_total_segs_val.text = "📊 Total: %d seg%s" % [
-					analysis["total_billable_units"],
-					("s" if analysis["total_billable_units"] != 1 else "")
+				var tot = analysis["total_billable_units"]
+				lbl_est_total_segs_val.text = "📊 Total: %d segment%s" % [
+					tot,
+					("s" if tot != 1 else "")
 				]
 
 		if lbl_est_cost_val:
@@ -1990,6 +2015,12 @@ func _update_character_count() -> void:
 					lbl_est_alert_banner.text = "⚠️ Unicode detected! Optimizing will save %d segments ($%.2f / %.0f%% fewer segments). Click '✨ Optimize for SMS' above." % [
 						opt_check["total_segment_savings"],
 						opt_check["cost_savings"],
+						opt_check["percent_savings"]
+					]
+				elif opt_check.get("savings_per_recipient", 0) > 0:
+					lbl_est_alert_banner.visible = true
+					lbl_est_alert_banner.text = "⚠️ Unicode detected! Optimizing will save %d segments per recipient (%.0f%% fewer segments). Click '✨ Optimize for SMS' above." % [
+						opt_check["savings_per_recipient"],
 						opt_check["percent_savings"]
 					]
 				else:

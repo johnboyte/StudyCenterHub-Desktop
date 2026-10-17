@@ -79,7 +79,7 @@ static func is_gsm7_extended(cp: int) -> bool:
 
 ## Full analysis of message text, segmentation, encoding, and cost
 static func analyze_sms(text: String, has_media: bool = false, recipient_count: int = 1) -> Dictionary:
-	var recips = maxi(1, recipient_count)
+	var recips = maxi(0, recipient_count)
 	
 	if has_media:
 		# MMS Mode: 1 flat MMS message per recipient regardless of length (up to 1600 chars)
@@ -218,7 +218,7 @@ static func analyze_sms(text: String, has_media: bool = false, recipient_count: 
 
 ## Perform safe text optimization replacing non-GSM punctuation with GSM-7 equivalents
 static func get_optimized_text(original: String, recipient_count: int = 1) -> Dictionary:
-	var recips = maxi(1, recipient_count)
+	var recips = maxi(0, recipient_count)
 	var before_analysis = analyze_sms(original, false, recips)
 	
 	var opt = original
@@ -248,7 +248,11 @@ static func get_optimized_text(original: String, recipient_count: int = 1) -> Di
 	var total_savings = maxi(0, total_before - total_after)
 	
 	var cost_savings = float(total_savings) * COST_PER_SMS_SEGMENT
-	var pct_savings = (float(total_savings) / float(total_before) * 100.0) if total_before > 0 else 0.0
+	var pct_savings = 0.0
+	if total_before > 0:
+		pct_savings = (float(total_savings) / float(total_before) * 100.0)
+	elif segs_before > 0:
+		pct_savings = (float(seg_savings_per_recip) / float(segs_before) * 100.0)
 
 	return {
 		"original_text": original,

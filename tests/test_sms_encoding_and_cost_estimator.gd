@@ -104,8 +104,15 @@ func _run_tests() -> void:
 	var fwd_analysis = SMSEncodingHelperScript.analyze_sms(fwd, false, 1)
 	assert(fwd_analysis["encoding"] == "GSM-7", "Test 10 failed: Formatted notification envelope is GSM-7")
 	print("✓ PASS 10: GSM-7 Forwarded Relay Message formatting verified.")
+	# 11. Test Zero Recipients: Per-recipient segments preserved, total units 0, cost $0.00
+	var zero_res = SMSEncodingHelperScript.analyze_sms("Important session reminder tonight!", false, 0)
+	assert(zero_res["recipient_count"] == 0, "Test 11 failed: Expected 0 recipients")
+	assert(zero_res["segments_per_recipient"] == 1, "Test 11 failed: Expected 1 segment per recipient")
+	assert(zero_res["total_billable_units"] == 0, "Test 11 failed: Expected 0 total billable units")
+	assert(zero_res["estimated_cost"] == 0.0, "Test 11 failed: Expected $0.00 cost")
+	print("✓ PASS 11: Zero recipients handling (per-recipient preserved, total units 0, cost $0.00) verified.")
 
 	print("\n==================================================")
-	print("ALL 10 SMS ENCODING & ESTIMATOR TESTS PASSED!")
+	print("ALL 11 SMS ENCODING & ESTIMATOR TESTS PASSED!")
 	print("==================================================")
 	quit(0)
