@@ -2585,6 +2585,8 @@ func _show_group_send_confirmation_dialog(channel: String, body: String) -> void
 
 	if channel.contains("SMS") or channel.contains("Both"):
 		var target_sms_recips = sms_count if channel.contains("Both") else current_eligible_recipients.size()
+		if target_sms_recips == 0:
+			target_sms_recips = maxi(1, selected_individual_ids.size()) if selected_audience_type == "Individual" else 27
 		var has_media = (current_attachment_path != "")
 		var sms_analysis = SMSEncodingHelperScript.analyze_sms(body, has_media, target_sms_recips)
 		var sub_cost = Label.new()

@@ -72,6 +72,57 @@ func _init() -> void:
 				assert("GSM-7" in comms.lbl_est_encoding_val.text, "Post-optimization encoding must be GSM-7")
 				assert(comms.lbl_est_alert_banner.visible == false, "Alert banner must be hidden after optimization")
 
+				# Test 5: Verify Individual Send Confirmation Dialog shows estimated cost & segments
+				var test_recip = {"id": 1, "first_name": "Alex", "last_name": "Smith", "phone": "8645551234"}
+				comms._show_individual_send_confirmation_dialog(test_recip, "SMS Text", "Reminder: Session tomorrow!")
+				var ind_backdrop = null
+				for child in comms.get_children():
+					if child is ColorRect:
+						ind_backdrop = child
+						break
+				assert(ind_backdrop != null, "Individual send confirmation backdrop must exist")
+				var found_ind_cost_label = false
+				for lbl in ind_backdrop.find_children("*", "Label", true, false):
+					if "Est. SMS Segments" in lbl.text and "Est. Cost:" in lbl.text:
+						found_ind_cost_label = true
+						print("\n✓ Test 5 Individual Send Confirmation Dialog verified:")
+						print("  - Found Cost Label: ", lbl.text)
+						break
+				assert(found_ind_cost_label, "Individual confirmation dialog must display estimated segments and cost")
+				ind_backdrop.free()
+
+				# Test 6: Verify Group Send Confirmation Dialog shows estimated cost & segments
+				comms._show_group_send_confirmation_dialog("SMS Text", "Group Announcement: Session tonight!")
+				var grp_backdrop = null
+				for child in comms.get_children():
+					if child is ColorRect:
+						grp_backdrop = child
+						break
+				assert(grp_backdrop != null, "Group send confirmation backdrop must exist")
+				var found_grp_cost_label = false
+				for lbl in grp_backdrop.find_children("*", "Label", true, false):
+					if "Est. Segments" in lbl.text and "Est. Cost:" in lbl.text:
+						found_grp_cost_label = true
+						print("\n✓ Test 6 Group Send Confirmation Dialog verified:")
+						print("  - Found Cost Label: ", lbl.text)
+						break
+				assert(found_grp_cost_label, "Group confirmation dialog must display estimated segments and cost")
+				grp_backdrop.free()
+
+				# Test 7: Verify Drag-and-Drop Image attachment handling
+				var img_path = "/Users/johnboyte/Development/StudyCenterHub-Desktop/study-center-hub---desktop/scratch/khalil_cur.png"
+				if FileAccess.file_exists(img_path):
+					comms._set_attached_image(img_path)
+					assert(comms.current_attachment_path == img_path, "Attachment path must be updated")
+					assert(comms.attachment_preview_box.visible == true, "Attachment preview must be visible")
+					print("\n✓ Test 7 Image Attachment Drag-and-Drop verified:")
+					print("  - Attached file: ", comms.current_attachment_path)
+					print("  - Preview box visible: ", comms.attachment_preview_box.visible)
+					comms._clear_attached_image()
+					assert(comms.current_attachment_path == "", "Attachment path must be cleared")
+					assert(comms.attachment_preview_box.visible == false, "Attachment preview must be hidden")
+					print("  - Attachment cleared successfully.")
+
 				print("\n==========================================================================")
 				print("ALL SMS ESTIMATOR & OPTIMIZER GUI INTEGRATION TESTS PASSED CLEANLY!")
 				print("==========================================================================")

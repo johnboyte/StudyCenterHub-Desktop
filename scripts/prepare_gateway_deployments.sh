@@ -45,7 +45,11 @@ cp -f "$PROJECT_DIR/gateway/upload_pass.php" "$DEV_DEPLOY_DIR/upload_pass.php"
 cp -f "$PROJECT_DIR/gateway/upload_media.php" "$PROD_DEPLOY_DIR/upload_media.php"
 cp -f "$PROJECT_DIR/gateway/upload_media.php" "$DEV_DEPLOY_DIR/upload_media.php"
 
+# 7. Package authoritative gateway_production.zip archive
+(cd "$PROD_DEPLOY_DIR" && zip -r -q "$BUILDS_DIR/gateway_production.zip" .)
+
 echo "✅ Production Gateway Bundle Created at: $PROD_DEPLOY_DIR"
+echo "✅ Production Gateway Archive Created at: $BUILDS_DIR/gateway_production.zip"
 echo "✅ Development Gateway Bundle Created at: $DEV_DEPLOY_DIR"
 echo "=============================================================================="
 echo "DEPLOYMENT INSTRUCTIONS:"
