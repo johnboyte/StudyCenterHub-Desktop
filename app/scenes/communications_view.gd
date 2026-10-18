@@ -1186,11 +1186,7 @@ func _on_btn_optimize_sms_pressed() -> void:
 	var txt = message_body_edit.text
 	if txt.strip_edges() == "": return
 
-	var recips = 0
-	if current_eligible_recipients.size() > 0:
-		for p in current_eligible_recipients:
-			if p.get("eval", {}).get("sms_ok", false): recips += 1
-
+	var recips = get_authoritative_sms_recipient_count()
 	var opt_data = SMSEncodingHelperScript.get_optimized_text(txt, recips)
 	if not opt_data.get("has_changes", false):
 		OS.alert("This message already uses GSM-7 standard encoding. No further optimization needed!", "Message Already Optimized")
@@ -1403,6 +1399,7 @@ func _set_attached_image(file_path: String) -> void:
 	if attachment_drop_zone: attachment_drop_zone.visible = false
 	if attachment_preview_box: attachment_preview_box.visible = true
 	_update_composer_validation()
+	_update_character_count()
 
 func _clear_attached_image() -> void:
 	if not attachment_drop_zone or not attachment_preview_box:
@@ -1414,6 +1411,7 @@ func _clear_attached_image() -> void:
 	if attachment_drop_zone: attachment_drop_zone.visible = true
 	_update_drag_diagnostic("WAITING FOR FILE", "Image cleared. Ready for Finder file drag.")
 	_update_composer_validation()
+	_update_character_count()
 
 func _reset_communications_composer_after_successful_send() -> void:
 	selected_individual_ids.clear()
@@ -1689,6 +1687,8 @@ func _refresh_checkbox_list() -> void:
 
 		checkbox_list_vbox.add_child(row)
 
+	_update_character_count()
+
 func _sync_checkbox_states() -> void:
 	if not checkbox_list_vbox: return
 	for row in checkbox_list_vbox.get_children():
@@ -1922,6 +1922,39 @@ func _on_channel_selected(index: int) -> void:
 	_update_audience_resolution()
 	_update_character_count()
 
+func get_authoritative_sms_recipients() -> Array:
+	var result: Array = []
+	var seen_phones: Dictionary = {}
+
+	for p in current_eligible_recipients:
+		var eval_d = p.get("eval", {})
+		var is_sms_ok = false
+		if eval_d.has("sms_ok"):
+			is_sms_ok = bool(eval_d.get("sms_ok", false))
+		else:
+			var phone_raw = str(p.get("phone", "")).strip_edges()
+			var sms_consent = int(p.get("sms_consent", 1)) == 1
+			is_sms_ok = (phone_raw != "" and phone_raw != "555-0000" and phone_raw.length() >= 7 and sms_consent)
+
+		if not is_sms_ok:
+			continue
+
+		var phone = str(p.get("phone", "")).strip_edges()
+		var norm_phone = CommunicationsServiceScript.normalize_phone_digits(phone)
+		if norm_phone == "" or norm_phone == "5550000" or norm_phone.length() < 7:
+			continue
+
+		if seen_phones.has(norm_phone):
+			continue
+
+		seen_phones[norm_phone] = true
+		result.append(p)
+
+	return result
+
+func get_authoritative_sms_recipient_count() -> int:
+	return get_authoritative_sms_recipients().size()
+
 func _update_character_count() -> void:
 	if not message_body_edit: return
 	var txt = message_body_edit.text
@@ -1929,13 +1962,8 @@ func _update_character_count() -> void:
 	var ch = channel_dropdown.get_item_text(channel_dropdown.selected) if (channel_dropdown and channel_dropdown.selected >= 0 and channel_dropdown.selected < channel_dropdown.get_item_count()) else "SMS Text"
 	var has_media = (current_attachment_path != "")
 
-	# Determine recipient count from resolved recipients
-	var recips = 0
-	if current_eligible_recipients.size() > 0:
-		for p in current_eligible_recipients:
-			var eval_d = p.get("eval", {})
-			if eval_d.get("sms_ok", false) or ch == "SMS Text":
-				recips += 1
+	# Determine recipient count authoritatively from resolved eligible recipients
+	var recips = get_authoritative_sms_recipient_count()
 
 	var analysis = SMSEncodingHelperScript.analyze_sms(txt, has_media, recips)
 
@@ -2615,9 +2643,7 @@ func _show_group_send_confirmation_dialog(channel: String, body: String) -> void
 	details_vbox.add_child(sub_excl)
 
 	if channel.contains("SMS") or channel.contains("Both"):
-		var target_sms_recips = sms_count if channel.contains("Both") else current_eligible_recipients.size()
-		if target_sms_recips == 0:
-			target_sms_recips = maxi(1, selected_individual_ids.size()) if selected_audience_type == "Individual" else 27
+		var target_sms_recips = get_authoritative_sms_recipient_count()
 		var has_media = (current_attachment_path != "")
 		var sms_analysis = SMSEncodingHelperScript.analyze_sms(body, has_media, target_sms_recips)
 		var sub_cost = Label.new()

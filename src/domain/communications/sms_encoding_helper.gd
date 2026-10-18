@@ -78,7 +78,7 @@ static func is_gsm7_extended(cp: int) -> bool:
 	return cp in GSM7_EXTENDED_CODEPOINTS
 
 ## Full analysis of message text, segmentation, encoding, and cost
-static func analyze_sms(text: String, has_media: bool = false, recipient_count: int = 1) -> Dictionary:
+static func analyze_sms(text: String, has_media: bool = false, recipient_count: int = 0) -> Dictionary:
 	var recips = maxi(0, recipient_count)
 	
 	if has_media:
@@ -217,7 +217,7 @@ static func analyze_sms(text: String, has_media: bool = false, recipient_count: 
 	}
 
 ## Perform safe text optimization replacing non-GSM punctuation with GSM-7 equivalents
-static func get_optimized_text(original: String, recipient_count: int = 1) -> Dictionary:
+static func get_optimized_text(original: String, recipient_count: int = 0) -> Dictionary:
 	var recips = maxi(0, recipient_count)
 	var before_analysis = analyze_sms(original, false, recips)
 	
