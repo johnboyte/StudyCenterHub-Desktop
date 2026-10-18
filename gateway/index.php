@@ -1,4 +1,12 @@
 <?php
+// ==============================================================================
+// StudyCenterHub Authoritative Cloud Gateway Controller
+// Source File: study-center-hub---desktop/gateway/index.php
+// Target Deployments: builds/gateway_production/ and builds/gateway_development/
+// NOTE: This is the ONLY authoritative source file. Never edit files in builds/.
+// All modifications must be made here, then deployed via prepare_gateway_deployments.sh.
+// ==============================================================================
+
 // Rate Limiting Helper Function (10 requests / 10s per IP)
 function enforce_rate_limit_php($pdo, $endpoint_name) {
     $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
