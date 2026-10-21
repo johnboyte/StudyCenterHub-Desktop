@@ -39,6 +39,7 @@ echo "==========================================================================
 "$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_sms_encoding_and_cost_estimator.gd"
 "$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_sms_estimator_gui.gd"
 "$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_sms_estimator_recipient_count.gd"
+"$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_communications_typing_responsiveness.gd"
 "$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_mobile_sms_relay_name_lookup.gd"
 "$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_single_relay_architecture.gd"
 "$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_scanner_focus_and_checkin_isolation.gd"

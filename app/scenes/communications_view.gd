@@ -71,6 +71,11 @@ var char_count_label: Label = null
 
 const SMSEncodingHelperScript = preload("res://src/domain/communications/sms_encoding_helper.gd")
 
+var _sms_analysis_timer: Timer = null
+var _cached_authoritative_sms_recipients: Array = []
+var _is_authoritative_sms_cache_valid: bool = false
+var _cached_eligible_recipients_size: int = -1
+
 # SMS Cost Estimator & Optimization Members
 var btn_optimize_sms: Button = null
 var sms_estimator_card: PanelContainer = null
@@ -807,11 +812,10 @@ func _apply_composer_styles_and_items() -> void:
 		if env_prefill != "" and message_body_edit.text == "":
 			message_body_edit.text = env_prefill
 
-		if not message_body_edit.text_changed.is_connected(_update_character_count):
-			message_body_edit.text_changed.connect(func():
-				_update_character_count()
-				_update_composer_validation()
-			)
+		if not message_body_edit.text_changed.is_connected(_on_message_body_text_changed):
+			message_body_edit.text_changed.connect(_on_message_body_text_changed)
+
+	_init_sms_debounce_timer()
 
 	var composer_vbox = composer_card.get_node_or_null("ComposerMargin/ComposerVBox") as VBoxContainer
 	if composer_vbox:
@@ -1470,9 +1474,17 @@ func _open_image_file_dialog() -> void:
 func _update_composer_validation() -> void:
 	var body = message_body_edit.text.strip_edges() if message_body_edit else ""
 	var has_content = (body != "" or current_attachment_path != "")
-	var has_recipients = (current_eligible_recipients.size() > 0)
-	var can_send = has_content and has_recipients
 	var channel_text = channel_dropdown.get_item_text(channel_dropdown.selected) if (channel_dropdown and channel_dropdown.selected >= 0 and channel_dropdown.selected < channel_dropdown.get_item_count()) else "SMS Text"
+
+	var has_recipients = false
+	if channel_text.contains("SMS"):
+		has_recipients = (get_authoritative_sms_recipient_count() > 0)
+	elif channel_text.contains("Email"):
+		has_recipients = (current_eligible_recipients.size() > 0)
+	else:
+		has_recipients = (current_eligible_recipients.size() > 0)
+
+	var can_send = has_content and has_recipients
 
 	if channel_text.contains("SMS"):
 		if current_attachment_path != "":
@@ -1489,19 +1501,26 @@ func _update_composer_validation() -> void:
 			channel_mms_indicator.visible = true
 
 	if btn_send_message:
-		btn_send_message.disabled = not can_send
-		if can_send:
-			_style_primary_button(btn_send_message)
-		else:
-			_style_disabled_button(btn_send_message)
+		var was_disabled = btn_send_message.disabled
+		var now_disabled = not can_send
+		btn_send_message.disabled = now_disabled
+		if was_disabled != now_disabled:
+			if can_send:
+				_style_primary_button(btn_send_message)
+			else:
+				_style_disabled_button(btn_send_message)
+
 	if btn_schedule_message:
-		btn_schedule_message.disabled = not can_send
-		if can_send:
-			btn_schedule_message.tooltip_text = "Schedule message or flyer broadcast"
-			_style_primary_button(btn_schedule_message)
-		else:
-			btn_schedule_message.tooltip_text = "Select a recipient and type a message or attach an image to schedule"
-			_style_disabled_button(btn_schedule_message)
+		var was_disabled_sched = btn_schedule_message.disabled
+		var now_disabled_sched = not can_send
+		btn_schedule_message.disabled = now_disabled_sched
+		if was_disabled_sched != now_disabled_sched:
+			if can_send:
+				btn_schedule_message.tooltip_text = "Schedule message or flyer broadcast"
+				_style_primary_button(btn_schedule_message)
+			else:
+				btn_schedule_message.tooltip_text = "Select a recipient and type a message or attach an image to schedule"
+				_style_disabled_button(btn_schedule_message)
 
 func _style_dropdown_control(dd: OptionButton) -> void:
 	if not dd: return
@@ -1922,7 +1941,42 @@ func _on_channel_selected(index: int) -> void:
 	_update_audience_resolution()
 	_update_character_count()
 
+func _init_sms_debounce_timer() -> void:
+	if not _sms_analysis_timer:
+		_sms_analysis_timer = Timer.new()
+		_sms_analysis_timer.one_shot = true
+		_sms_analysis_timer.wait_time = 0.18
+		_sms_analysis_timer.timeout.connect(func():
+			_update_character_count()
+		)
+		add_child(_sms_analysis_timer)
+
+func _on_message_body_text_changed() -> void:
+	_update_lightweight_char_count()
+	_update_composer_validation()
+	if _sms_analysis_timer:
+		_sms_analysis_timer.start(0.18)
+	else:
+		_update_character_count()
+
+func _update_lightweight_char_count() -> void:
+	if not message_body_edit: return
+	var count = message_body_edit.text.length()
+	if lbl_est_chars_val:
+		lbl_est_chars_val.text = "📝 Chars: %d" % count
+	if char_count_label:
+		var count_str = "%d character%s" % [count, ("s" if count != 1 else "")]
+		char_count_label.text = count_str
+
+func invalidate_authoritative_sms_cache() -> void:
+	_is_authoritative_sms_cache_valid = false
+	_cached_eligible_recipients_size = -1
+	_cached_authoritative_sms_recipients.clear()
+
 func get_authoritative_sms_recipients() -> Array:
+	if _is_authoritative_sms_cache_valid and _cached_eligible_recipients_size == current_eligible_recipients.size():
+		return _cached_authoritative_sms_recipients
+
 	var result: Array = []
 	var seen_phones: Dictionary = {}
 
@@ -1950,12 +2004,18 @@ func get_authoritative_sms_recipients() -> Array:
 		seen_phones[norm_phone] = true
 		result.append(p)
 
-	return result
+	_cached_authoritative_sms_recipients = result
+	_cached_eligible_recipients_size = current_eligible_recipients.size()
+	_is_authoritative_sms_cache_valid = true
+	return _cached_authoritative_sms_recipients
 
 func get_authoritative_sms_recipient_count() -> int:
 	return get_authoritative_sms_recipients().size()
 
 func _update_character_count() -> void:
+	if _sms_analysis_timer and not _sms_analysis_timer.is_stopped():
+		_sms_analysis_timer.stop()
+
 	if not message_body_edit: return
 	var txt = message_body_edit.text
 	var count = txt.length()
@@ -2186,6 +2246,7 @@ func _update_audience_resolution() -> void:
 	if aud_count_label:
 		aud_count_label.text = str(current_eligible_recipients.size()) + " Eligible Recipients | " + str(current_excluded_recipients.size()) + " Excluded"
 
+	invalidate_authoritative_sms_cache()
 	_update_composer_validation()
 	_update_character_count()
 

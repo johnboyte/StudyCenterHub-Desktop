@@ -10,11 +10,15 @@ extends RefCounted
 ## - Red squiggle overlay & right-click context menu (Replace, Ignore, Add, Cut/Copy/Paste/Delete)
 
 static var _common_words_set: Dictionary = {}
+static var _common_english_words_set: Dictionary = {}
 static var _proper_names_set: Dictionary = {}
 static var _candidate_word_list: Array = []
 static var _user_added_words: Dictionary = {}
 static var _ignored_words: Dictionary = {}
 static var _is_dict_loaded: bool = false
+static var _word_regex: RegEx = null
+static var _digits_regex: RegEx = null
+static var _suggestion_cache: Dictionary = {}
 
 const SUGGESTION_MAP = {
 	"tha": "the",
@@ -427,6 +431,7 @@ static func _ensure_dictionary_loaded() -> void:
 	# 2. Seed Built-in Common English Vocabulary & Short Words Fallback
 	for w in COMMON_ENGLISH_WORDS:
 		var lower = w.to_lower()
+		_common_english_words_set[lower] = true
 		_common_words_set[lower] = true
 		if not _candidate_word_list.has(lower):
 			_candidate_word_list.append(lower)
@@ -505,9 +510,10 @@ static func is_word_valid(word: String) -> bool:
 		return true
 
 	# 5. Ignore tokens containing numbers or special chars (e.g. P-20260813, 123th, 555-0100, $50)
-	var regex_digits = RegEx.new()
-	regex_digits.compile("[0-9#\\$%\\&@\\/\\\\]")
-	if regex_digits.search(word) != null:
+	if not _digits_regex:
+		_digits_regex = RegEx.new()
+		_digits_regex.compile("[0-9#\\$%\\&@\\/\\\\]")
+	if _digits_regex.search(word) != null:
 		return true
 
 	# 6. Possessive check (e.g. John's, Tess's, constituent's, constituent' -> check base)
@@ -528,7 +534,7 @@ static func is_word_valid(word: String) -> bool:
 	if _proper_names_set.has(title_version) or _proper_names_set.has(word):
 		if is_title_case:
 			return true
-		elif not COMMON_ENGLISH_WORDS.has(lower):
+		elif not _common_english_words_set.has(lower):
 			return false
 
 	# 8. Check Common Modern English Words
@@ -614,9 +620,20 @@ static func find_suggestions(word: String) -> Array:
 	_ensure_dictionary_loaded()
 	var lower = word.to_lower()
 
+	# Check suggestion cache
+	if _suggestion_cache.has(lower):
+		var cached_list: Array = _suggestion_cache[lower]
+		if word.length() > 0 and word[0] == word[0].to_upper():
+			var cap_res = []
+			for s in cached_list:
+				cap_res.append(s.capitalize())
+			return cap_res
+		return cached_list.duplicate()
+
 	# 1. Direct explicit map match
 	if SUGGESTION_MAP.has(lower):
 		var explicit_sug = SUGGESTION_MAP[lower]
+		_suggestion_cache[lower] = [explicit_sug]
 		if word.length() > 0 and word[0] == word[0].to_upper():
 			explicit_sug = explicit_sug.capitalize()
 		return [explicit_sug]
@@ -635,7 +652,7 @@ static func find_suggestions(word: String) -> Array:
 
 		if dist <= 2 or (dist <= 4 and overlap > 0.65):
 			var prefix_bonus = 4 if lower_cand.begins_with(lower.left(3)) else (2 if lower_cand.begins_with(first_char) else 0)
-			var common_bonus = 3 if lower_cand in COMMON_ENGLISH_WORDS else 0
+			var common_bonus = 3 if _common_words_set.has(lower_cand) else 0
 			var score = dist * 10 - int(overlap * 15.0) - prefix_bonus - common_bonus
 
 			scored_candidates.append({
@@ -654,26 +671,33 @@ static func find_suggestions(word: String) -> Array:
 	var suggestions = []
 	for item in scored_candidates:
 		var sug = item["word"]
-		if word.length() > 0 and word[0] == word[0].to_upper():
-			sug = sug.capitalize()
 		if not suggestions.has(sug):
 			suggestions.append(sug)
 		if suggestions.size() >= 3:
 			break
 
+	_suggestion_cache[lower] = suggestions.duplicate()
+
+	if word.length() > 0 and word[0] == word[0].to_upper():
+		var cap_res = []
+		for s in suggestions:
+			cap_res.append(s.capitalize())
+		return cap_res
+
 	return suggestions
 
-static func check_text(text: String) -> Array:
+static func check_text(text: String, include_suggestions: bool = true) -> Array:
 	_ensure_dictionary_loaded()
 
 	var issues = []
 	if text.strip_edges() == "":
 		return issues
 
-	var regex = RegEx.new()
-	regex.compile("\\b[a-zA-Z']+\\b")
+	if not _word_regex:
+		_word_regex = RegEx.new()
+		_word_regex.compile("\\b[a-zA-Z']+\\b")
 
-	var matches = regex.search_all(text)
+	var matches = _word_regex.search_all(text)
 	for m in matches:
 		var word = m.get_string()
 		var lower = word.to_lower()
@@ -684,7 +708,10 @@ static func check_text(text: String) -> Array:
 		if is_word_valid(word):
 			continue
 
-		var sugs = find_suggestions(word)
+		var sugs: Array = []
+		if include_suggestions:
+			sugs = find_suggestions(word)
+
 		issues.append({
 			"word": word,
 			"suggestions": sugs,
@@ -696,6 +723,7 @@ static func check_text(text: String) -> Array:
 
 static func ignore_word(word: String) -> void:
 	_ignored_words[word.to_lower()] = true
+	_suggestion_cache.clear()
 
 static func add_word_to_dictionary(word: String) -> void:
 	_ensure_dictionary_loaded()
@@ -707,6 +735,7 @@ static func add_word_to_dictionary(word: String) -> void:
 		_common_words_set[lower] = true
 	if not _candidate_word_list.has(word):
 		_candidate_word_list.append(word)
+	_suggestion_cache.clear()
 
 # --- Godot 4 Shared Native Spelling Syntax Highlighter Implementation ---
 
@@ -721,7 +750,7 @@ class SpellingSyntaxHighlighter extends SyntaxHighlighter:
 			return {}
 
 		const HelperScript = preload("res://src/ui/components/spelling_assistance_helper.gd")
-		var issues = HelperScript.check_text(line_str)
+		var issues = HelperScript.check_text(line_str, false)
 		if issues.size() == 0:
 			return {}
 

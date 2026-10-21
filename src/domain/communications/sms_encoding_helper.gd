@@ -71,11 +71,25 @@ const SAFE_SUBSTITUTIONS: Dictionary = {
 	"…": "..."
 }
 
+static var _gsm7_basic_set: Dictionary = {}
+static var _gsm7_extended_set: Dictionary = {}
+static var _gsm7_sets_initialized: bool = false
+
+static func _ensure_gsm7_sets() -> void:
+	if _gsm7_sets_initialized: return
+	for cp in GSM7_BASIC_CODEPOINTS:
+		_gsm7_basic_set[cp] = true
+	for cp in GSM7_EXTENDED_CODEPOINTS:
+		_gsm7_extended_set[cp] = true
+	_gsm7_sets_initialized = true
+
 static func is_gsm7_basic(cp: int) -> bool:
-	return cp in GSM7_BASIC_CODEPOINTS
+	if not _gsm7_sets_initialized: _ensure_gsm7_sets()
+	return _gsm7_basic_set.has(cp)
 
 static func is_gsm7_extended(cp: int) -> bool:
-	return cp in GSM7_EXTENDED_CODEPOINTS
+	if not _gsm7_sets_initialized: _ensure_gsm7_sets()
+	return _gsm7_extended_set.has(cp)
 
 ## Full analysis of message text, segmentation, encoding, and cost
 static func analyze_sms(text: String, has_media: bool = false, recipient_count: int = 0) -> Dictionary:
