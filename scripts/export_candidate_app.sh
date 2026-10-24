@@ -41,12 +41,14 @@ chmod +x "$EXEC_BIN"
 # Copy PCK resource package
 cp -f "$TARGET_PCK" "$RESOURCE_PCK"
 
-# Copy app icon if present
-if [ -f "$PROJECT_DIR/icon.icns" ]; then
-    cp -f "$PROJECT_DIR/icon.icns" "$RESOURCE_ICNS"
-elif [ -f "/Applications/StudyCenterHub.app/Contents/Resources/icon.icns" ]; then
-    cp -f "/Applications/StudyCenterHub.app/Contents/Resources/icon.icns" "$RESOURCE_ICNS"
+# Copy and enforce authoritative StudyCenterHub icon
+AUTH_ICNS="$PROJECT_DIR/assets/branding/StudyCenterHub.icns"
+if [ ! -f "$AUTH_ICNS" ]; then
+    echo "❌ ERROR: Authoritative icon missing at $AUTH_ICNS"
+    exit 1
 fi
+cp -f "$AUTH_ICNS" "$RESOURCE_ICNS"
+cp -f "$AUTH_ICNS" "$PROJECT_DIR/icon.icns"
 
 # Create Info.plist for self-contained Candidate app
 cat <<EOF > "$INFO_PLIST"
@@ -87,6 +89,12 @@ xattr -cr "$TARGET_APP"
 codesign --force --deep --sign - "$TARGET_APP"
 
 touch "$TARGET_APP"
+
+# Re-register bundle with macOS LaunchServices
+/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister -f "$TARGET_APP" || true
+
+# Mandatory icon integrity verification
+"$PROJECT_DIR/scripts/verify_app_icon_integrity.sh" "$TARGET_APP"
 
 echo "=============================================================================="
 echo "4. VERIFYING CANDIDATE STANDALONE APP BUNDLE"

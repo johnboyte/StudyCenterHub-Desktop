@@ -43,6 +43,7 @@ echo "==========================================================================
 "$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_mobile_sms_relay_name_lookup.gd"
 "$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_single_relay_architecture.gd"
 "$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_scanner_focus_and_checkin_isolation.gd"
+"$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_production_app_icon_regression.gd"
 "$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/verify_production_deployment.gd"
 echo "✅ All regression test suites passed 100% cleanly."
 
@@ -103,11 +104,15 @@ cp -f "$TARGET_PCK" "$BUILD_APP/Contents/Resources/StudyCenterHub.pck"
 cp -f "$TARGET_PCK" "$BUILD_APP/Contents/MacOS/StudyCenterHub-Desktop-Production.pck"
 cp -f "$TARGET_PCK" "$BUILD_APP/Contents/MacOS/StudyCenterHub.pck"
 
-# Copy icon
-if [ -f "$PROJECT_DIR/icon.icns" ]; then
-    cp -f "$PROJECT_DIR/icon.icns" "$TARGET_APP/Contents/Resources/icon.icns"
-    cp -f "$PROJECT_DIR/icon.icns" "$BUILD_APP/Contents/Resources/icon.icns"
+# Copy and enforce authoritative StudyCenterHub icon
+AUTH_ICNS="$PROJECT_DIR/assets/branding/StudyCenterHub.icns"
+if [ ! -f "$AUTH_ICNS" ]; then
+    echo "❌ ERROR: Authoritative icon missing at $AUTH_ICNS"
+    exit 1
 fi
+cp -f "$AUTH_ICNS" "$TARGET_APP/Contents/Resources/icon.icns"
+cp -f "$AUTH_ICNS" "$BUILD_APP/Contents/Resources/icon.icns"
+cp -f "$AUTH_ICNS" "$PROJECT_DIR/icon.icns"
 
 # Write Info.plist for self-contained Production bundle
 cat <<EOF > "$TARGET_APP/Contents/Info.plist"
@@ -154,8 +159,18 @@ codesign --force --deep --sign - "$BUILD_APP"
 touch "$TARGET_APP"
 touch "$BUILD_APP"
 
+# Re-register bundles with macOS LaunchServices
+/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister -f "$TARGET_APP" || true
+/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister -f "$BUILD_APP" || true
+
 echo "=============================================================================="
-echo "5. VERIFYING PRODUCTION DATABASE PRESERVATION"
+echo "5. MANDATORY PRODUCTION APP ICON INTEGRITY VERIFICATION"
+echo "=============================================================================="
+"$PROJECT_DIR/scripts/verify_app_icon_integrity.sh" "$TARGET_APP"
+"$PROJECT_DIR/scripts/verify_app_icon_integrity.sh" "$BUILD_APP"
+
+echo "=============================================================================="
+echo "6. VERIFYING PRODUCTION DATABASE PRESERVATION"
 echo "=============================================================================="
 if [ -f "$PROD_DB" ]; then
     echo "✅ Production Database Intact: $PROD_DB"

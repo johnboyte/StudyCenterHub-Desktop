@@ -55,9 +55,14 @@ if [ -f "$TARGET_PCK" ]; then
     cp -f "$TARGET_PCK" "$RESOURCE_PCK"
     cp -f "$TARGET_PCK" "$MACOS_DIR/StudyCenterHub-Desktop-Development.pck"
     
-    if [ -f "$PROJECT_DIR/icon.icns" ]; then
-        cp -f "$PROJECT_DIR/icon.icns" "$TARGET_APP/Contents/Resources/icon.icns"
+    # Copy and enforce authoritative StudyCenterHub icon
+    AUTH_ICNS="$PROJECT_DIR/assets/branding/StudyCenterHub.icns"
+    if [ ! -f "$AUTH_ICNS" ]; then
+        echo "❌ ERROR: Authoritative icon missing at $AUTH_ICNS"
+        exit 1
     fi
+    cp -f "$AUTH_ICNS" "$TARGET_APP/Contents/Resources/icon.icns"
+    cp -f "$AUTH_ICNS" "$PROJECT_DIR/icon.icns"
     
     # Install native runner binary directly into bundle MacOS directory
     cp -f "$GODOT_BIN" "$EXECUTABLE_BIN"
@@ -102,6 +107,13 @@ EOF
     codesign --force --deep --sign - "$TARGET_APP"
 
     touch "$TARGET_APP"
+
+    # Re-register bundle with macOS LaunchServices
+    /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister -f "$TARGET_APP" || true
+
+    # Mandatory icon integrity verification
+    "$PROJECT_DIR/scripts/verify_app_icon_integrity.sh" "$TARGET_APP"
+
     echo "✅ Development App Bundle Package Updated: $TARGET_APP"
 else
     echo "❌ ERROR: Exported PCK missing at $TARGET_PCK"

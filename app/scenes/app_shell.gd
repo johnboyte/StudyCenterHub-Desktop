@@ -108,8 +108,29 @@ func _ready() -> void:
 		switch_view("home")
 
 	_apply_window_title()
+	_enforce_brand_icon()
 	call_deferred("_prewarm_all_view_scenes")
 	call_deferred("_start_auto_sync")
+
+func _enforce_brand_icon() -> void:
+	if not DisplayServer.has_feature(DisplayServer.FEATURE_ICON):
+		return
+	var icon_paths = ["res://icon.png", "res://assets/branding/StudyCenterHub_512x512.png"]
+	for p in icon_paths:
+		var img: Image = null
+		if ResourceLoader.exists(p):
+			var tex = load(p)
+			if tex is Texture2D:
+				img = tex.get_image()
+		if not img or img.is_empty():
+			if FileAccess.file_exists(p):
+				img = Image.new()
+				var err = img.load(p)
+				if err != OK or img.is_empty():
+					img = null
+		if img and not img.is_empty():
+			DisplayServer.set_icon(img)
+			return
 
 const MacWKWebViewPlayerScript = preload("res://src/infrastructure/native/mac_wkwebview_player.gd")
 
