@@ -840,33 +840,8 @@ static void mac_wkwebview_cleanup_native();
 }
 @end
 
-static uint64_t g_macos_keydown_count = 0;
-static int g_macos_last_keycode = -1;
-static int g_macos_last_char_count = 0;
-static std::string g_macos_event_win_class = "nil";
-static id g_macos_key_monitor = nil;
-
-static void setup_passive_native_key_monitor() {
-    if (g_macos_key_monitor) return;
-    g_macos_key_monitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown handler:^NSEvent *(NSEvent *event) {
-        if (event && event.type == NSEventTypeKeyDown) {
-            g_macos_keydown_count++;
-            g_macos_last_keycode = (int)[event keyCode];
-            NSString *chars = [event characters];
-            g_macos_last_char_count = chars ? (int)chars.length : 0;
-            NSWindow *win = event.window;
-            g_macos_event_win_class = win ? [[win className] UTF8String] : "nil";
-        }
-        return event; // PASSIVE ONLY — NEVER MODIFY OR CONSUME EVENTS
-    }];
-}
-
 static void mac_wkwebview_cleanup_native() {
     g_dropWindowShouldBeVisible = false;
-    if (g_macos_key_monitor) {
-        [NSEvent removeMonitor:g_macos_key_monitor];
-        g_macos_key_monitor = nil;
-    }
     if (g_dropObserver) {
         [[NSNotificationCenter defaultCenter] removeObserver:g_dropObserver];
         g_dropObserver = nil;
@@ -881,7 +856,6 @@ static void mac_wkwebview_cleanup_native() {
 }
 
 static void ensure_external_drag_receiver() {
-    setup_passive_native_key_monitor();
     g_diag_info.bridge_loaded = true;
     
     NSArray *dragTypes = @[
@@ -1653,7 +1627,6 @@ static void call_set_drag_box_visible(void *userdata, GDExtensionClassInstancePt
 }
 
 static void call_get_native_diagnostics(void *userdata, GDExtensionClassInstancePtr instance, const GDExtensionConstVariantPtr *args, GDExtensionInt arg_count, GDExtensionVariantPtr r_return, GDExtensionCallError *r_error) {
-    setup_passive_native_key_monitor();
     NSWindow *mainWin = getGodotMainWindow();
     NSWindow *keyWin = [NSApp keyWindow];
     
@@ -1674,7 +1647,7 @@ static void call_get_native_diagnostics(void *userdata, GDExtensionClassInstance
 
     char buf[4096] = {0};
     snprintf(buf, sizeof(buf),
-             "version=%s|bridge_loaded=YES|window_found=%s|app_ptr=%p|app_activation_policy=%d|app_is_active=%s|main_window_ptr=%s|main_window_class=%s|key_window_ptr=%s|key_window_class=%s|godot_is_key=%s|godot_is_main=%s|independent_window_ptr=%s|independent_window_class=%s|independent_is_created=%s|independent_is_visible=%s|independent_is_key=%s|independent_is_main=%s|macos_keydown_count=%llu|macos_last_keycode=%d|macos_last_char_count=%d|event_window_class=%s|registered_types=%s",
+             "version=%s|bridge_loaded=YES|window_found=%s|app_ptr=%p|app_activation_policy=%d|app_is_active=%s|main_window_ptr=%s|main_window_class=%s|key_window_ptr=%s|key_window_class=%s|godot_is_key=%s|godot_is_main=%s|independent_window_ptr=%s|independent_window_class=%s|independent_is_created=%s|independent_is_visible=%s|independent_is_key=%s|independent_is_main=%s|registered_types=%s",
              NATIVE_DRAG_BRIDGE_VERSION_STR,
              mainWin ? "YES" : "NO",
              NSApp,
@@ -1692,10 +1665,6 @@ static void call_get_native_diagnostics(void *userdata, GDExtensionClassInstance
              indVisible ? "YES" : "NO",
              indIsKey ? "YES" : "NO",
              indIsMain ? "YES" : "NO",
-             (unsigned long long)g_macos_keydown_count,
-             g_macos_last_keycode,
-             g_macos_last_char_count,
-             g_macos_event_win_class.c_str(),
              g_diag_info.registered_types.c_str()
     );
     

@@ -43,6 +43,7 @@ echo "==========================================================================
 "$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_mobile_sms_relay_name_lookup.gd"
 "$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_single_relay_architecture.gd"
 "$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_scanner_focus_and_checkin_isolation.gd"
+"$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_checkin_scan_and_search_restoration.gd"
 "$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/test_production_app_icon_regression.gd"
 "$GODOT_BIN" --headless --script "$PROJECT_DIR/tests/verify_production_deployment.gd"
 echo "✅ All regression test suites passed 100% cleanly."

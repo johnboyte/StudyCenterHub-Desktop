@@ -10,20 +10,6 @@ const BirthdayServiceScript = preload("res://src/domain/birthday/birthday_servic
 const PublicQrSignDialogScript = preload("res://app/scenes/public_qr_sign_dialog.gd")
 const NativePlayerBridgeScript = preload("res://src/infrastructure/native/native_player_bridge.gd")
 
-var _diag_panel: PanelContainer = null
-var _diag_label: Label = null
-var _diag_raw_key_count: int = 0
-var _diag_raw_chars: String = ""
-var _diag_last_timestamp: String = "None"
-var _diag_return_received: bool = false
-var _diag_stage_raw_key: String = "NOT RECEIVED"
-var _diag_stage_return: String = "NOT RECEIVED"
-var _diag_stage_search_val: String = "len: 0"
-var _diag_stage_submit: String = "NOT CALLED"
-var _diag_stage_parser: String = "NONE"
-var _diag_stage_lookup: String = "NONE"
-var _diag_stage_checkin: String = "NONE"
-
 var db: RefCounted:
 	set(value):
 		db = value
@@ -115,8 +101,10 @@ func _ready() -> void:
 
 	if OS.get_name() == "macOS":
 		NativePlayerBridgeScript.set_drag_box_visible(false)
-	_setup_scanner_diagnostic_ui()
-	_reset_scanner_diagnostic()
+	if search_line_edit:
+		# Godot 4.4+ LineEdit leaves edit mode after Enter while keeping focus, which
+		# silently drops every keystroke of the next badge scan. Keep editing active.
+		search_line_edit.keep_editing_on_text_submit = true
 	call_deferred("grab_search_focus")
 
 	var top_bar = get_node_or_null("MarginContainer/MainVBox/TopBarHBox")
@@ -361,182 +349,22 @@ func _populate_dropdowns() -> void:
 		session_dropdown.add_item("— Choose a session —", 0)
 
 func grab_search_focus() -> void:
-	if search_line_edit and is_instance_valid(search_line_edit):
+	if search_line_edit and is_instance_valid(search_line_edit) and search_line_edit.is_visible_in_tree():
 		search_line_edit.grab_focus()
+		if not search_line_edit.is_editing():
+			search_line_edit.edit()
 
-func _input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and not event.echo:
-		_diag_stage_raw_key = "RECEIVED"
-		_diag_raw_key_count += 1
-		_diag_last_timestamp = Time.get_time_string_from_system()
-		
-		if event.keycode == KEY_ENTER or event.keycode == KEY_KP_ENTER:
-			_diag_return_received = true
-			_diag_stage_return = "RECEIVED"
-		elif event.unicode > 0 and event.unicode < 128:
-			var c = String.chr(event.unicode)
-			if _diag_raw_chars.length() < 60:
-				_diag_raw_chars += c
-		
-		_update_scanner_diagnostic_ui()
-
-func _reset_scanner_diagnostic() -> void:
-	_diag_raw_key_count = 0
-	_diag_raw_chars = ""
-	_diag_last_timestamp = "None"
-	_diag_return_received = false
-	_diag_stage_raw_key = "NOT RECEIVED"
-	_diag_stage_return = "NOT RECEIVED"
-	_diag_stage_search_val = "len: %d" % (search_line_edit.text.length() if search_line_edit else 0)
-	_diag_stage_submit = "NOT CALLED"
-	_diag_stage_parser = "NONE"
-	_diag_stage_lookup = "NONE"
-	_diag_stage_checkin = "NONE"
-	_update_scanner_diagnostic_ui()
-
-func _setup_scanner_diagnostic_ui() -> void:
-	var hero_vbox = get_node_or_null("MarginContainer/MainVBox/HeroTerminalCard/HeroMargin/HeroVBox")
-	if not hero_vbox: return
-	
-	if hero_vbox.has_node("ScannerDiagPanel"):
-		_diag_panel = hero_vbox.get_node("ScannerDiagPanel")
-		_diag_label = _diag_panel.get_node_or_null("DiagVBox/DiagLabel")
-		return
-
-	_diag_panel = PanelContainer.new()
-	_diag_panel.name = "ScannerDiagPanel"
-	
-	var st = StyleBoxFlat.new()
-	st.bg_color = Color(0.05, 0.08, 0.14, 0.95)
-	st.border_width_left = 2; st.border_width_top = 2; st.border_width_right = 2; st.border_width_bottom = 2
-	st.border_color = Color(1.0, 0.75, 0.20, 1.0)
-	st.corner_radius_top_left = 8; st.corner_radius_top_right = 8; st.corner_radius_bottom_left = 8; st.corner_radius_bottom_right = 8
-	st.content_margin_left = 14; st.content_margin_top = 10; st.content_margin_right = 14; st.content_margin_bottom = 10
-	_diag_panel.add_theme_stylebox_override("panel", st)
-
-	var vbox = VBoxContainer.new()
-	vbox.name = "DiagVBox"
-	vbox.add_theme_constant_override("separation", 6)
-
-	var header_hbox = HBoxContainer.new()
-	var title_lbl = Label.new()
-	title_lbl.text = "🔍 PHYSICAL SCANNER DIAGNOSTICS (TEMPORARY PROBE)"
-	title_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	title_lbl.add_theme_font_size_override("font_size", 14)
-	title_lbl.add_theme_color_override("font_color", Color(1.0, 0.82, 0.30, 1.0))
-	header_hbox.add_child(title_lbl)
-
-	var btn_clear = Button.new()
-	btn_clear.text = "🧹 Clear Diagnostic"
-	btn_clear.custom_minimum_size = Vector2(140, 28)
-	btn_clear.add_theme_font_size_override("font_size", 12)
-	btn_clear.pressed.connect(_reset_scanner_diagnostic)
-	header_hbox.add_child(btn_clear)
-	vbox.add_child(header_hbox)
-
-	_diag_label = Label.new()
-	_diag_label.name = "DiagLabel"
-	_diag_label.add_theme_font_size_override("font_size", 13)
-	_diag_label.add_theme_color_override("font_color", Color(0.9, 0.95, 1.0, 1.0))
-	vbox.add_child(_diag_label)
-
-	_diag_panel.add_child(vbox)
-	hero_vbox.add_child(_diag_panel)
-	
+## Clears the scan/search field and restores the full directory so the next
+## badge scan or typed name starts clean. Does not dismiss the active toast.
+func _reset_search_field(refocus: bool = true) -> void:
 	if search_line_edit:
-		var idx = search_line_edit.get_index()
-		hero_vbox.move_child(_diag_panel, idx + 1)
-
-func _update_scanner_diagnostic_ui() -> void:
-	if not _diag_label or not is_instance_valid(_diag_label): return
-	
-	var godot_window_focused = "YES" if DisplayServer.window_is_focused() else "NO"
-	var search_focused = "YES" if (search_line_edit and search_line_edit.has_focus()) else "NO"
-	var enter_received_str = "YES" if _diag_return_received else "NO"
-	
-	var search_text_len = search_line_edit.text.length() if search_line_edit else 0
-	var final_search_preview = "len=%d" % search_text_len
-	if search_text_len > 0:
-		final_search_preview += " ('%s')" % (search_line_edit.text.left(12) + ("..." if search_text_len > 12 else ""))
-		
-	var native_diag = NativePlayerBridgeScript.get_native_diagnostics()
-	var key_win_class = str(native_diag.get("key_window_class", "unknown"))
-	var key_win_ptr = str(native_diag.get("key_window_ptr", "unknown"))
-	var main_win_class = str(native_diag.get("main_window_class", "unknown"))
-	var main_win_ptr = str(native_diag.get("main_window_ptr", "unknown"))
-	var godot_is_key = str(native_diag.get("godot_is_key", "unknown"))
-	var godot_is_main = str(native_diag.get("godot_is_main", "unknown"))
-	var ind_vis = str(native_diag.get("independent_is_visible", "NO"))
-	var ind_key = str(native_diag.get("independent_is_key", "NO"))
-	var ind_main = str(native_diag.get("independent_is_main", "NO"))
-	
-	var macos_keydown_count = int(native_diag.get("macos_keydown_count", "0"))
-	var macos_last_keycode = int(native_diag.get("macos_last_keycode", "-1"))
-	var macos_last_char_count = int(native_diag.get("macos_last_char_count", "0"))
-	var event_win_class = str(native_diag.get("event_window_class", "nil"))
-	
-	var diag_text = """SCANNER DIAGNOSTIC
-Godot window focused: %s
-Search field focused: %s
-Last input timestamp: %s
-Raw characters received: '%s'
-Key count: %d
-Enter/Return received: %s
-Final captured scan string: %s
-
---------------------------------------------------------
-PIPELINE STAGES STATUS:
-1. RAW KEY INPUT: %s
-2. RETURN TERMINATOR: %s
-3. SEARCH FIELD VALUE: %s
-4. SUBMIT HANDLER: %s
-5. CREDENTIAL PARSER: %s
-6. MEMBER LOOKUP: %s
-7. CHECK-IN REQUEST: %s
-
---------------------------------------------------------
-MACOS APPKIT PASSIVE KEYBOARD DIAGNOSTIC:
-- MACOS KEYDOWN COUNT: %d
-- LAST MACOS KEYCODE: %d
-- MACOS CHARACTER COUNT: %d
-- EVENT WINDOW CLASS: %s
-- KEY WINDOW CLASS: %s (Ptr: %s)
-- GODOT MAIN WINDOW CLASS: %s (Ptr: %s)
-- GODOT WINDOW IS KEY: %s
-- GODOT WINDOW IS MAIN: %s
-- Playlist drop window visible: %s
-- Playlist drop window key: %s
-- Playlist drop window main: %s""" % [
-		godot_window_focused,
-		search_focused,
-		_diag_last_timestamp,
-		_diag_raw_chars,
-		_diag_raw_key_count,
-		enter_received_str,
-		final_search_preview,
-		_diag_stage_raw_key,
-		_diag_stage_return,
-		_diag_stage_search_val,
-		_diag_stage_submit,
-		_diag_stage_parser,
-		_diag_stage_lookup,
-		_diag_stage_checkin,
-		macos_keydown_count,
-		macos_last_keycode,
-		macos_last_char_count,
-		event_win_class,
-		key_win_class,
-		key_win_ptr,
-		main_win_class,
-		main_win_ptr,
-		godot_is_key,
-		godot_is_main,
-		ind_vis,
-		ind_key,
-		ind_main
-	]
-	
-	_diag_label.text = diag_text
+		search_line_edit.clear()
+	if suggestion_list:
+		suggestion_list.visible = false
+	filtered_person_list = person_list.duplicate()
+	_update_person_dropdown_list(person_list)
+	if refocus:
+		call_deferred("grab_search_focus")
 
 func _update_person_dropdown_list(list: Array) -> void:
 	person_dropdown.clear()
@@ -551,7 +379,7 @@ func _update_person_dropdown_list(list: Array) -> void:
 func _connect_signals() -> void:
 	if btn_mode_daily: btn_mode_daily.pressed.connect(func(): _switch_mode("Daily Check In"))
 	if btn_mode_session: btn_mode_session.pressed.connect(func(): _switch_mode("Session Attendance"))
-	if btn_quick_check_in: btn_quick_check_in.pressed.connect(_on_record_check_in)
+	if btn_quick_check_in: btn_quick_check_in.pressed.connect(_on_quick_check_in_pressed)
 	if search_line_edit:
 		search_line_edit.text_changed.connect(_on_search_text_changed)
 		search_line_edit.text_submitted.connect(_on_search_text_submitted)
@@ -574,6 +402,11 @@ func _switch_mode(new_mode: String) -> void:
 	current_mode = new_mode
 	_dismiss_toast()
 	_update_mode_ui()
+	call_deferred("grab_search_focus")
+
+func _on_quick_check_in_pressed() -> void:
+	_on_record_check_in()
+	_reset_search_field()
 
 func _get_active_theme_color() -> Color:
 	var idx = 0
@@ -665,10 +498,14 @@ func _update_mode_ui() -> void:
 		btn_quick_check_in.text = "✔ CHECK IN TO SESSION"
 
 func _on_search_text_changed(query: String) -> void:
-	_dismiss_toast()
-	_diag_stage_search_val = "len: %d" % query.length()
-	_update_scanner_diagnostic_ui()
+	# LineEdit emits text_changed deferred (end of frame). When the field is cleared
+	# right after a check-in, that late empty-text signal must not hide the
+	# confirmation toast, so only dismiss when the user starts typing again.
+	if query.strip_edges() != "":
+		_dismiss_toast()
+	_apply_directory_filter(query)
 
+func _apply_directory_filter(query: String) -> void:
 	var q = query.strip_edges().to_lower()
 	if q == "":
 		filtered_person_list = person_list.duplicate()
@@ -701,9 +538,6 @@ func _on_suggestion_item_selected(index: int) -> void:
 
 func _on_search_text_submitted(new_text: String) -> void:
 	_dismiss_toast()
-	_diag_stage_submit = "CALLED"
-	_diag_stage_search_val = "len: %d" % new_text.length()
-	_update_scanner_diagnostic_ui()
 
 	var val = new_text.strip_edges()
 	if val == "": return
@@ -720,26 +554,16 @@ func _on_search_text_submitted(new_text: String) -> void:
 	var qr_res = db.execute("SELECT person_id FROM participant_qr_credentials WHERE (token_hash = ? OR token_hash = ?) AND status = 'active' LIMIT 1;", [token_hash, token_candidate])
 	if qr_res["success"] and qr_res["data"].size() > 0:
 		var pid = int(qr_res["data"][0]["person_id"])
-		_diag_stage_parser = "ACCEPTED (QR Credential)"
-		_diag_stage_lookup = "MATCH (pid=%d)" % pid
-		_diag_stage_checkin = "ATTEMPTED"
-		_update_scanner_diagnostic_ui()
 		_execute_check_in_for_person_id(pid, "Self Service QR Scanner")
-		search_line_edit.clear()
-		suggestion_list.visible = false
+		_reset_search_field()
 		return
 
 	# Check legacy qr_code_value field directly
 	var people_qr_res = db.execute("SELECT id FROM people WHERE qr_code_value = ? OR qr_code_value = ? LIMIT 1;", [val, token_candidate])
 	if people_qr_res["success"] and people_qr_res["data"].size() > 0:
 		var pid = int(people_qr_res["data"][0]["id"])
-		_diag_stage_parser = "ACCEPTED (Legacy QR)"
-		_diag_stage_lookup = "MATCH (pid=%d)" % pid
-		_diag_stage_checkin = "ATTEMPTED"
-		_update_scanner_diagnostic_ui()
 		_execute_check_in_for_person_id(pid, "Self Service QR Scanner")
-		search_line_edit.clear()
-		suggestion_list.visible = false
+		_reset_search_field()
 		return
 
 
@@ -754,57 +578,38 @@ func _on_search_text_submitted(new_text: String) -> void:
 				var pid = int(p_res["data"][0]["id"])
 				var pin_check = db.execute("SELECT id FROM participant_pin_credentials WHERE person_id = ? AND pin_hash = ? AND status = 'active' LIMIT 1;", [pid, pin])
 				if pin_check["success"] and pin_check["data"].size() > 0:
-					_diag_stage_parser = "ACCEPTED (ID:PIN)"
-					_diag_stage_lookup = "MATCH (pid=%d)" % pid
-					_diag_stage_checkin = "ATTEMPTED"
-					_update_scanner_diagnostic_ui()
 					_execute_check_in_for_person_id(pid, "Self Service PIN")
-					search_line_edit.clear()
-					suggestion_list.visible = false
+					_reset_search_field()
 					return
 				else:
-					_diag_stage_parser = "REJECTED (Invalid PIN)"
-					_diag_stage_lookup = "MATCH (pid=%d)" % pid
-					_diag_stage_checkin = "INVALID PIN"
-					_update_scanner_diagnostic_ui()
 					_show_toast_message("❌ Invalid PIN entered for student ID: " + hid)
-					search_line_edit.clear()
-					suggestion_list.visible = false
+					_reset_search_field()
 					return
 
 	# 3. Check if input matches a Student/Human ID (trigger PIN popup flow)
 	var id_res = db.execute("SELECT id, first_name, last_name, person_uuid FROM people WHERE human_id = ? LIMIT 1;", [val])
 	if id_res["success"] and id_res["data"].size() > 0:
 		var person = id_res["data"][0]
-		_diag_stage_parser = "ACCEPTED (Student ID)"
-		_diag_stage_lookup = "MATCH (pid=%d)" % int(person.get("id", 0))
-		_diag_stage_checkin = "PIN PROMPT OPENED"
-		_update_scanner_diagnostic_ui()
+		# Do not refocus: the PIN modal owns keyboard focus.
+		_reset_search_field(false)
 		_open_checkin_pin_verification_dialog(person)
-		search_line_edit.clear()
-		suggestion_list.visible = false
 		return
 
-	# 4. Fallback: Normal Roster Search auto-select check-in
+	# 4. Fallback: Normal Roster Search auto-select check-in.
+	# Re-filter against the submitted text: a scanner can type and press Return
+	# within one frame, before the deferred text_changed filter has run.
+	_apply_directory_filter(val)
 	if filtered_person_list.size() > 0:
-		_diag_stage_parser = "ROSTER SEARCH FALLBACK"
-		_diag_stage_lookup = "MATCH (filtered_size=%d)" % filtered_person_list.size()
-		_diag_stage_checkin = "ATTEMPTED"
-		_update_scanner_diagnostic_ui()
 		person_dropdown.select(0)
 		_on_record_check_in()
-		search_line_edit.clear()
-		suggestion_list.visible = false
+		_reset_search_field()
 		return
 
-	_diag_stage_parser = "REJECTED (Unrecognized)"
-	_diag_stage_lookup = "NO MATCH"
-	_diag_stage_checkin = "NOT ATTEMPTED"
-	_update_scanner_diagnostic_ui()
+	# 5. Nothing matched (unknown/invalid/revoked badge or unmatched name)
+	_show_toast_message("❌ No matching member found. Please try again or type the member's name.")
+	_reset_search_field()
 
 func _execute_check_in_for_person_id(pid: int, method: String) -> void:
-	_diag_stage_checkin = "EXECUTING (pid=%d, %s)" % [pid, method]
-	_update_scanner_diagnostic_ui()
 	var res_p = db.execute("SELECT * FROM people WHERE id = ? LIMIT 1;", [pid])
 	if not res_p["success"] or res_p["data"].size() == 0:
 		_show_toast_message("❌ Error retrieving student information.")
@@ -835,8 +640,6 @@ func _execute_check_in_for_person_id(pid: int, method: String) -> void:
 		return
 
 	print("Check-In recorded successfully: ", res["checkin_uuid"])
-	_diag_stage_checkin = "SUCCESS (pid=%d, %s)" % [pid, method]
-	_update_scanner_diagnostic_ui()
 	_refresh_dashboard()
 
 	var mode_name = "Session Attendance" if current_mode == "Session Attendance" else "Daily Attendance"
@@ -890,6 +693,10 @@ func _show_checkin_pin_modal(title: String, placeholder: String, button_text: St
 	overlay.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	overlay.grow_vertical = Control.GROW_DIRECTION_BOTH
 	add_child(overlay)
+	overlay.tree_exited.connect(func():
+		if is_inside_tree():
+			call_deferred("grab_search_focus")
+	)
 	
 	var card = PanelContainer.new()
 	card.custom_minimum_size = Vector2(400, 200)
